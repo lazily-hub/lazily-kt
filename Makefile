@@ -1,4 +1,4 @@
 .PHONY: check
 
 check:
-	gradle test
+	./gradlew test
