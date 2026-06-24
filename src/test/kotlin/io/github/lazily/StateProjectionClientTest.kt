@@ -2,6 +2,12 @@ package io.github.lazily
 
 import com.sun.jna.Pointer
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
+import java.io.File
+import java.security.MessageDigest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -89,5 +95,63 @@ class StateProjectionClientTest {
         val accepted = client.recordStateEvent("""{"type":"Invalid"}""")
 
         assertFalse(accepted)
+    }
+
+    @Test
+    fun `document hash uses canonical path sha256`() {
+        val file = File.createTempFile("agent-doc-state", ".md")
+        try {
+            val expected = MessageDigest.getInstance("SHA-256")
+                .digest(file.canonicalPath.toByteArray(Charsets.UTF_8))
+                .joinToString("") { "%02x".format(it) }
+            assertEquals(expected, StateProjectionBridgeSupport.documentHash(file.path))
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun `state event json matches Rust state backbone serde shape`() {
+        val json = StateProjectionBridgeSupport.stateEventJson(
+            documentHash = "doc-a",
+            type = "editor_patch_queued",
+            fields = mapOf("patch_id" to "patch-1", "actor_generation" to 7),
+            eventSuffix = "editor-patch-queued-patch-1-7",
+        )
+
+        val root = Json.parseToJsonElement(json).jsonObject
+        assertEquals("doc-a:editor-patch-queued-patch-1-7", root["event_id"]!!.jsonPrimitive.content)
+        val fact = root["fact"]!!.jsonObject
+        assertEquals("editor_patch_queued", fact["type"]!!.jsonPrimitive.content)
+        assertEquals("doc-a", fact["document_hash"]!!.jsonPrimitive.content)
+        assertEquals("patch-1", fact["patch_id"]!!.jsonPrimitive.content)
+        assertEquals(7, fact["actor_generation"]!!.jsonPrimitive.long)
+    }
+
+    @Test
+    fun `projection summary renders route transport and proof slices`() {
+        val projection = """
+            {
+              "document_hash":"doc-a",
+              "route":{"generation":3,"pane_id":"%2","readiness":"dispatch_proven","dispatch_proofs":["p1"]},
+              "transport":{"patches":{"patch-1":{"phase":"queued"},"patch-2":{"phase":"acked"}}},
+              "proof":{"markers":{"dispatch_start":{"phase":"observed","sources":["route"]}}},
+              "document":{},
+              "queue":{},
+              "closeout":{},
+              "supervisor":{}
+            }
+        """.trimIndent()
+
+        val summary = StateProjectionBridgeSupport.projectionSummary(projection)!!
+        assertEquals("dispatch_proven", summary.routeReadiness)
+        assertEquals("%2", summary.routePaneId)
+        assertEquals("patch-2", summary.latestTransportPatchId)
+        assertEquals("acked", summary.latestTransportPhase)
+        assertEquals(1, summary.proofMarkers)
+        assertEquals(
+            "route=dispatch_proven pane=%2 transport=patch-2:acked proof_markers=1",
+            summary.compact(),
+        )
     }
 }
