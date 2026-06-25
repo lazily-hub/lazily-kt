@@ -31,6 +31,22 @@ interface LazilyFFI : Library {
     fun agent_doc_state_projection(documentHash: String): Pointer
 
     /**
+     * Subscribe to lazily-spec snapshot/delta messages for a document
+     * (`#lazilystatesync2` / `#lazilystatesync3`).
+     *
+     * - `lastEpoch == 0` → cold read returning a full `{"type":"snapshot",...}`
+     *   graph image the caller applies once.
+     * - `0 < lastEpoch < current` → warm delta
+     *   `{"type":"delta","base_epoch":<last>,"epoch":<current>,"ops":[...]}` the
+     *   caller applies verbatim to converge.
+     * - `lastEpoch >= current` → no-op delta (caller is current).
+     *
+     * Returns a NUL-terminated JSON string (or `"null"` on hash/ledger failure).
+     * Caller MUST free the returned pointer with [agent_doc_free_string].
+     */
+    fun agent_doc_state_subscribe(documentHash: String, lastEpoch: Long): Pointer
+
+    /**
      * Record a lazily state-backbone event from a plugin.
      *
      * `factJson` must be a JSON object deserializable as a `StateEvent`.

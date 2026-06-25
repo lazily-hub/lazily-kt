@@ -27,9 +27,20 @@ class StateProjectionClientTest {
         var recordedEvent: String? = null
         var recordResult = 1
         var freeCallCount = 0
+        /** Queue of subscribe responses returned in order, or empty → "null". */
+        val subscribeResponses = ArrayDeque<String>()
 
         override fun agent_doc_state_projection(documentHash: String): Pointer {
             val bytes = projectionJson.toByteArray(Charsets.UTF_8)
+            val mem = com.sun.jna.Memory(bytes.size + 1L)
+            mem.write(0, bytes, 0, bytes.size)
+            mem.setByte(bytes.size.toLong(), 0)
+            return mem
+        }
+
+        override fun agent_doc_state_subscribe(documentHash: String, lastEpoch: Long): Pointer {
+            val raw = subscribeResponses.removeFirstOrNull() ?: "null"
+            val bytes = raw.toByteArray(Charsets.UTF_8)
             val mem = com.sun.jna.Memory(bytes.size + 1L)
             mem.write(0, bytes, 0, bytes.size)
             mem.setByte(bytes.size.toLong(), 0)
@@ -153,5 +164,34 @@ class StateProjectionClientTest {
             "route=dispatch_proven pane=%2 transport=patch-2:acked proof_markers=1",
             summary.compact(),
         )
+    }
+
+    @Test
+    fun `refreshMirror cold snapshot then delta advances mirror epoch`() {
+        val mock = MockFFI()
+        val client = StateProjectionClient("doc-a", mock)
+
+        // Cold read: full snapshot with one route node at epoch 2.
+        val routePayload = java.util.Base64.getEncoder()
+            .encodeToString("""{"readiness":"dispatch_proven","pane_id":"%2"}""".toByteArray())
+        mock.subscribeResponses.addLast(
+            """{"type":"snapshot","epoch":2,"document_hash":"doc-a","nodes":[{"slot_id":11,"type_tag":"agent_doc.route","state":"resolved","payload":"$routePayload"}],"edges":[],"roots":[11]}"""
+        )
+        val cold = client.refreshMirror()
+        assertEquals(2, client.mirror.epoch)
+        assertTrue(cold is WireSubscribe.Snapshot)
+        val coldSummary = MirrorProjectionSummary.fromMirror(client.mirror)
+        assertEquals("dispatch_proven", coldSummary.routeReadiness)
+
+        // Warm read: delta advancing the route phase to idle at epoch 3.
+        val idlePayload = java.util.Base64.getEncoder()
+            .encodeToString("""{"readiness":"idle","pane_id":"%2"}""".toByteArray())
+        mock.subscribeResponses.addLast(
+            """{"type":"delta","base_epoch":2,"epoch":3,"document_hash":"doc-a","ops":[{"op":"cell_set","slot_id":11,"payload":"$idlePayload"}]}"""
+        )
+        val warm = client.refreshMirror()
+        assertEquals(3, client.mirror.epoch)
+        assertTrue(warm is WireSubscribe.Delta)
+        assertEquals("idle", MirrorProjectionSummary.fromMirror(client.mirror).routeReadiness)
     }
 }
