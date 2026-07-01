@@ -54,6 +54,75 @@ private fun bytesFromJson(element: JsonElement): List<Int> =
 
 private fun ByteArray.toWireBytes(): List<Int> = map { it.toInt() and 0xff }
 
+/** Maximum encoded byte length of a [NodeKey] path. */
+const val NODE_KEY_MAX_LEN: Int = 1024
+
+/** Maximum number of `/`-separated segments in a [NodeKey] path. */
+const val NODE_KEY_MAX_SEGMENTS: Int = 32
+
+/** Why a [NodeKey] failed validation. Mirrors lazily-rs `NodeKeyError`. */
+sealed class NodeKeyError(message: String) : RuntimeException(message) {
+    data object Empty : NodeKeyError("node key path is empty")
+    data class TooLong(val len: Int) :
+        NodeKeyError("node key path is $len bytes, exceeds $NODE_KEY_MAX_LEN")
+    data class TooManySegments(val segments: Int) :
+        NodeKeyError("node key has $segments segments, exceeds $NODE_KEY_MAX_SEGMENTS")
+    data object EmptySegment : NodeKeyError("node key path has an empty segment")
+}
+
+/**
+ * Wire-stable keyed address for a collection entry — a `/`-joined path
+ * (e.g. `scores/alice`, `outer/k1/inner/k2`). Unlike [NodeId] — the volatile
+ * internal handle a producer may re-mint after a resync — a `NodeKey` is
+ * producer-defined and stable across NodeId churn, so a peer can subscribe to
+ * "entry `scores/alice`" without an out-of-band key→NodeId map. A multi-segment
+ * path addresses nested collections with no extra machinery.
+ *
+ * Length and segment count are bounded ([NODE_KEY_MAX_LEN],
+ * [NODE_KEY_MAX_SEGMENTS]); oversized keys are rejected on construction and on
+ * the wire. Serialization is format-aware: self-describing codecs (JSON) omit a
+ * `None` key so pre-`key` encoders and existing conformance fixtures round-trip
+ * unchanged. See `lazily-spec/protocol.md` § NodeKey.
+ */
+@JvmInline
+value class NodeKey private constructor(val path: String) {
+    init {
+        validate(path)
+    }
+
+    /** Iterate the path segments. */
+    fun segments(): List<String> = path.split('/')
+
+    /** Attach this key to a [NodeSnapshot] (builder style). */
+    fun attach(node: NodeSnapshot): NodeSnapshot = node.withKey(this)
+
+    fun toJson(): JsonPrimitive = JsonPrimitive(path)
+
+    companion object {
+        /** Construct a validated key from a `/`-joined path; throws [NodeKeyError] on invalid input. */
+        fun from(path: String): NodeKey {
+            validate(path)
+            return NodeKey(path)
+        }
+
+        /** Construct a key from already-validated segments (joined with `/`). */
+        fun fromSegments(segments: Iterable<String>): NodeKey = from(segments.joinToString("/"))
+
+        fun fromJson(element: JsonElement): NodeKey = from(element.jsonPrimitive.content)
+
+        private fun validate(path: String) {
+            if (path.isEmpty()) throw NodeKeyError.Empty
+            if (path.length > NODE_KEY_MAX_LEN) throw NodeKeyError.TooLong(path.length)
+            var segments = 0
+            for (segment in path.split('/')) {
+                if (segment.isEmpty()) throw NodeKeyError.EmptySegment
+                segments += 1
+            }
+            if (segments > NODE_KEY_MAX_SEGMENTS) throw NodeKeyError.TooManySegments(segments)
+        }
+    }
+}
+
 data class ShmBlobRef(
     val offset: Long,
     val len: Long,
@@ -174,12 +243,17 @@ data class NodeSnapshot(
     val node: NodeId,
     val typeTag: String,
     val state: NodeState,
+    val key: NodeKey? = null,
 ) {
     fun toJson(): JsonObject = buildJsonObject {
         put("node", node)
         put("type_tag", typeTag)
         put("state", state.toJson())
+        if (key != null) put("key", key.toJson())
     }
+
+    /** Attach a wire-stable [NodeKey] to this node (builder style). */
+    fun withKey(key: NodeKey): NodeSnapshot = copy(key = key)
 
     companion object {
         fun payload(node: NodeId, typeTag: String, bytes: ByteArray): NodeSnapshot =
@@ -197,6 +271,7 @@ data class NodeSnapshot(
                 node = obj.longField("node"),
                 typeTag = obj.stringField("type_tag"),
                 state = NodeState.fromJson(obj.required("state")),
+                key = (obj["key"] as? JsonPrimitive)?.let { NodeKey.fromJson(it) },
             )
         }
     }
@@ -306,12 +381,14 @@ sealed interface DeltaOp {
         val node: NodeId,
         val typeTag: String,
         val state: NodeState,
+        val key: NodeKey? = null,
     ) : DeltaOp {
         override fun toJson(): JsonObject = buildJsonObject {
             put("NodeAdd", buildJsonObject {
                 put("node", node)
                 put("type_tag", typeTag)
                 put("state", state.toJson())
+                if (key != null) put("key", key.toJson())
             })
         }
 
@@ -362,6 +439,8 @@ sealed interface DeltaOp {
         fun invalidate(node: NodeId): DeltaOp = Invalidate(node)
         fun nodeAdd(node: NodeId, typeTag: String, state: NodeState): DeltaOp =
             NodeAdd(node, typeTag, state)
+        fun nodeAdd(node: NodeId, typeTag: String, state: NodeState, key: NodeKey?): DeltaOp =
+            NodeAdd(node, typeTag, state, key)
         fun nodeRemove(node: NodeId): DeltaOp = NodeRemove(node)
         fun edgeAdd(dependent: NodeId, dependency: NodeId): DeltaOp =
             EdgeAdd(dependent, dependency)
@@ -387,6 +466,7 @@ sealed interface DeltaOp {
                     node = body.longField("node"),
                     typeTag = body.stringField("type_tag"),
                     state = NodeState.fromJson(body.required("state")),
+                    key = (body["key"] as? JsonPrimitive)?.let { NodeKey.fromJson(it) },
                 )
                 "NodeRemove" -> NodeRemove(body.longField("node"))
                 "EdgeAdd" -> EdgeAdd(
@@ -451,6 +531,130 @@ data class Delta(
     }
 }
 
+/**
+ * Wire-stable mirror of a hybrid-logical-clock stamp — all plain integers, so
+ * the IPC layer carries CRDT causal-stability metadata without depending on a
+ * distributed runtime. Total order is `(wall_time, logical, peer)`. See
+ * `lazily-spec/protocol.md` § Distributed.
+ */
+data class WireStamp(
+    val wallTime: Long,
+    val logical: Long,
+    val peer: PeerId,
+) {
+    fun toJson(): JsonObject = buildJsonObject {
+        put("wall_time", wallTime)
+        put("logical", logical)
+        put("peer", peer)
+    }
+
+    companion object {
+        fun fromJson(element: JsonElement): WireStamp {
+            val obj = element.asObject("WireStamp")
+            return WireStamp(
+                wallTime = obj.longField("wall_time"),
+                logical = obj.longField("logical"),
+                peer = obj.longField("peer"),
+            )
+        }
+    }
+}
+
+/**
+ * One CRDT cell op on the wire (state-based / CvRDT): the converged register,
+ * sequence, or text `state` for [node], tagged with the [stamp] that produced
+ * it and the optional wire-stable [key] that survives NodeId churn. The
+ * receiver merges `state` into its local replica; because every cell CRDT merge
+ * is commutative, associative, and idempotent, out-of-order, duplicated, or
+ * batched delivery all converge.
+ *
+ * `key` is serialized as `null` when absent (mirroring lazily-rs), so a decoder
+ * accepts `null`, absent, or a bare path string.
+ */
+data class CrdtOp(
+    val node: NodeId,
+    val key: NodeKey?,
+    val stamp: WireStamp,
+    val state: IpcValue,
+) {
+    fun targetReadable(permissions: PeerPermissions, peer: PeerId): Boolean =
+        permissions.canRead(peer, node)
+
+    fun toJson(): JsonObject = buildJsonObject {
+        put("node", node)
+        put("key", key?.toJson() ?: JsonNull)
+        put("stamp", stamp.toJson())
+        put("state", state.toJson())
+    }
+
+    companion object {
+        fun fromJson(element: JsonElement): CrdtOp {
+            val obj = element.asObject("CrdtOp")
+            val keyEl = obj["key"]
+            val key = if (keyEl == null || keyEl is JsonNull) null else NodeKey.fromJson(keyEl)
+            return CrdtOp(
+                node = obj.longField("node"),
+                key = key,
+                stamp = WireStamp.fromJson(obj.required("stamp")),
+                state = IpcValue.fromJson(obj.required("state")),
+            )
+        }
+    }
+}
+
+/**
+ * A CRDT anti-entropy sync frame: the sender advertises its per-peer stamp
+ * [frontier] (the highest [WireStamp] it has observed from each peer) and ships
+ * a batch of [ops]. The frontier is the `StampFrontier` exchange: it lets the
+ * receiver compute which ops it is still missing (anti-entropy) and feeds the
+ * causal-stability watermark (`min` over membership) that drives tombstone GC.
+ * The exchange is bounded, idempotent, and resumable; re-sending a frame the
+ * receiver already has is a no-op.
+ */
+data class CrdtSync(
+    val frontier: List<Pair<PeerId, WireStamp>>,
+    val ops: List<CrdtOp>,
+) {
+    /**
+     * Return a peer-specific frame that omits ops for non-readable nodes
+     * entirely (omission, not redaction — mirroring [Delta.filterReadable]).
+     * The [frontier] advertisement is retained: it names peers and stamps, not
+     * node content, and the receiver needs the whole frontier to compute a
+     * sound causal-stability watermark.
+     */
+    fun filterReadable(permissions: PeerPermissions, peer: PeerId): CrdtSync =
+        CrdtSync(
+            frontier = frontier,
+            ops = ops.filter { it.targetReadable(permissions, peer) },
+        )
+
+    fun toJson(): JsonObject = buildJsonObject {
+        put("frontier", buildJsonArray {
+            for ((peer, stamp) in frontier) {
+                add(buildJsonArray {
+                    add(JsonPrimitive(peer))
+                    add(stamp.toJson())
+                })
+            }
+        })
+        put("ops", buildJsonArray { ops.forEach { add(it.toJson()) } })
+    }
+
+    companion object {
+        fun fromJson(element: JsonElement): CrdtSync {
+            val obj = element.asObject("CrdtSync")
+            return CrdtSync(
+                frontier = obj.required("frontier").asArray("frontier").map { entry ->
+                    val pair = entry.asArray("frontier entry")
+                    require(pair.size == 2) { "frontier entry must be a [peer, stamp] pair" }
+                    pair[0].jsonPrimitive.long to WireStamp.fromJson(pair[1])
+                },
+                ops = obj.required("ops").asArray("ops").map { CrdtOp.fromJson(it) },
+            )
+        }
+    }
+}
+
 sealed interface IpcMessage {
     fun toJson(): JsonObject
 
@@ -466,12 +670,19 @@ sealed interface IpcMessage {
         }
     }
 
+    data class CrdtSyncMessage(val sync: CrdtSync) : IpcMessage {
+        override fun toJson(): JsonObject = buildJsonObject {
+            put("CrdtSync", sync.toJson())
+        }
+    }
+
     fun encodeJson(): ByteArray =
         ipcJson.encodeToString(JsonElement.serializer(), toJson()).encodeToByteArray()
 
     companion object {
         fun ofSnapshot(snapshot: Snapshot): IpcMessage = SnapshotMessage(snapshot)
         fun ofDelta(delta: Delta): IpcMessage = DeltaMessage(delta)
+        fun ofCrdtSync(sync: CrdtSync): IpcMessage = CrdtSyncMessage(sync)
 
         fun decodeJson(data: ByteArray): IpcMessage =
             fromJson(ipcJson.parseToJsonElement(data.decodeToString()))
@@ -486,6 +697,7 @@ sealed interface IpcMessage {
             return when (tag) {
                 "Snapshot" -> SnapshotMessage(Snapshot.fromJson(body))
                 "Delta" -> DeltaMessage(Delta.fromJson(body))
+                "CrdtSync" -> CrdtSyncMessage(CrdtSync.fromJson(body))
                 else -> error("unknown IpcMessage variant: $tag")
             }
         }

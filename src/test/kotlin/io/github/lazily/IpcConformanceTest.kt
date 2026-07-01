@@ -277,6 +277,15 @@ class IpcConformanceTest {
                     assertIs<DeltaApplyStatus.ResyncRequired>(delta.applyStatus(lastEpoch), "$key for lastEpoch=$lastEpoch")
                 }
             }
+            is IpcMessage.CrdtSyncMessage -> {
+                val sync = message.sync
+                assertions.assertionLong("frontier_count")?.let {
+                    assertEquals(it, sync.frontier.size.toLong(), "frontier_count")
+                }
+                assertions.assertionLong("op_count")?.let {
+                    assertEquals(it, sync.ops.size.toLong(), "op_count")
+                }
+            }
         }
     }
 }

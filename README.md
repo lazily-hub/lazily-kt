@@ -118,8 +118,9 @@ Implemented subset (per the spec's implementation-status note): compound states,
 orthogonal (parallel) regions, shallow + deep history (record-on-exit /
 restore-on-enter), entry/exit/transition actions (exit innermost-first →
 transition → entry outermost-first), named guards (fail-closed), and external +
-internal transitions. `run` actions, `{"expr": …}` context guards, and
-`final`/completion (`done`) are rejected explicitly.
+internal transitions. `run` actions and `{"expr": …}` context guards are
+rejected explicitly; `final` states are accepted as leaves (completion/`done`
+events are not raised, the deferred slice the spec permits).
 
 ```kotlin
 import io.github.lazily.Context
@@ -147,14 +148,17 @@ chart.lastActions()                           // exit → transition → entry a
 `Snapshot`, `Delta`, `DeltaOp` (all seven variants: `CellSet`, `SlotValue`,
 `Invalidate`, `NodeAdd`, `NodeRemove`, `EdgeAdd`, `EdgeRemove`), `IpcMessage`,
 `NodeState` (`Payload` / `SharedBlob` / `Opaque`), `IpcValue`
-(`Inline` / `SharedBlob`), `ShmBlobRef`, and `PeerPermissions`. Every type
+(`Inline` / `SharedBlob`), `ShmBlobRef`, `PeerPermissions`, the optional
+wire-stable `NodeKey` (`key` field on `NodeSnapshot`/`NodeAdd`, omitted in JSON
+when absent), and the multi-writer `CrdtSync` plane (`WireStamp`, `CrdtOp`,
+`CrdtSync`, and the `IpcMessage.CrdtSyncMessage` variant). Every type
 round-trips the canonical externally-tagged JSON shape via `toJson()` /
 `fromJson()`; `IpcMessage` adds `encodeJson()` / `decodeJson()` for direct
-transport.
+transport, and the JSON codec is byte-compatible with lazily-rs.
 
 `StateGraphMirror` is a pure native mirror that applies a `snapshot` and then
-`delta` ops to a local node/edge view, and `Snapshot` / `Delta` expose
-`filterReadable(permissions, peer)` for per-peer capability filtering.
+`delta` ops to a local node/edge view, and `Snapshot` / `Delta` / `CrdtSync`
+expose `filterReadable(permissions, peer)` for per-peer capability filtering.
 
 ## State-projection consumer (optional FFI)
 

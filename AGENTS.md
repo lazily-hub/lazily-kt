@@ -38,16 +38,20 @@ counterpart is future work).
   event). Implemented subset: compound states, orthogonal (parallel) regions,
   shallow + deep history (record-on-exit / restore-on-enter), entry/exit/
   transition actions (exit innermost-first → transition → entry outermost-first),
-  named guards (fail-closed), external + internal transitions. `run` actions,
-  `{"expr": …}` context guards, and `final`/completion (`done`) are rejected
-  explicitly per the spec's implementation-status note. Conformance fixtures in
+  named guards (fail-closed), external + internal transitions. `run` actions
+  and `{"expr": …}` context guards are rejected explicitly per the spec's
+  implementation-status note; `final` states are accepted as leaves (completion/
+  `done` events not raised — the deferred slice the spec permits). Conformance fixtures in
   `src/test/resources/conformance/statechart/` (mirrored from
   `lazily-spec/conformance/statechart/`) are replayed by
   `StateChartConformanceTest`.
 
 ### Wire types + projection consumer
 - `Ipc.kt` — native lazily-spec IPC wire types (`Snapshot`, `Delta`, `DeltaOp`,
-  `IpcMessage`, `PeerPermissions`), kotlinx-serialization-free hand-rolled JSON.
+  `IpcMessage`, `PeerPermissions`, optional wire-stable `NodeKey` `key` field,
+  and the multi-writer `CrdtSync` plane: `WireStamp`/`CrdtOp`/`CrdtSync` +
+  `IpcMessage.CrdtSyncMessage`), kotlinx-serialization-free hand-rolled JSON
+  that is byte-compatible with lazily-rs.
 - `StateGraphMirror.kt` — pure native mirror that applies `snapshot`/`delta`.
 - `StateProjectionClient.kt` / `StateProjectionBridgeSupport.kt` — agent-doc
   state-projection consumers.
