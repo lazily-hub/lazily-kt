@@ -1,3 +1,74 @@
+# lazily-kt
+
+Native Kotlin port of the lazily reactive core — a first-class reactive binding
+alongside lazily-rs / lazily-py / lazily-zig (no FFI dependency for the reactive
+graph). Plus the lazily-spec IPC wire types and an agent-doc state-projection
+consumer.
+
+## Architecture
+
+### Reactive core (native, FFI-free)
+Mirrors lazily-rs `Context` semantics (single-threaded; `ThreadSafeContext`
+counterpart is future work).
+
+- `Context.kt` — `Context`: the reactive dependency graph. Reactive family is
+  **Slot** (lazy memoized derived) → **Cell** (mutable source) → **Signal**
+  (eager derived), plus **Effect** (side-effecting observer).
+  - Pull-based, glitch-free refresh: a slot that reads other slots always
+    observes values consistent with the current inputs.
+  - `==` (PartialEq) guard on `setCell`: equal value is a no-op.
+  - `memo` adds a `==` guard so an equal recompute suppresses downstream.
+  - Signal = memo slot + puller effect (eager; value materialized by the time
+    `setCell`/`batch` returns).
+  - Effect reruns after any tracked dependency invalidates; cleanup closure runs
+    before each rerun and on dispose.
+  - `batch` coalesces invalidations into one effect flush.
+  - Tracking stack auto-discovers dependencies; cycles are detected (throws).
+  - Handles (`SlotHandle`/`CellHandle`/`SignalHandle`/`EffectHandle`) are
+    lightweight ids over a shared node table, like lazily-rs.
+- `StateMachine.kt` — `StateMachine<S, E>`: a reactive FSM backed by a `Cell`
+  (the native counterpart of lazily-rs/py/zig). `send`/`state`/`onTransition`/
+  `stateIs`. Pure transition `(S, E) -> S?`; `null` rejects (guard); equal
+  self-transition suppressed by the cell's `==` guard.
+- `StateChart.kt` — `ChartDef` + reactive `StateChart`: the full Harel/SCXML
+  chart (compute, never a wire kind), the native counterpart of
+  `lazily-formal/LazilyFormal/StateChart.lean` and `lazily-rs/src/statechart.rs`.
+  The active configuration lives in a `Cell`; `send` is deterministic by
+  construction (a total function of chart + configuration + history + guards +
+  event). Implemented subset: compound states, orthogonal (parallel) regions,
+  shallow + deep history (record-on-exit / restore-on-enter), entry/exit/
+  transition actions (exit innermost-first → transition → entry outermost-first),
+  named guards (fail-closed), external + internal transitions. `run` actions,
+  `{"expr": …}` context guards, and `final`/completion (`done`) are rejected
+  explicitly per the spec's implementation-status note. Conformance fixtures in
+  `src/test/resources/conformance/statechart/` (mirrored from
+  `lazily-spec/conformance/statechart/`) are replayed by
+  `StateChartConformanceTest`.
+
+### Wire types + projection consumer
+- `Ipc.kt` — native lazily-spec IPC wire types (`Snapshot`, `Delta`, `DeltaOp`,
+  `IpcMessage`, `PeerPermissions`), kotlinx-serialization-free hand-rolled JSON.
+- `StateGraphMirror.kt` — pure native mirror that applies `snapshot`/`delta`.
+- `StateProjectionClient.kt` / `StateProjectionBridgeSupport.kt` — agent-doc
+  state-projection consumers.
+- `LazilyFFI.kt` — JNA bindings to the agent-doc binary's C-ABI projection
+  surface. This is an **optional transport** for consuming authoritative
+  projections from the Rust binary; it is independent of the reactive core. A
+  state chart or other compute runs natively — never via this FFI channel.
+
+## Commands
+
+```bash
+make check   # == ./gradlew test
+```
+
+## Related Projects
+
+- `lazily-spec` — canonical wire protocol + state-chart conformance fixtures.
+- `lazily-formal` — Lean 4 formal model (Primitive, flat `StateMachine`, full
+  Harel `StateChart`) — the executable reference behind the chart fixtures.
+- `lazily-rs` / `lazily-py` / `lazily-zig` — sibling reactive cores.
+
 <!-- tsift:code-navigation v=0.1.73 -->
 ## Code Navigation
 
