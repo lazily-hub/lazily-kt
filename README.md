@@ -3,10 +3,11 @@
 Native Kotlin port of the **lazily** reactive core — a first-class reactive
 binding alongside [`lazily-rs`][rs], [`lazily-py`][py], and [`lazily-zig`][zig],
 with **no FFI dependency** for the reactive graph. Plus the [`lazily-spec`][spec]
-IPC wire types, a reactive full-Harel state chart, and an agent-doc
+IPC wire types, a reactive full-Harel state chart, an `AsyncContext` async
+reactive graph, an in-process `ShmBlobArena` blob host, and an agent-doc
 state-projection consumer.
 
-`io.github.lazily:lazily` · Kotlin 2.0.21 · JVM 21
+`io.github.lazily:lazily` · Kotlin 2.0.21 · JVM 21 · v0.4.0
 
 ## The reactive family
 
@@ -160,6 +161,46 @@ transport, and the JSON codec is byte-compatible with lazily-rs.
 `delta` ops to a local node/edge view, and `Snapshot` / `Delta` / `CrdtSync`
 expose `filterReadable(permissions, peer)` for per-peer capability filtering.
 
+## Shared-memory blob arena
+
+`ShmBlobArena` is the in-process host for the shared-memory blob plane — the
+Kotlin counterpart of `lazily-rs::ShmBlobArena`. It writes a fixed 40-byte LZSH
+header (`{ magic, version, header_len, generation, epoch, len, checksum }`,
+little-endian) before each payload and validates the header + FNV-1a-64
+checksum on read, so `IpcMessage` control frames carry compact `ShmBlobRef`
+descriptors instead of embedding large bytes inline. The byte layout and
+checksum are identical across lazily-rs / lazily-py / lazily-zig / lazily-kt,
+pinned by `conformance/arena_blob.json` (`ShmBlobArenaTest`). This host is
+heap-backed (a `ByteArray`); a future transport may back it with a memory-mapped
+`ByteBuffer` for true cross-process sharing without changing the contract.
+
+## Async reactive context
+
+`AsyncContext` is a **separate** reactive surface for `suspend`-returning
+computations — the Kotlin counterpart of `lazily-rs::AsyncContext` and the
+[`lazily-spec`][spec] Async Reactive Context contract. It is **compute, not
+protocol**: only resolved slot values cross IPC/FFI as ordinary cell payloads.
+Cells are the synchronous input layer (`cell` / `getCell` / `setCell`);
+`computedAsync` / `memoAsync` slots and `effectAsync` effects are async. It
+implements the full contract: the `Empty` / `Computing` / `Resolved` / `Error`
+slot state machine with revision-based stale-completion discard, in-flight
+deduplication (concurrent `getAsync` callers share one compute), the five-point
+cancellation contract (waiter-cancellation-safe, stale-discard, explicit
+cancel, disposal-awaits-cleanups, cleanup-before-body), compute-context
+dependency tracking registered before each awaited read, executor-scheduled
+serialized async effects, and synchronous `batch` that schedules async reruns
+only at the outermost exit. `signalAsync` is the eager (memo slot + puller
+effect) counterpart of the synchronous `Signal`.
+
+```kotlin
+val ctx = AsyncContext()
+val a = ctx.cell(2)
+val sum = ctx.computedAsync { getCell(a) + 3 }
+ctx.getAsync(sum)             // suspends, computes, caches -> 5
+ctx.setCell(a, 10)
+ctx.getAsync(sum)             // dependency invalidated -> 13
+```
+
 ## State-projection consumer (optional FFI)
 
 `StateProjectionClient` and `StateProjectionBridgeSupport` consume the agent-doc
@@ -176,10 +217,25 @@ lazily-kt replays the shared [`lazily-spec`][spec] conformance fixtures:
 
 - IPC fixtures round-trip through `IpcMessage.fromJson` / `toJson`
   (`IpcConformanceTest`).
+- The agent-doc state-projection IPC fixtures
+  (`conformance/agent-doc/snapshot_agent_doc_state.json`,
+  `conformance/agent-doc/delta_agent_doc_state.json`) decode, round-trip, and
+  validate their `type_tag` vocabulary + decoded payload phases
+  (`AgentDocStateConformanceTest`).
+- The `ShmBlobArena` host fixture (`conformance/arena_blob.json`) is replayed
+  byte-for-byte — descriptor, 40-byte LZSH header, payload region, FNV-1a-64
+  checksum, and round-trip read (`ShmBlobArenaTest`).
 - State-chart fixtures mirrored into
   `src/test/resources/conformance/statechart/` are replayed by
   `StateChartConformanceTest`, asserting `accepted`, `active`, `matches`, and
   `actions` identically to every other binding.
+- The Async Reactive Context contract (slot state machine, stale discard,
+  cancellation, dependency tracking, effect cleanup ordering, batch) is covered
+  by `AsyncContextTest`.
+
+Not yet implemented: the keyed-collection surfaces (`CellFamily` / `CellMap` /
+`CellTree` / `reconcile` / `SemTree` / CRDT text), which no other JVM/JS binding
+ships either.
 
 ## Development
 

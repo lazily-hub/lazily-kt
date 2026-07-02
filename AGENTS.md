@@ -44,7 +44,10 @@ counterpart is future work).
   `done` events not raised — the deferred slice the spec permits). Conformance fixtures in
   `src/test/resources/conformance/statechart/` (mirrored from
   `lazily-spec/conformance/statechart/`) are replayed by
-  `StateChartConformanceTest`.
+  `StateChartConformanceTest`. The agent-doc state-projection IPC fixtures
+  (mirrored into `src/test/resources/conformance/agent-doc/`) are replayed by
+  `AgentDocStateConformanceTest`, validating the pinned `type_tag` vocabulary and
+  decoded payload phases.
 
 ### Wire types + projection consumer
 - `Ipc.kt` — native lazily-spec IPC wire types (`Snapshot`, `Delta`, `DeltaOp`,
@@ -52,6 +55,16 @@ counterpart is future work).
   and the multi-writer `CrdtSync` plane: `WireStamp`/`CrdtOp`/`CrdtSync` +
   `IpcMessage.CrdtSyncMessage`), kotlinx-serialization-free hand-rolled JSON
   that is byte-compatible with lazily-rs.
+- `ShmBlobArena.kt` — in-process host for the shared-memory blob plane
+  (counterpart of `lazily-rs::ShmBlobArena`): 40-byte LZSH header + FNV-1a-64,
+  byte-compatible across rs/py/zig/kt (pinned by `arena_blob.json`).
+- `AsyncContext.kt` — async reactive graph (counterpart of
+  `lazily-rs::AsyncContext`, `lazily-spec/docs/async.md`): the
+  `Empty`/`Computing`/`Resolved`/`Error` slot state machine with revision-based
+  stale discard, in-flight dedup, the five-point cancellation contract,
+  compute-context dependency tracking (registered before each awaited read),
+  serialized executor-scheduled async effects (`effect_async`/`signal_async`),
+  and synchronous `batch`. Coroutine-backed (`kotlinx.coroutines`).
 - `StateGraphMirror.kt` — pure native mirror that applies `snapshot`/`delta`.
 - `StateProjectionClient.kt` / `StateProjectionBridgeSupport.kt` — agent-doc
   state-projection consumers.
