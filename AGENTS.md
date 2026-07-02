@@ -90,6 +90,24 @@ counterpart is future work).
   The JVM channel is conformance-tested; the `extern "C"` symbols
   (`src/main/resources/native/lazily_ffi.h`) export via a Graal native-image
   build or the JNI shim. lazily-kt declares the `ffi = host` capability.
+- `SeqCrdt.kt` — move-aware mergeable ordered sequence CRDT (`#lzseqcrdt`):
+  per-element independent LWW registers (value, fractional-index position,
+  tombstone); a move is a single LWW reassign (not delete+reinsert), so
+  concurrent moves converge without duplication. Caller-driven HLC.
+- `TextCrdt.kt` — Fugue/RGA character CRDT (`#lztextcrdt`) for concurrent
+  free-text edits: OpId + left-origin tree, deterministic order, sticky
+  tombstones, causally-stable GC.
+- `SemTree.kt` — memoized semantic tree over a `CellTree` (`#lzsemtree`): one
+  memo slot per node; an edit recomputes only the ancestor chain and the memo
+  guard stops propagation when the fold is unchanged.
+- `StableId.kt` — manufactured identity for markdown text (`#lzstableid`):
+  anchors, normalized content hashes, word-LCS similarity alignment,
+  `assignStable_keys` flow through edits.
+- The four CRDT/semantic collection fixtures (`seqcrdt_convergence`,
+  `textcrdt_convergence`, `semtree_incremental`, `stableid_alignment`) are
+  replayed by `CollectionsCrdtConformanceTest`; together with
+  `CollectionsConformanceTest` they cover all seven `conformance/collections/`
+  fixtures.
 
 ## Commands
 

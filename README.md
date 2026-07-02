@@ -7,7 +7,7 @@ IPC wire types, a reactive full-Harel state chart, an `AsyncContext` async
 reactive graph, an in-process `ShmBlobArena` blob host, and an agent-doc
 state-projection consumer.
 
-`io.github.lazily:lazily` · Kotlin 2.0.21 · JVM 21 · v0.5.0
+`io.github.lazily:lazily` · Kotlin 2.0.21 · JVM 21 · v0.6.0
 
 ## The reactive family
 
@@ -236,6 +236,14 @@ lazily-kt replays the shared [`lazily-spec`][spec] conformance fixtures:
   keyed reconciliation) replays the shared `conformance/collections/` fixtures
   (`CollectionsConformanceTest`) — value / set-membership / order reactivity
   independence, stable handles, and atomic move.
+- The CRDT and semantic-tree collection models replay the remaining shared
+  `conformance/collections/` fixtures (`CollectionsCrdtConformanceTest`) — the
+  move-aware sequence CRDT (`seqcrdt_convergence`), the Fugue/RGA character CRDT
+  (`textcrdt_convergence`), the memoized semantic tree (`semtree_incremental`),
+  and manufactured text identity (`stableid_alignment`). All seven
+  `conformance/collections/` fixtures are now replayed, covering the full
+  [Binding Conformance Matrix](https://github.com/lazily-hub/lazily-spec/blob/main/protocol.md#binding-conformance-matrix)
+  keyed-collections + CRDT rows.
 - The distributed CRDT plane runtime (LWW / MV / PN-counter registers, HLC
   clock, `StampFrontier`, causal-stability watermark, idempotent ingress into a
   reactive root cell) is covered by `CrdtRuntimeTest`.
@@ -245,6 +253,34 @@ lazily-kt replays the shared [`lazily-spec`][spec] conformance fixtures:
 
 Not yet implemented: the `ffi = host` symbol export is provided as a JVM
 embeddable channel + C header + JNI-ready native entry table ([`src/main/resources/native/lazily_ffi.h`](src/main/resources/native/lazily_ffi.h)); real `extern "C"` symbol export ships via a Graal native-image build of the artifact. The single-writer `ThreadSafeContext` counterpart remains future work.
+
+## CRDT sequence / text + manufactured identity + semantic tree
+
+Beyond the single-value register plane, lazily-kt implements the cell-model's
+mergeable sequence and text surfaces — the native counterparts of the
+`lazily-rs` models and the `conformance/collections/` compute fixtures:
+
+- **`SeqCrdt`** — a move-aware, mergeable ordered sequence (`#lzseqcrdt`). Each
+  element is three independent LWW registers (value, fractional-index position,
+  tombstone). A move is a *single* LWW reassignment of position (not
+  delete+reinsert), so concurrent moves of the same element converge to the
+  later stamp without duplication, and a concurrent move + value edit both
+  apply. Merge is commutative, associative, and idempotent; the caller-driven
+  HLC keeps behaviour deterministic.
+- **`TextCrdt`** — a Fugue/RGA-style character CRDT (`#lztextcrdt`) for
+  concurrent free-text edits. Each character is an element with a unique `OpId`
+  + left-origin; order is a pure deterministic function of the element set, so
+  merge (a union of elements, tombstones sticky) converges regardless of
+  delivery order. Includes causally-stable tombstone GC.
+- **`SemTree`** — a memoized semantic derivation over a `CellTree` (`#lzsemtree`).
+  One memo slot per node folds `(node value, child derived values)`; editing one
+  node recomputes only its **ancestor chain** (a sibling subtree stays cached),
+  and the memo guard stops propagation when the folded result is unchanged.
+- **`StableId`** — manufactured identity for markdown text (`#lzstableid`):
+  in-band anchors (survive body rewrite), content-derived hashes of normalized
+  text (survive reflow/reorder), and word-LCS similarity alignment (≥ 0.5 ⇒
+  `Edited`, else `Inserted`). `assignStableKeys` flows identity through an edit
+  so the reconciler emits `Update`, not remove+insert.
 
 ## Keyed cell collections
 
