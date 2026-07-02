@@ -7,7 +7,7 @@ IPC wire types, a reactive full-Harel state chart, an `AsyncContext` async
 reactive graph, an in-process `ShmBlobArena` blob host, and an agent-doc
 state-projection consumer.
 
-`io.github.lazily:lazily` · Kotlin 2.0.21 · JVM 21 · v0.6.0
+`io.github.lazily:lazily` · Kotlin 2.0.21 · JVM 21 · v0.7.0
 
 ## The reactive family
 
@@ -339,10 +339,26 @@ so it declares the `ffi = host` capability.
 ## Development
 
 ```bash
-make check   # == ./gradlew test
+make check   # == ./gradlew test + build both Lean formal models
 ```
 
-Requires JDK 21 and Gradle (the included wrapper works out of the box).
+`make check` runs the Kotlin test suite and builds the two sibling Lean formal
+models lazily-kt is bound to:
+
+- `test-lean-formal` — `lazily-spec/formal/lean`: the IPC Snapshot/Delta state
+  plane + the `PartialEq` / memo / Signal / batch invariants every binding
+  shares.
+- `test-lazily-formal` — `lazily-formal`: the full Harel state chart, the
+  reactive-graph kernel (Slot/Cell/Signal/Effect), the keyed collection
+  (CellMap/CellFamily), the ordered tree (CellTree), keyed reconciliation (LIS),
+  and the async slot state machine — the executable reference behind the
+  conformance fixtures lazily-kt replays.
+
+Both targets resolve via `LEAN_SPEC_DIR` / `LEAN_FORMAL_DIR` (defaulting to the
+sibling submodule paths) and fail with a clear message if the sibling is absent.
+
+Requires JDK 21 and Gradle (the included wrapper works out of the box). Building
+the formal models additionally requires Lean 4 (`elan` / `lake`).
 
 ## See also
 

@@ -30,3 +30,37 @@ jobs:
 
       - name: Test
         run: ./gradlew test --no-daemon
+
+  lean:
+    name: Lean formal models (#lzleanformal)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout canonical lazily-spec
+        uses: actions/checkout@v4
+        with:
+          repository: lazily-hub/lazily-spec
+          path: lazily-spec
+
+      - name: Checkout canonical lazily-formal
+        uses: actions/checkout@v4
+        with:
+          repository: lazily-hub/lazily-formal
+          path: lazily-formal
+
+      - name: Build lazily-spec IPC formal model
+        uses: leanprover/lean-action@v1
+        with:
+          lake-package-directory: lazily-spec/formal/lean
+          auto-config: false
+          build: true
+          test: false
+          lint: false
+
+      - name: Build lazily-formal reactive + state-chart model
+        uses: leanprover/lean-action@v1
+        with:
+          lake-package-directory: lazily-formal
+          auto-config: false
+          build: true
+          test: false
+          lint: false

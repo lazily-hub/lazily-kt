@@ -112,8 +112,16 @@ counterpart is future work).
 ## Commands
 
 ```bash
-make check   # == ./gradlew test
+make check   # == ./gradlew test + test-lean-formal + test-lazily-formal
+make test    # ./gradlew test (Kotlin suite only)
+make test-lean-formal   # build lazily-spec/formal/lean (IPC state-plane proofs)
+make test-lazily-formal # build lazily-formal (state-chart + reactive + collection formal model)
 ```
+
+`make check` builds the two sibling Lean formal models lazily-kt is bound to
+(`lazily-spec/formal/lean` and `lazily-formal`), mirroring the lazily-rs
+conformance gate. They default to `../lazily-spec/formal/lean` and
+`../lazily-formal` and can be redirected via `LEAN_SPEC_DIR` / `LEAN_FORMAL_DIR`.
 
 ## Related Projects
 
