@@ -8,8 +8,9 @@ consumer.
 ## Architecture
 
 ### Reactive core (native, FFI-free)
-Mirrors lazily-rs `Context` semantics (single-threaded; `ThreadSafeContext`
-counterpart is future work).
+Mirrors lazily-rs `Context` semantics across all three context layers:
+single-threaded base (`Context`), lock-backed thread-safe (`ThreadSafeContext`),
+and coroutine-backed async (`AsyncContext`).
 
 - `Context.kt` — `Context`: the reactive dependency graph. Reactive family is
   **Slot** (lazy memoized derived) → **Cell** (mutable source) → **Signal**
@@ -65,6 +66,14 @@ counterpart is future work).
   compute-context dependency tracking (registered before each awaited read),
   serialized executor-scheduled async effects (`effect_async`/`signal_async`),
   and synchronous `batch`. Coroutine-backed (`kotlinx.coroutines`).
+- `ThreadSafeContext.kt` — lock-backed thread-safe reactive graph (counterpart
+  of `lazily-rs::ThreadSafeContext`, the spec's `thread_safe = host` layer): a
+  single `ReentrantLock` serializes every graph mutation/read so observers fire
+  synchronously within the invalidating `setCell`/`batch` preserving glitch-free
+  pull-based ordering (JVM monitor happens-before = Rust `Send + Sync`);
+  clonable value-class handles; per-thread (`ThreadLocal`) dependency tracking;
+  reentrant callbacks; atomic cross-thread `batch`. `ThreadSafeStateMachine.kt`
+  mirrors `StateMachine` over it (flat FSM safe from any sharing thread).
 - `StateGraphMirror.kt` — pure native mirror that applies `snapshot`/`delta`.
 - `StateProjectionClient.kt` / `StateProjectionBridgeSupport.kt` — agent-doc
   state-projection consumers.

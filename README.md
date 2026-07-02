@@ -4,15 +4,15 @@ Native Kotlin port of the **lazily** reactive core — a first-class reactive
 binding alongside [`lazily-rs`][rs], [`lazily-py`][py], and [`lazily-zig`][zig],
 with **no FFI dependency** for the reactive graph. Plus the [`lazily-spec`][spec]
 IPC wire types, a reactive full-Harel state chart, an `AsyncContext` async
-reactive graph, an in-process `ShmBlobArena` blob host, and an agent-doc
-state-projection consumer.
+reactive graph, a lock-backed `ThreadSafeContext`, an in-process `ShmBlobArena`
+blob host, and an agent-doc state-projection consumer.
 
-`io.github.lazily:lazily` · Kotlin 2.0.21 · JVM 21 · v0.7.0
+`io.github.lazily:lazily` · Kotlin 2.0.21 · JVM 21 · v0.8.0
 
 ## The reactive family
 
-lazily-kt mirrors lazily-rs `Context` semantics (single-threaded;
-`ThreadSafeContext` counterpart is future work):
+lazily-kt mirrors lazily-rs `Context` semantics across all three context layers
+— single-threaded base, lock-backed thread-safe, and coroutine-backed async:
 
 - **Slot** — a lazily-computed, memoized derived value. Tracks its dependencies
   automatically, computes on first read, caches, and recomputes only when read
@@ -232,6 +232,12 @@ lazily-kt replays the shared [`lazily-spec`][spec] conformance fixtures:
 - The Async Reactive Context contract (slot state machine, stale discard,
   cancellation, dependency tracking, effect cleanup ordering, batch) is covered
   by `AsyncContextTest`.
+- The Thread-safe Reactive Context contract (lock-backed Cell/Slot/Signal/Effect,
+  `==`/memo guards, glitch-free refresh, synchronous eager flush, reentrant
+  callbacks, atomic cross-thread `batch`, clonable handles, per-thread dependency
+  tracking) — the spec's `thread_safe = host` row — is covered by
+  `ThreadSafeContextTest`, including multi-thread convergence, cross-thread
+  handle reads, and a thread-safe `ThreadSafeStateMachine`.
 - The keyed cell collections layer (`CellMap` / `CellFamily` / `CellTree` /
   keyed reconciliation) replays the shared `conformance/collections/` fixtures
   (`CollectionsConformanceTest`) — value / set-membership / order reactivity
@@ -252,7 +258,44 @@ lazily-kt replays the shared [`lazily-spec`][spec] conformance fixtures:
   JSON re-encode, panic-guarded) is covered by `LazilyFfiBoundaryTest`.
 
 Not yet implemented: the `ffi = host` symbol export is provided as a JVM
-embeddable channel + C header + JNI-ready native entry table ([`src/main/resources/native/lazily_ffi.h`](src/main/resources/native/lazily_ffi.h)); real `extern "C"` symbol export ships via a Graal native-image build of the artifact. The single-writer `ThreadSafeContext` counterpart remains future work.
+embeddable channel + C header + JNI-ready native entry table ([`src/main/resources/native/lazily_ffi.h`](src/main/resources/native/lazily_ffi.h)); real `extern "C"` symbol export ships via a Graal native-image build of the artifact.
+
+## Thread-safe reactive context
+
+`ThreadSafeContext` ([`ThreadSafeContext.kt`](src/main/kotlin/io/github/lazily/ThreadSafeContext.kt))
+is the lock-backed counterpart of `Context` — the
+[`thread_safe` capability](https://github.com/lazily-hub/lazily-spec/blob/main/protocol.md#concurrency-layers-are-required)
+the spec requires of any binding whose platform exposes preemptive
+multi-threading. The JVM/Kotlin runtime structurally supports OS threads and a
+shared heap, so lazily-kt declares `thread_safe = host` (not `none`).
+
+It satisfies the spec contract: a single `ReentrantLock` serializes every graph
+mutation and read, so observers fire **synchronously within the invalidating
+`setCell`/`batch`**, preserving glitch-free pull-based ordering. The JVM memory
+model's monitor happens-before guarantee is the counterpart of Rust's
+`Send + Sync` obligation. Handles (`ThreadSafeSlotHandle` /
+`ThreadSafeCellHandle` / `ThreadSafeEffectHandle` / `ThreadSafeSignalHandle`)
+are value classes — clonable by value — so a handle minted on one thread may be
+read on another through the shared context. A `ThreadLocal` tracking stack
+mirrors lazily-rs's `thread_local!` tracking, so two threads computing
+concurrently never mix their dependency edges. `ReentrantLock` is reentrant, so a
+compute/effect callback that re-enters the same context (e.g. a slot reading
+another slot) does not self-deadlock. `batch` runs its whole block under the
+lock, so a batch is atomic across threads.
+
+```kotlin
+val ctx = ThreadSafeContext()
+val src = ctx.cell(1)
+val doubled = ctx.signal { ctx.getCell(src) * 2 }  // eager, materialized
+val eff = ctx.effect { println("now ${ctx.get(doubled)}"); null }
+
+// From any thread: clonable handle, synchronous observer.
+ctx.setCell(src, 21)   // observer fires synchronously before this returns
+```
+
+`ThreadSafeStateMachine` mirrors `StateMachine` over a `ThreadSafeContext` — the
+flat FSM whose `send`/`state`/`onTransition`/`stateIs` are safe to call from any
+thread sharing the context.
 
 ## CRDT sequence / text + manufactured identity + semantic tree
 
