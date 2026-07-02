@@ -72,6 +72,24 @@ counterpart is future work).
   surface. This is an **optional transport** for consuming authoritative
   projections from the Rust binary; it is independent of the reactive core. A
   state chart or other compute runs natively — never via this FFI channel.
+- `Collections.kt` — native keyed cell collections layer (`CellMap` + the
+  `CellFamily` factory, `CellTree` ordered keyed tree, move-minimized LIS
+  `reconcile`): a composition of cells (not a new cell kind) with independent
+  value / set-membership / order reactivity, stable handles, and atomic move.
+  Conformance fixtures in `conformance/collections/` (loaded from the sibling
+  `lazily-spec` submodule) are replayed by `CollectionsConformanceTest`.
+- `Crdt.kt` — distributed CRDT cell plane **runtime** (`#lzcrdtplane5b`): the
+  `merge: crdt` ingress mechanism — HLC `CrdtClock`, per-peer `StampFrontier`,
+  causal-stability watermark, GC contract, LWW / MV / PN-counter registers, and
+  `ReplicatedCell` ingress into a reactive root cell (idempotent / commutative /
+  associative merge; local edits mint `CrdtOp`s, remote ops merge and feed the
+  converged value as an ordinary equality-guarded cell update).
+- `LazilyFfiBoundary.kt` — lazily-kt's **own** C-ABI FFI host boundary
+  (`LazilyFfiBytes` / `LazilyFfiStatus` / `LazilyFfiMessageKind` incl.
+  `CrdtSync = 3`, decode→`IpcMessage`→canonical JSON re-encode, panic-guarded).
+  The JVM channel is conformance-tested; the `extern "C"` symbols
+  (`src/main/resources/native/lazily_ffi.h`) export via a Graal native-image
+  build or the JNI shim. lazily-kt declares the `ffi = host` capability.
 
 ## Commands
 

@@ -7,7 +7,7 @@ IPC wire types, a reactive full-Harel state chart, an `AsyncContext` async
 reactive graph, an in-process `ShmBlobArena` blob host, and an agent-doc
 state-projection consumer.
 
-`io.github.lazily:lazily` · Kotlin 2.0.21 · JVM 21 · v0.4.0
+`io.github.lazily:lazily` · Kotlin 2.0.21 · JVM 21 · v0.5.0
 
 ## The reactive family
 
@@ -232,10 +232,73 @@ lazily-kt replays the shared [`lazily-spec`][spec] conformance fixtures:
 - The Async Reactive Context contract (slot state machine, stale discard,
   cancellation, dependency tracking, effect cleanup ordering, batch) is covered
   by `AsyncContextTest`.
+- The keyed cell collections layer (`CellMap` / `CellFamily` / `CellTree` /
+  keyed reconciliation) replays the shared `conformance/collections/` fixtures
+  (`CollectionsConformanceTest`) — value / set-membership / order reactivity
+  independence, stable handles, and atomic move.
+- The distributed CRDT plane runtime (LWW / MV / PN-counter registers, HLC
+  clock, `StampFrontier`, causal-stability watermark, idempotent ingress into a
+  reactive root cell) is covered by `CrdtRuntimeTest`.
+- The C-ABI FFI host boundary (`LazilyFfiBytes` / `LazilyFfiStatus` /
+  `LazilyFfiMessageKind` incl. `CrdtSync = 3`, decode→`IpcMessage`→canonical
+  JSON re-encode, panic-guarded) is covered by `LazilyFfiBoundaryTest`.
 
-Not yet implemented: the keyed-collection surfaces (`CellFamily` / `CellMap` /
-`CellTree` / `reconcile` / `SemTree` / CRDT text), which no other JVM/JS binding
-ships either.
+Not yet implemented: the `ffi = host` symbol export is provided as a JVM
+embeddable channel + C header + JNI-ready native entry table ([`src/main/resources/native/lazily_ffi.h`](src/main/resources/native/lazily_ffi.h)); real `extern "C"` symbol export ships via a Graal native-image build of the artifact. The single-writer `ThreadSafeContext` counterpart remains future work.
+
+## Keyed cell collections
+
+`CellMap` (+ the `CellFamily` factory) and `CellTree` are the native
+implementation of the [`lazily-spec`][spec] keyed cell collections layer
+([Cell Model § Keyed cell collections](https://github.com/lazily-hub/lazily-spec/blob/main/cell-model.md#keyed-cell-collections)) — a **composition of cells**, not a new cell kind. Each entry is an ordinary cell; a dedicated membership cell tracks the key set; a dedicated order cell tracks the ordered key list. The three reactive planes are independent by construction:
+
+- writing an entry value invalidates only that entry's value readers;
+- inserting / removing a key invalidates membership + order readers, never unrelated entry value readers;
+- a pure reorder (atomic move) invalidates order readers only — membership readers (`len` / `contains`) and value readers are untouched, and the moved entry keeps its same cell handle (not remove + re-mint).
+
+```kotlin
+val ctx = Context()
+val map = CellMap(ctx, listOf("a" to 1, "b" to 2, "c" to 3))
+
+map.setValue("a", 10)        // value reader of "a" only
+map.insert("d", 4)           // membership + order readers
+map.moveTo("b", 3)           // order reader only; "b" keeps its handle
+map.keysNow()                // [a, c, d, b]
+```
+
+`reconcile(prior, target)` diffs two keyed sequences **by stable key**, emitting
+the minimal move-minimized `{insert, remove, move, update}` op set (longest-
+increasing-subsequence over prior indices preserved); applying it to a live
+`CellMap` keeps stable entries' value cells un-invalidated. `CellTree` composes
+the same guarantees node-by-node for an ordered keyed tree.
+
+## Distributed CRDT plane
+
+The `CrdtSync` wire types live in `Ipc.kt`; `Crdt.kt` is the **runtime
+integration slice** (`#lzcrdtplane5b`) — the `merge: crdt` ingress mechanism
+([Cell Model § Multi-write cells](https://github.com/lazily-hub/lazily-spec/blob/main/cell-model.md#multi-write-cells)):
+local edits mint `CrdtOp`s; remote `CrdtOp`s merge into a `ReplicatedCell` and
+the converged value is fed into the reactive graph as an ordinary cell update
+(equality-guarded, so an equal merge invalidates nothing). It includes a hybrid
+logical clock (`CrdtClock`), the per-peer `StampFrontier` (per-peer `max`), the
+causal-stability **watermark** (`min` over membership — fail-closed when a
+member is unobserved), the tombstone **GC** contract, and the LWW / MV /
+PN-counter register types. Merge is commutative, associative, and idempotent;
+out-of-order, duplicated, or batched delivery all converge.
+
+## C-ABI FFI boundary
+
+`LazilyFfiBoundary.kt` exposes lazily-kt's **own** C-ABI FFI host boundary
+([protocol § FFI Boundary](https://github.com/lazily-hub/lazily-spec/blob/main/protocol.md#ffi-boundary),
+[`ffi.json`](https://github.com/lazily-hub/lazily-spec/blob/main/schemas/ffi.json)):
+`LazilyFfiBytes` / `LazilyFfiStatus` / `LazilyFfiMessageKind` (with the required
+`CrdtSync = 3` discriminant), explicit allocation ownership, panics caught
+before crossing the C ABI (`LazilyFfiChannel.panicGuard`), and a channel that
+decodes each accepted frame as `IpcMessage` and re-encodes canonical JSON bytes.
+The JVM channel is the conformance-tested surface; the `extern "C"` symbols in
+`lazily_ffi.h` are exported via a Graal native-image build or the JNI shim
+(`LazilyFfiNative`). lazily-kt's platform CAN host a native in-process boundary,
+so it declares the `ffi = host` capability.
 
 ## Development
 
