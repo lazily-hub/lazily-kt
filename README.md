@@ -16,8 +16,9 @@ binding. Legend: ✅ shipped · `~` partial · `—` absent or not applicable. T
 canonical matrix with per-cell notes and platform carve-outs lives in
 [`lazily-spec` § Cross-Language Coverage](../lazily-spec/docs/coverage.md).
 
+<!-- coverage-table:start -->
 | Feature | Rust | Python | Kotlin | JS | Dart | Zig |
-|---------|:----:|:------:|:------:|:--:|:----:|:---:|
+| --------- | :----: | :------: | :------: | :--: | :----: | :---: |
 | Reactive graph — `Cell` / `Slot` / `Signal` / `Effect` / memo / batch | ✅ | ~ | ✅ | ✅ | ~ | ~ |
 | Thread-safe context (lock-backed) | ✅ | ✅ | ✅ | — | — | ✅ |
 | Async reactive context | ✅ | ✅ | ✅ | ✅ | ✅ | — |
@@ -39,6 +40,7 @@ canonical matrix with per-cell notes and platform carve-outs lives in
 | Permission boundary (`PeerPermissions` / `RemoteOp`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Capability negotiation (`SessionHandshake`) | ✅ | — | ✅ | ✅ | ✅ | ✅ |
 | Instrumentation / benchmarks | ✅ | — | — | — | — | — |
+<!-- coverage-table:end -->
 
 CRDT convergence and the wire protocol are pinned by the shared conformance fixtures
 and JSON Schemas in `lazily-spec` and the Lean models in `lazily-formal`.
