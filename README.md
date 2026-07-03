@@ -7,30 +7,38 @@ IPC wire types, a reactive full-Harel state chart, an `AsyncContext` async
 reactive graph, a lock-backed `ThreadSafeContext`, an in-process `ShmBlobArena`
 blob host, and an agent-doc state-projection consumer.
 
-`io.github.lazily:lazily` · Kotlin 2.0.21 · JVM 21 · v0.8.0
+`io.github.lazily:lazily` · Kotlin 2.0.21 · JVM 21 · v0.11.0
 
 ## Feature Set
 
-The full `lazily` capability set and its cross-language coverage (`lazily-rs`,
-`lazily-kt`, `lazily-js`). `✅` shipped, `~` partial, `—` not applicable/absent.
+The full `lazily` capability set and its cross-language coverage across every
+binding. Legend: ✅ shipped · `~` partial · `—` absent or not applicable. The
+canonical matrix with per-cell notes and platform carve-outs lives in
+[`lazily-spec` § Cross-Language Coverage](../lazily-spec/docs/coverage.md).
 
-| Feature | Rust | Kotlin | JS |
-|---------|:----:|:------:|:--:|
-| Reactive graph — `Context`, `Slot`, `Cell`, `memo`, `Signal` (eager), `Effect`, `batch` | ✅ | ✅ | ✅ |
-| Thread-safe `Context` (`Send + Sync`, lock-backed) | ✅ | ✅ | — |
-| Async reactive `Context` | ✅ | ✅ | — |
-| Statechart (Harel) + state machine | ✅ | ✅ | ✅ |
-| Keyed cell collections + `reconcile` + `SemTree` (keyed tree) | ✅ | ✅ | ✅ |
-| Stable-id alignment (manufactured identity) | ✅ | ✅ | ✅ |
-| Free-text character CRDT (`TextCrdt`) | ✅ | ✅ | ✅ |
-| **`TextCrdt` delta sync — `version_vector` / `delta_since` / `apply_delta` (`#lztextsync`)** | ✅ | ✅ | ✅ |
-| Move-aware sequence CRDT (`SeqCrdt`) | ✅ | ✅ | ✅ |
-| Registers (LWW / MV), `PnCounter`, `CellCrdt` | ✅ | ✅ | ✅ |
-| IPC wire — `Snapshot` + `Delta` + `CrdtSync` + shared-memory blobs | ✅ | ✅ | ~ |
-| State projection / mirror | ✅ | ✅ | ✅ |
-| FFI boundary | ✅ | ✅ | n/a |
-| Distributed plane (WebRTC transport + signaling) | ✅ | — | — |
-| Instrumentation / benchmarks | ✅ | — | — |
+| Feature | Rust | Python | Kotlin | JS | Dart | Zig |
+|---------|:----:|:------:|:------:|:--:|:----:|:---:|
+| Reactive graph — `Cell` / `Slot` / `Signal` / `Effect` / memo / batch | ✅ | ~ | ✅ | ✅ | ~ | ~ |
+| Thread-safe context (lock-backed) | ✅ | ✅ | ✅ | — | — | ✅ |
+| Async reactive context | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Flat state machine | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Harel state charts | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Keyed cell collections (`CellMap` / `CellTree`) + reconcile | ✅ | ✅ | ✅ | ✅ | ✅ | ~ |
+| Memoized semantic tree (`SemTree`) | ✅ | — | ✅ | ✅ | — | — |
+| Stable-id alignment (manufactured identity) | ✅ | — | ✅ | ✅ | — | — |
+| Free-text character CRDT (`TextCrdt`) | ✅ | — | ✅ | ✅ | — | — |
+| `TextCrdt` delta sync (`version_vector` / `delta_since` / `apply_delta`) | ✅ | — | ✅ | ✅ | — | — |
+| Move-aware sequence CRDT (`SeqCrdt`) | ✅ | — | ✅ | ✅ | — | — |
+| Registers (LWW / MV) + `PnCounter` + `CellCrdt` | ✅ | — | ✅ | ✅ | — | — |
+| IPC wire — `Snapshot` + `Delta` + `CrdtSync` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Shared-memory blob path (`ShmBlobArena`) | ✅ | ✅ | ✅ | ~ | ~ | ✅ |
+| Distributed CRDT plane (`CrdtPlaneRuntime` / anti-entropy) | ✅ | — | ✅ | ✅ | ~ | — |
+| Distributed plane — WebRTC transport + signaling | ✅ | — | ✅ | ✅ | — | — |
+| State projection / mirror | ✅ | — | ✅ | ✅ | — | — |
+| C-ABI FFI boundary | ✅ | ✅ | ✅ | — | ✅ | ✅ |
+| Permission boundary (`PeerPermissions` / `RemoteOp`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Capability negotiation (`SessionHandshake`) | ✅ | — | ✅ | ✅ | ✅ | ✅ |
+| Instrumentation / benchmarks | ✅ | — | — | — | — | — |
 
 CRDT convergence and the wire protocol are pinned by the shared conformance fixtures
 and JSON Schemas in `lazily-spec` and the Lean models in `lazily-formal`.
@@ -389,6 +397,28 @@ causal-stability **watermark** (`min` over membership — fail-closed when a
 member is unobserved), the tombstone **GC** contract, and the LWW / MV /
 PN-counter register types. Merge is commutative, associative, and idempotent;
 out-of-order, duplicated, or batched delivery all converge.
+
+### Distributed plane — transport + signaling (seam + platform adapter)
+
+`CrdtPlaneRuntime` (`CrdtPlane.kt`) is the per-session runtime glue over those
+primitives: it owns the plane clock/frontier/membership, an op-log (dedup by
+`(node, stamp)`), a `NodeId`↔`NodeKey` index, and a registry of replicated root
+cells. `localUpdate` mints a broadcastable `CrdtOp` (or `null` for a
+value-preserving edit); `ingest` folds a peer's `CrdtSync` frame in exactly once
+(idempotent re-delivery applies 0), advancing the clock, frontier, and
+membership; `syncFrame` / `syncFrameSince` / `syncReply` drive anti-entropy.
+
+The networking is a **consumer-provided seam** — no bundled native WebRTC
+library. `DataChannel` (`DataChannel.kt`) is the ordered byte-frame surface a
+real `RTCDataChannel` backend must supply; `WebRtcSink` / `WebRtcSource`
+(`WebRtcTransport.kt`) bridge it to IPC with outbound per-peer permission
+filtering (omission, not redaction). The signaling wire protocol
+(`ClientMessage` / `ServerMessage`, kebab-case tags), the `RoomCore` server
+router (anti-spoof `to`→`from` rewrite, roster-excludes-self, `unknown_target`),
+and a `SignalingClient` over a `SignalingSocket` seam live in `Signaling.kt`.
+Everything is testable via zero-dependency in-memory loopbacks
+(`InMemoryDataChannel`, `InMemorySignalingSocket`); wiring a real WebSocket /
+WebRTC backend is the deliberate follow-up.
 
 ## C-ABI FFI boundary
 
