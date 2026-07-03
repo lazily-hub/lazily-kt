@@ -38,6 +38,15 @@ private class Elem(val ch: Char, val origin: OpId?) {
 }
 
 /**
+ * One text-CRDT element in transport-ready form (#lztextsync): the wire unit for
+ * [TextCrdt.deltaSince] / [TextCrdt.applyDelta]. A whole-state snapshot is
+ * `deltaSince(emptyMap())`; rebuilding a replica via [TextCrdt.applyDelta]
+ * preserves each character's [OpId] identity so later concurrent edits still merge
+ * conflict-free.
+ */
+data class TextOp(val id: OpId, val ch: Char, val origin: OpId?, val deleted: OpId?)
+
+/**
  * A character-granular, mergeable text buffer for concurrent free-text edits.
  *
  * Merge is commutative, associative, and idempotent; out-of-order, duplicated,
@@ -171,6 +180,64 @@ class TextCrdt private constructor(
                 }
             } else {
                 elems[id] = Elem(oe.ch, oe.origin).apply { deleted = oe.deleted }
+            }
+        }
+        return text() != before
+    }
+
+    // -- Delta sync (#lztextsync) -------------------------------------------
+
+    /**
+     * This replica's version vector: for each peer that authored an insert or a
+     * deletion this replica holds, the greatest counter seen from that peer. An op
+     * `(c, p)` is unknown to a partner iff `c > theirVv[p]` (0 when absent).
+     */
+    fun versionVector(): Map<Long, Long> {
+        val vv = HashMap<Long, Long>()
+        fun bump(id: OpId) { vv[id.peer] = maxOf(vv[id.peer] ?: 0L, id.counter) }
+        for ((id, e) in elems) {
+            bump(id)
+            e.deleted?.let { bump(it) }
+        }
+        return vv
+    }
+
+    /**
+     * The ops this replica holds that [theirVv] has not observed — new inserts and
+     * newly-observed deletions of older elements. [applyDelta]-ing this list into
+     * the partner converges the two replicas. A whole-state snapshot is
+     * `deltaSince(emptyMap())`.
+     */
+    fun deltaSince(theirVv: Map<Long, Long>): List<TextOp> {
+        fun seen(id: OpId) = id.counter <= (theirVv[id.peer] ?: 0L)
+        val out = ArrayList<TextOp>()
+        for ((id, e) in elems) {
+            val insertNew = !seen(id)
+            val deleteNew = e.deleted?.let { !seen(it) } ?: false
+            if (insertNew || deleteNew) out.add(TextOp(id, e.ch, e.origin, e.deleted))
+        }
+        return out
+    }
+
+    /**
+     * Apply a delta op list (from [deltaSince]). Commutative, associative, and
+     * idempotent — the same convergence contract as [merge], from the transport
+     * form. Returns whether the visible text changed.
+     */
+    fun applyDelta(ops: List<TextOp>): Boolean {
+        val before = text()
+        for (op in ops) {
+            counter = maxOf(counter, op.id.counter)
+            op.deleted?.let { counter = maxOf(counter, it.counter) }
+            val e = elems[op.id]
+            if (e != null) {
+                e.deleted = when {
+                    e.deleted != null && op.deleted != null -> minOf(e.deleted!!, op.deleted!!)
+                    e.deleted != null -> e.deleted
+                    else -> op.deleted
+                }
+            } else {
+                elems[op.id] = Elem(op.ch, op.origin).apply { deleted = op.deleted }
             }
         }
         return text() != before
