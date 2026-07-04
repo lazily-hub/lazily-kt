@@ -234,6 +234,6 @@ class AgentDocStateConformanceTest {
 
         val patch = nodes.getValue(104L)
         assertEquals("agent_doc.transport.patch", patch.typeTag)
-        assertEquals("acked", payloadPhase(decodePayloadObject((patch.state as NodeState.Payload).bytes)))
+        assertEquals("applied", payloadPhase(decodePayloadObject((patch.state as NodeState.Payload).bytes)))
     }
 }

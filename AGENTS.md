@@ -142,7 +142,7 @@ conformance gate. They default to `../lazily-spec/formal/lean` and
   Harel `StateChart`) — the executable reference behind the chart fixtures.
 - `lazily-rs` / `lazily-py` / `lazily-zig` — sibling reactive cores.
 
-<!-- tsift:code-navigation v=0.1.73 -->
+<!-- tsift:code-navigation v=0.1.74 -->
 ## Code Navigation
 
 Keep this block self-contained for Codex/OpenCode prompt reuse. If this repository also ships current `.claude/skills/tsift/SKILL.md` or `runbooks/code-navigation.md`, use those deeper runbooks for command detail instead of expanding this block.

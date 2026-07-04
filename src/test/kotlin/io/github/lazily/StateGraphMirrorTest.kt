@@ -135,7 +135,7 @@ class StateGraphMirrorTest {
                 documentHash = "doc",
                 nodes = listOf(
                     WireNodeSnapshot(11, MirrorProjectionSummary.ROUTE, payload = routePayload("dispatch_proven", "%2")),
-                    WireNodeSnapshot(40, MirrorProjectionSummary.TRANSPORT_PATCH, payload = patchPayload("acked")),
+                    WireNodeSnapshot(40, MirrorProjectionSummary.TRANSPORT_PATCH, payload = patchPayload("applied")),
                     WireNodeSnapshot(41, MirrorProjectionSummary.TRANSPORT_PATCH, payload = patchPayload("queued")),
                     WireNodeSnapshot(50, MirrorProjectionSummary.PROOF_MARKER, payload = b64("{}")),
                 ),

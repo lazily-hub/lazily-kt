@@ -145,7 +145,7 @@ class StateProjectionClientTest {
             {
               "document_hash":"doc-a",
               "route":{"generation":3,"pane_id":"%2","readiness":"dispatch_proven","dispatch_proofs":["p1"]},
-              "transport":{"patches":{"patch-1":{"phase":"queued"},"patch-2":{"phase":"acked"}}},
+              "transport":{"patches":{"patch-1":{"phase":"queued"},"patch-2":{"phase":"applied"}}},
               "proof":{"markers":{"dispatch_start":{"phase":"observed","sources":["route"]}}},
               "document":{},
               "queue":{},
@@ -158,10 +158,10 @@ class StateProjectionClientTest {
         assertEquals("dispatch_proven", summary.routeReadiness)
         assertEquals("%2", summary.routePaneId)
         assertEquals("patch-2", summary.latestTransportPatchId)
-        assertEquals("acked", summary.latestTransportPhase)
+        assertEquals("applied", summary.latestTransportPhase)
         assertEquals(1, summary.proofMarkers)
         assertEquals(
-            "route=dispatch_proven pane=%2 transport=patch-2:acked proof_markers=1",
+            "route=dispatch_proven pane=%2 transport=patch-2:applied proof_markers=1",
             summary.compact(),
         )
     }
