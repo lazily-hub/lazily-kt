@@ -105,18 +105,21 @@ and coroutine-backed async (`AsyncContext`).
   concurrent moves converge without duplication. Caller-driven HLC.
 - `TextCrdt.kt` — Fugue/RGA character CRDT (`#lztextcrdt`) for concurrent
   free-text edits: OpId + left-origin tree, deterministic order, sticky
-  tombstones, causally-stable GC.
+  tombstones, causally-stable GC. Delta sync (`#lztextsync`):
+  `versionVector` / `deltaSince` / `applyDelta` — a whole-state snapshot is
+  `deltaSince({})`, and `applyDelta`-ing it rebuilds a mergeable replica
+  (OpIds preserved), pinned by the `textcrdt_delta_sync.json` fixture.
 - `SemTree.kt` — memoized semantic tree over a `CellTree` (`#lzsemtree`): one
   memo slot per node; an edit recomputes only the ancestor chain and the memo
   guard stops propagation when the fold is unchanged.
 - `StableId.kt` — manufactured identity for markdown text (`#lzstableid`):
   anchors, normalized content hashes, word-LCS similarity alignment,
   `assignStable_keys` flow through edits.
-- The four CRDT/semantic collection fixtures (`seqcrdt_convergence`,
-  `textcrdt_convergence`, `semtree_incremental`, `stableid_alignment`) are
-  replayed by `CollectionsCrdtConformanceTest`; together with
-  `CollectionsConformanceTest` they cover all seven `conformance/collections/`
-  fixtures.
+- The five CRDT/semantic collection fixtures (`seqcrdt_convergence`,
+  `textcrdt_convergence`, `textcrdt_delta_sync`, `semtree_incremental`,
+  `stableid_alignment`) are replayed by `CollectionsCrdtConformanceTest`;
+  together with `CollectionsConformanceTest` they cover all eight
+  `conformance/collections/` fixtures.
 
 ## Commands
 

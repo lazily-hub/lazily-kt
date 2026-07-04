@@ -198,9 +198,112 @@ class CollectionsCrdtConformanceTest {
         }
     }
 
+    // -- TextCrdt delta sync (#lztextsync) ----------------------------------
+
+    @Test
+    fun `conformance textcrdt delta sync`() {
+        val fixture = loadFixture("textcrdt_delta_sync.json")
+        for (scenario in fixture.getValue("scenarios").jsonArray) {
+            val s = scenario.jsonObject
+            val name = s.getValue("name").jsonPrimitive.content
+            val replicas = LinkedHashMap<String, TextRepl>()
+            val (defaultName, defaultRepl) = seedTextCrdt(s)
+            replicas[defaultName] = defaultRepl
+
+            for (stepEl in s.getValue("steps").jsonArray) {
+                val step = stepEl.jsonObject
+                when {
+                    step["fork"] != null -> {
+                        val newName = step.getValue("fork").jsonPrimitive.content
+                        val newPeer = step.getValue("peer").jsonPrimitive.long
+                        val forked = replicas.getValue(defaultName).crdt.fork(newPeer)
+                        replicas[newName] = TextRepl(forked)
+                    }
+                    step["new"] != null -> {
+                        val newName = step.getValue("new").jsonPrimitive.content
+                        val newPeer = step.getValue("peer").jsonPrimitive.long
+                        replicas[newName] = TextRepl(TextCrdt(newPeer))
+                    }
+                    step["snapshot"] != null -> {
+                        val snap = step.getValue("snapshot").jsonObject
+                        val from = snap.getValue("from").jsonPrimitive.content
+                        val into = snap.getValue("into").jsonPrimitive.content
+                        val peer = snap.getValue("peer").jsonPrimitive.long
+                        val delta = replicas.getValue(from).crdt.deltaSince(emptyMap())
+                        val rebuilt = TextCrdt(peer)
+                        val changed = rebuilt.applyDelta(delta)
+                        assertEquals(
+                            step.getValue("expect_changed").jsonPrimitive.boolean,
+                            changed,
+                            "$name: snapshot expect_changed",
+                        )
+                        replicas[into] = TextRepl(rebuilt)
+                    }
+                    step["delta"] != null -> {
+                        val d = step.getValue("delta").jsonObject
+                        val into = d.getValue("into").jsonPrimitive.content
+                        val from = d.getValue("from").jsonPrimitive.content
+                        val theirVv = replicas.getValue(into).crdt.versionVector()
+                        val delta = replicas.getValue(from).crdt.deltaSince(theirVv)
+                        val changed = replicas.getValue(into).crdt.applyDelta(delta)
+                        step["expect_changed"]?.let {
+                            assertEquals(
+                                it.jsonPrimitive.boolean,
+                                changed,
+                                "$name: delta expect_changed",
+                            )
+                        }
+                    }
+                    step["exchange"] != null -> {
+                        val (x, y) = step.getValue("exchange").jsonArray.map { it.jsonPrimitive.content }
+                        val rx = replicas.getValue(x).crdt
+                        val ry = replicas.getValue(y).crdt
+                        val xToY = rx.deltaSince(ry.versionVector())
+                        val yToX = ry.deltaSince(rx.versionVector())
+                        ry.applyDelta(xToY)
+                        rx.applyDelta(yToX)
+                    }
+                    step["on"] != null -> {
+                        val target = step.getValue("on").jsonPrimitive.content
+                        applyTextOp(replicas.getValue(target).crdt, step)
+                    }
+                    step["op"] != null -> applyTextOp(replicas.getValue(defaultName).crdt, step)
+                }
+            }
+
+            val expect = s.getValue("expect").jsonObject
+            expect["text_on"]?.jsonObject?.forEach { (repl, textEl) ->
+                assertEquals(
+                    textEl.jsonPrimitive.content,
+                    replicas.getValue(repl).crdt.text(),
+                    "$name: text_on[$repl]",
+                )
+            }
+            expect["texts_equal"]?.jsonArray?.forEach { pair ->
+                val (x, y) = pair.jsonArray.map { it.jsonPrimitive.content }
+                assertEquals(
+                    replicas.getValue(x).crdt.text(),
+                    replicas.getValue(y).crdt.text(),
+                    "$name: texts_equal[$x,$y]",
+                )
+            }
+            expect["version_vector_on"]?.jsonObject?.forEach { (repl, vvEl) ->
+                val want = vvEl.jsonObject.entries.associate { (peer, counter) ->
+                    peer.toLong() to counter.jsonPrimitive.long
+                }
+                assertEquals(
+                    want,
+                    replicas.getValue(repl).crdt.versionVector(),
+                    "$name: version_vector_on[$repl]",
+                )
+            }
+        }
+    }
+
     private fun applyTextOp(crdt: TextCrdt, step: JsonObject) {
         when (step.getValue("op").jsonPrimitive.content) {
             "insert" -> crdt.insert(step.getValue("index").jsonPrimitive.int, step.getValue("ch").jsonPrimitive.content.first())
+            "insert_str" -> crdt.insertString(step.getValue("index").jsonPrimitive.int, step.getValue("str").jsonPrimitive.content)
             "delete" -> crdt.delete(step.getValue("index").jsonPrimitive.int)
             "gc" -> {
                 val stable = step.getValue("stable").jsonPrimitive.boolean
