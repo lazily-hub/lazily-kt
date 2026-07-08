@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "io.github.lazily"
-version = "0.12.1"
+version = "0.13.0"
 
 repositories {
     mavenCentral()
@@ -21,6 +21,32 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+}
+
+// Reactive-core microbenchmark (parity with lazily-rs benches/context.rs).
+// Run via `./gradlew benchmark` or `make benchmark`.
+tasks.register<JavaExec>("benchmark") {
+    group = "benchmark"
+    description = "Run the lazily-kt reactive-core microbenchmarks."
+    mainClass.set("io.github.lazily.Benchmarks")
+    classpath = sourceSets.main.get().runtimeClasspath
+    // JVM microbenchmarks need a warm settled heap; no special flags required.
+    standardOutput = System.out
+    errorOutput = System.err
+}
+
+// Spreadsheet-scale benchmark (parity with lazily-rs benches/scale.rs).
+// Run via `./gradlew benchmarkScale -Plazily.scaleN=1000000` or `make benchmark-scale`.
+tasks.register<JavaExec>("benchmarkScale") {
+    group = "benchmark"
+    description = "Run the lazily-kt spreadsheet-scale benchmark (default N=1,000,000)."
+    mainClass.set("io.github.lazily.ScaleBench")
+    classpath = sourceSets.main.get().runtimeClasspath
+    standardOutput = System.out
+    errorOutput = System.err
+    // LAZILY_SCALE_N / LAZILY_SCALE_VIEWPORT env vars are read by ScaleBench.main.
+    val scaleN = project.findProperty("lazily.scaleN") as String?
+    if (scaleN != null) environment("LAZILY_SCALE_N", scaleN)
 }
 
 kotlin {

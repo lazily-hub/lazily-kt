@@ -5,6 +5,17 @@ alongside lazily-rs / lazily-py / lazily-zig (no FFI dependency for the reactive
 graph). Plus the lazily-spec IPC wire types and an agent-doc state-projection
 consumer.
 
+## Commit & Push
+
+Commit and push completed work at the end of every turn that changed code,
+tests, docs, or fixtures — do not leave finished work uncommitted. Run `make
+check` first and ensure it is green; stage only the files that belong to the
+change (never secrets or private customer names — see the workspace
+`runbooks/private-name-hygiene.md`); write a concise commit message in the
+repo's existing style; push to the current branch on `origin`. This standing
+rule overrides the harness default of "commit only when explicitly asked" for
+this repo.
+
 ## Architecture
 
 ### Reactive core (native, FFI-free)
@@ -121,11 +132,26 @@ and coroutine-backed async (`AsyncContext`).
   together with `CollectionsConformanceTest` they cover all eight
   `conformance/collections/` fixtures.
 
+### Benchmarks
+- `Benchmarks.kt` — reactive-core microbenchmark harness (parity with lazily-rs
+  `benches/context.rs`): cached reads, cold first get, dependency fan-out,
+  set-cell invalidation, memo equality suppression, effect flushing, batch
+  storms, typed cache reads, and thread-safe contention. Wall-clock with a JIT
+  warmup phase; mirrors the lazily-py `Benchmark`/`BenchmarkResult`/`timeOp`
+  shape.
+- `ScaleBench.kt` — spreadsheet-scale bench (parity with lazily-rs
+  `benches/scale.rs`): `build` / `cold_full_recalc` / `viewport_recalc` /
+  `full_recalc_invalidate_all` on a graph of up to 1,000,000 cells. Run with
+  `make benchmark-scale`; override `N` via `LAZILY_SCALE_N`.
+- `BENCHMARKS.md` — captured results + reproduction notes.
+
 ## Commands
 
 ```bash
 make check   # == ./gradlew test + test-lean-formal + test-lazily-formal
 make test    # ./gradlew test (Kotlin suite only)
+make benchmark        # reactive-core micro-bench (parity with context.rs)
+make benchmark-scale  # spreadsheet-scale bench, default N=1,000,000 (scale.rs)
 make test-lean-formal   # build lazily-spec/formal/lean (IPC state-plane proofs)
 make test-lazily-formal # build lazily-formal (state-chart + reactive + collection formal model)
 ```

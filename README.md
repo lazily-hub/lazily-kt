@@ -7,7 +7,7 @@ IPC wire types, a reactive full-Harel state chart, an `AsyncContext` async
 reactive graph, a lock-backed `ThreadSafeContext`, an in-process `ShmBlobArena`
 blob host, and an agent-doc state-projection consumer.
 
-`io.github.lazily:lazily` · Kotlin 2.0.21 · JVM 21 · v0.12.0
+`io.github.lazily:lazily` · Kotlin 2.0.21 · JVM 21 · v0.12.2
 
 ## Feature Set
 
@@ -30,9 +30,9 @@ canonical matrix with per-cell notes and platform carve-outs lives in
 | Free-text character CRDT (`TextCrdt`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `TextCrdt` delta sync (`version_vector` / `delta_since` / `apply_delta`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Move-aware sequence CRDT (`SeqCrdt`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Lossless tree CRDT core (`LosslessTreeCrdt`, M1) | ✅ | — | ✅ | ✅ | — | — | — |
-| Lossless tree — dotted-frontier anti-entropy | ✅ | — | ✅ | ✅ | — | — | — |
-| Lossless tree — concurrent merge convergence | ✅ | — | ✅ | ✅ | — | — | — |
+| Lossless tree CRDT core (`LosslessTreeCrdt`, M1) | ✅ | ✅ | ✅ | ✅ | — | — | ✅ |
+| Lossless tree — dotted-frontier anti-entropy | ✅ | ✅ | ✅ | ✅ | — | — | ✅ |
+| Lossless tree — concurrent merge convergence | ✅ | ✅ | ✅ | ✅ | — | — | ✅ |
 | Registers (LWW / MV) + `PnCounter` + `CellCrdt` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | IPC wire — `Snapshot` + `Delta` + `CrdtSync` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Shared-memory blob path (`ShmBlobArena`) | ✅ | ✅ | ✅ | ~ | ~ | ✅ | ✅ |
@@ -40,11 +40,11 @@ canonical matrix with per-cell notes and platform carve-outs lives in
 | Distributed plane — WebRTC transport + signaling | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | State projection / mirror | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Causal receipts (`CausalReceipts` outcome projection) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Message-passing + RPC command plane (`command-plane-v1`) | ✅ | — | ✅ | ✅ | — | — | — |
+| Message-passing + RPC command plane (`command-plane-v1`) | ✅ | ✅ | ✅ | ✅ | — | — | ✅ |
 | C-ABI FFI boundary | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ |
 | Permission boundary (`PeerPermissions` / `RemoteOp`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Capability negotiation (`SessionHandshake`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Instrumentation / benchmarks | ✅ | ✅ | — | — | ✅ | ✅ | ✅ |
+| Instrumentation / benchmarks | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ |
 <!-- coverage-table:end -->
 
 CRDT convergence and the wire protocol are pinned by the shared conformance fixtures
@@ -464,6 +464,23 @@ sibling submodule paths) and fail with a clear message if the sibling is absent.
 
 Requires JDK 21 and Gradle (the included wrapper works out of the box). Building
 the formal models additionally requires Lean 4 (`elan` / `lake`).
+
+## Benchmarks
+
+Performance benchmarks mirroring the lazily-rs [`benches/`](https://github.com/lazily-hub/lazily-rs/tree/main/benches)
+coverage ([`BENCHMARKS.md`](BENCHMARKS.md) for full results):
+
+```bash
+make benchmark          # reactive-core micro-bench (parity with context.rs)
+make benchmark-scale    # spreadsheet-scale bench, default N=1,000,000 (scale.rs)
+```
+
+The micro-bench (`Benchmarks.kt`) covers cached reads, cold first get,
+dependency fan-out, set-cell invalidation, memo equality suppression, effect
+flushing, batch storms, typed cache reads, and thread-safe contention. The
+scale bench (`ScaleBench.kt`) models a spreadsheet of `2N` reactive nodes and
+highlights the lazy-pull viewport win (off-viewport formulas stay dirty and
+never recompute). Override the graph size with `LAZILY_SCALE_N`.
 
 ## See also
 
