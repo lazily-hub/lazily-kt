@@ -27,7 +27,7 @@ canonical matrix with per-cell notes and platform carve-outs lives in
 | Keyed cell collections (`CellMap` / `CellTree`) + reconcile | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Memoized semantic tree (`SemTree`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Stable-id alignment (manufactured identity) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Reactive queue (`QueueCell` SPSC/MPSC + `QueueStorage` adapter) | — | — | — | — | — | — | — | — |
+| Reactive queue (`QueueCell` SPSC/MPSC + `QueueStorage` adapter) | ✅ | — | — | ✅ | — | — | — | — |
 | Free-text character CRDT (`TextCrdt`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `TextCrdt` delta sync (`version_vector` / `delta_since` / `apply_delta`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Move-aware sequence CRDT (`SeqCrdt`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -291,6 +291,11 @@ lazily-kt replays the shared [`lazily-spec`][spec] conformance fixtures:
   `conformance/collections/` fixtures are now replayed, covering the full
   [Binding Conformance Matrix](https://github.com/lazily-hub/lazily-spec/blob/main/protocol.md#binding-conformance-matrix)
   keyed-collections + CRDT rows.
+- The reactive queue (`QueueCell` SPSC + MPSC-via-`batch()` usage rule +
+  `QueueStorage` adapter) replays the five `queuecell_*.json` fixtures
+  (`QueueCellConformanceTest`) — SPSC total FIFO, popped-head reader-kind
+  independence, MPSC multi-writer inside `batch()`, bounded reactive
+  backpressure (`is_full`), and the closure lifecycle.
 - The distributed CRDT plane runtime (LWW / MV / PN-counter registers, HLC
   clock, `StampFrontier`, causal-stability watermark, idempotent ingress into a
   reactive root cell) is covered by `CrdtRuntimeTest`.
@@ -391,6 +396,61 @@ the minimal move-minimized `{insert, remove, move, update}` op set (longest-
 increasing-subsequence over prior indices preserved); applying it to a live
 `CellMap` keeps stable entries' value cells un-invalidated. `CellTree` composes
 the same guarantees node-by-node for an ordered keyed tree.
+
+## Reactive queue
+
+`QueueCell` is the native implementation of the [`lazily-spec`][spec] reactive
+queue ([Cell Model § Reactive queues](https://github.com/lazily-hub/lazily-spec/blob/main/cell-model.md#reactive-queues))
+— a FIFO collection composed of reactive cells, **not a new cell kind**. It is
+specified as a **single-producer, single-consumer (SPSC)** primitive;
+**MPSC** (multi-producer) is a *usage rule* on the same primitive — multiple
+producers push inside one `batch { … }` and the batch serializes the pushes into
+a deterministic order. There is no separate `MPSCQueueCell` type.
+
+The reactive shell owns the reader-kind version cells (`head` / `len` /
+`is_empty` / `is_full` / `closed`) and invalidates **by reader kind**: a push to
+a non-empty queue does NOT invalidate the `head` reader (head unchanged); a pop
+does. This reader-kind independence falls out of the `==` guard on `setCell` —
+after each op the shell re-derives each reader-kind cell from storage and writes
+it back, and a cell whose value did not change is not invalidated. The storage
+backend is pluggable via `QueueStorage`; the default `VecDequeStorage` is
+unbounded, and a bounded form exposes reactive backpressure via `is_full`.
+
+```kotlin
+val ctx = Context()
+val q = QueueCell.unbounded<String>(ctx)
+
+// SPSC: total FIFO.
+q.tryPush("a")
+q.tryPush("b")
+assertEquals("a", q.head())
+assertEquals(2, q.len())
+
+assertEquals("a", (q.tryPop() as QueuePop.Value).value)
+assertEquals("b", (q.tryPop() as QueuePop.Value).value)
+assertTrue(q.isEmpty())
+
+// MPSC: multiple producers push inside one batch → one invalidation pass.
+ctx.batch {
+    q.tryPush("p1-a")
+    q.tryPush("p2-a")
+    q.tryPush("p1-b")
+}
+assertEquals(3, q.len())
+
+// Bounded queue → reactive backpressure via is_full.
+val bq = QueueCell.bounded<Int>(ctx, 2)
+bq.tryPush(1); bq.tryPush(2)
+assertTrue(bq.isFull())            // at capacity
+assertEquals(QueuePushError.Full, bq.tryPush(3))
+(bq.tryPop() as QueuePop.Value)    // pop frees a slot
+assertFalse(bq.isFull())           // is_full invalidated (true → false)
+```
+
+The shell / storage split (`QueueStorage` interface + `VecDequeStorage` default)
+is the integration seam for future backends — a distributed `RaftQueueStorage`
+or an external-broker adapter (`KafkaStorage`, etc.) plugs into the same
+reactive shell without changing the API.
 
 ## Distributed CRDT plane
 

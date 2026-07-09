@@ -126,11 +126,21 @@ and coroutine-backed async (`AsyncContext`).
 - `StableId.kt` — manufactured identity for markdown text (`#lzstableid`):
   anchors, normalized content hashes, word-LCS similarity alignment,
   `assignStable_keys` flow through edits.
+- `Queue.kt` — `QueueCell` (SPSC reactive FIFO + MPSC-via-`batch()` usage rule)
+  + `QueueStorage` adapter interface + `VecDequeStorage` default backend
+  (`#lzqueue`). Reader-kind invalidation (head/len/is_empty/is_full/closed);
+  bounded reactive backpressure via `is_full`; closure lifecycle (drain /
+  Closed-distinct-from-Empty / idempotent+terminal). The shell / storage split
+  keeps the reactive shell storage-agnostic; the `==` guard on `setCell`
+  implements reader-kind independence for free. Conformance fixtures in
+  `conformance/collections/` (`queuecell_*.json`, loaded from the sibling
+  `lazily-spec` submodule) are replayed by `QueueCellConformanceTest`.
 - The five CRDT/semantic collection fixtures (`seqcrdt_convergence`,
   `textcrdt_convergence`, `textcrdt_delta_sync`, `semtree_incremental`,
   `stableid_alignment`) are replayed by `CollectionsCrdtConformanceTest`;
   together with `CollectionsConformanceTest` they cover all eight
-  `conformance/collections/` fixtures.
+  `conformance/collections/` fixtures (plus the five `queuecell_*.json`
+  fixtures replayed by `QueueCellConformanceTest`).
 
 ### Benchmarks
 - `Benchmarks.kt` — reactive-core microbenchmark harness (parity with lazily-rs
