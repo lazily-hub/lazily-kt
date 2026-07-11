@@ -7,7 +7,7 @@ IPC wire types, a reactive full-Harel state chart, an `AsyncContext` async
 reactive graph, a lock-backed `ThreadSafeContext`, an in-process `ShmBlobArena`
 blob host, and an agent-doc state-projection consumer.
 
-`io.github.lazily:lazily` · Kotlin 2.0.21 · JVM 21 · v0.18.0
+`io.github.lazily:lazily` · Kotlin 2.0.21 · JVM 21 · v0.19.0
 
 ## Feature Set
 
@@ -21,10 +21,10 @@ canonical matrix with per-cell notes and platform carve-outs lives in
 | --------- | :----: | :------: | :------: | :--: | :----: | :---: | :--: | :---: |
 | Reactive graph — `Cell` / `Slot` / `Signal` / `Effect` / memo / batch | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Reactive family (`ReactiveFamily`) — keyed cell/slot family + materialization mode (`#lzmatmode`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Thread-safe reactive family (`ThreadSafeReactiveFamily`) — `Send + Sync` keyed family + materialization confluence (`#lzmatmode`) | ✅ | ✅ | — | ✅ | — | ✅ | ✅ | ✅ |
-| Async reactive family (`AsyncReactiveFamily`) — keyed family + eventual transparency (`#lzmatmode`) | ✅ | ✅ | — | ✅ | — | ✅ | ✅ | ✅ |
-| Reactive family sync — membership propagation + materialize-on-ingest + derived-aggregate transparency (`#lzfamilysync`) | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ |
-| Thread-safe context (lock-backed) | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ |
+| Thread-safe reactive family (`ThreadSafeReactiveFamily`) — `Send + Sync` keyed family + materialization confluence (`#lzmatmode`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Async reactive family (`AsyncReactiveFamily`) — keyed family + eventual transparency (`#lzmatmode`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Reactive family sync — membership propagation + materialize-on-ingest + derived-aggregate transparency (`#lzfamilysync`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Thread-safe context (lock-backed) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Async reactive context | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Flat state machine | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Harel state charts | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -40,7 +40,7 @@ canonical matrix with per-cell notes and platform carve-outs lives in
 | Lossless tree — concurrent merge convergence | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Registers (LWW / MV) + `PnCounter` + `CellCrdt` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | IPC wire — `Snapshot` + `Delta` + `CrdtSync` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Shared-memory blob path (`ShmBlobArena`) | ✅ | ✅ | ✅ | ✅ | ~ | ✅ | ✅ | ✅ |
+| Shared-memory blob path (`ShmBlobArena`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Cross-process zero-copy transport (`BlobBackend` / shm / arrow) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Distributed CRDT plane (`CrdtPlaneRuntime` / anti-entropy) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Distributed plane — WebRTC transport + signaling | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
