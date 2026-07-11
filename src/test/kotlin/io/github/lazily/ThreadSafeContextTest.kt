@@ -197,12 +197,18 @@ class ThreadSafeContextTest {
         val srcCopy = src
         val derivedCopy = derived
         val pool = Executors.newSingleThreadExecutor()
+        // Establishes the happens-before edge under test: the write is published
+        // before the worker reads, so the worker deterministically observes it
+        // (without the gate the worker could read the pre-write value and race).
+        val published = CountDownLatch(1)
         try {
             val future = pool.submit<Int> {
+                published.await()
                 ctx.getCell(srcCopy) // cross-thread read through a cloned handle
                 ctx.get(derivedCopy)
             }
             ctx.setCell(src, 21)
+            published.countDown()
             // Worker observes the happens-before-published value.
             assertEquals(42, future.get(5, TimeUnit.SECONDS))
         } finally {
