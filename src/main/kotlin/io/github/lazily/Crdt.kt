@@ -124,6 +124,9 @@ fun interface CrdtCodec<V> {
         val long: CrdtCodec<Long> = CrdtCodec {
             ByteArray(8) { i -> (it shr (56 - 8 * i)).toByte() }
         }
+
+        /** Single-byte Boolean codec (`1` = true, `0` = false). */
+        val bool: CrdtCodec<Boolean> = CrdtCodec { byteArrayOf(if (it) 1 else 0) }
     }
 }
 
@@ -141,6 +144,9 @@ fun CrdtCodec<Long>.decode(bytes: ByteArray): Long {
     for (i in 0 until 8) v = (v shl 8) or (bytes[i].toLong() and 0xff)
     return v
 }
+
+/** Decode [bytes] via the [CrdtCodec.bool] codec. */
+fun CrdtCodec<Boolean>.decode(bytes: ByteArray): Boolean = bytes.isNotEmpty() && bytes[0].toInt() != 0
 
 private fun decodeInline(state: IpcValue, codec: CrdtCodec<*>): ByteArray =
     when (state) {
@@ -387,13 +393,16 @@ class ReplicatedCell<V : Any>(
 }
 
 @Suppress("UNCHECKED_CAST")
-private fun decodeValue(codec: CrdtCodec<*>, bytes: ByteArray): Any? =
+internal fun decodeCrdtValue(codec: CrdtCodec<*>, bytes: ByteArray): Any? =
     when (codec) {
         CrdtCodec.string -> CrdtCodec.string.decode(bytes)
         CrdtCodec.int -> CrdtCodec.int.decode(bytes)
         CrdtCodec.long -> CrdtCodec.long.decode(bytes)
+        CrdtCodec.bool -> CrdtCodec.bool.decode(bytes)
         else -> error("unsupported CRDT codec")
     }
+
+private fun decodeValue(codec: CrdtCodec<*>, bytes: ByteArray): Any? = decodeCrdtValue(codec, bytes)
 
 /**
  * Allocate a [ReplicatedCell] backed by a fresh root cell seeded with

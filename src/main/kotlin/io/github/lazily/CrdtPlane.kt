@@ -15,6 +15,39 @@ package io.github.lazily
 // frame applies 0 new ops.
 
 /**
+ * The base [NodeId] for entries a family materializes on first remote observation
+ * (`#lzfamilysync`). Family entry nodes are locally-private — keyed ops resolve by
+ * [NodeKey], never by raw NodeId — so this only needs to avoid colliding with
+ * application-assigned node ids; the runtime skips any id already in use.
+ */
+private const val FAMILY_NODE_BASE: Long = 1L shl 48
+
+/**
+ * A last-writer-wins family (`#lzfamilysync`): entries are `LwwRegister<V>` cells
+ * addressed by [NodeKey] `namespace/suffix`. Materializes a fresh entry cell from a
+ * remote op's converged bytes so a keyed op for an entry not registered locally is
+ * materialized on ingest instead of being dropped.
+ */
+private class LwwFamilyFactory<V : Any>(
+    val namespace: String,
+    val codec: CrdtCodec<V>,
+    private val clock: CrdtClock,
+) {
+    fun materialize(ctx: Context, op: CrdtOp): ReplicatedCell<V> {
+        val bytes = when (val state = op.state) {
+            is IpcValue.Inline -> state.toByteArray()
+            else -> error("family op requires Inline state")
+        }
+        @Suppress("UNCHECKED_CAST")
+        val value = decodeCrdtValue(codec, bytes) as V
+        // Seed the backing cell with the decoded value; the caller's applyRemote(op)
+        // sets the register's real stamp and drives the reactive graph.
+        val handle = CellHandle<V>(ctx.cellAny(value))
+        return ReplicatedCell(ctx, handle, LwwRegister(codec), codec, clock)
+    }
+}
+
+/**
  * The live runtime that bridges the distributed CRDT plane to a reactive graph's
  * `merge:crdt` root cells.
  *
@@ -43,6 +76,13 @@ class CrdtPlaneRuntime(private val peer: PeerId) {
     private val typedCells = LinkedHashMap<NodeId, ReplicatedCell<*>>()
     private val keyToNode = LinkedHashMap<NodeKey, NodeId>()
     private val nodeToKey = LinkedHashMap<NodeId, NodeKey>()
+
+    // -- Family sync (#lzfamilysync) -----------------------------------------
+    private val families = LinkedHashMap<String, LwwFamilyFactory<*>>()
+    private val familyMembers = LinkedHashMap<String, MutableList<NodeKey>>()
+    private var familyCtx: Context? = null
+    private var membershipEpochCell: CellHandle<Long>? = null
+    private var nextFamilyNode: Long = FAMILY_NODE_BASE
 
     /** The local replica identity. */
     fun peer(): PeerId = peer
@@ -116,9 +156,27 @@ class CrdtPlaneRuntime(private val peer: PeerId) {
             val node = resolveNode(op)
             if (log.containsKey(node to op.stamp)) continue
             clock.observe(op.stamp)
-            // Drive the registered reactive cell (if any); the raw plane state is
-            // recorded regardless so unregistered nodes still converge.
-            typedCells[node]?.applyRemote(op)
+            val typed = typedCells[node]
+            if (typed != null) {
+                typed.applyRemote(op)
+                recordNew(op, node)
+                applied++
+                continue
+            }
+            // Materialize-on-ingest (#lzfamilysync): a keyed op whose entry is not
+            // registered locally materializes it if its key belongs to a registered
+            // family, instead of being dropped. Record under the fresh local node so
+            // future ops for the key resolve + dedup correctly.
+            val materialized = maybeMaterializeFamily(op)
+            if (materialized != null) {
+                val (localNode, cell) = materialized
+                cell.applyRemote(op)
+                recordNew(op, localNode)
+                applied++
+                continue
+            }
+            // A non-family unregistered node: raw plane state only (introspectable
+            // via `value`), so unregistered nodes still converge as before.
             recordNew(op, node)
             applied++
         }
@@ -155,6 +213,105 @@ class CrdtPlaneRuntime(private val peer: PeerId) {
         val since = StampFrontier()
         for ((p, wire) in request.frontier) since.observe(p, wire)
         return syncFrameSince(since)
+    }
+
+    // -- Family sync (#lzfamilysync) -----------------------------------------
+
+    /**
+     * Register a last-writer-wins family under [namespace]. An inbound keyed op
+     * whose first [NodeKey] segment matches materializes a fresh entry on [ingest]
+     * (seeded from the op's converged register) instead of being dropped. Creates the
+     * membership signal on first call; build family entries with this runtime's
+     * [clock].
+     */
+    fun <V : Any> registerFamilyLww(ctx: Context, namespace: String, codec: CrdtCodec<V>) {
+        familyCtx = ctx
+        if (membershipEpochCell == null) membershipEpochCell = CellHandle(ctx.cellAny(0L))
+        familyMembers.getOrPut(namespace) { mutableListOf() }
+        families[namespace] = LwwFamilyFactory(namespace, codec, clock)
+    }
+
+    /**
+     * The reactive membership signal (`#lzfamilysync`): depend on it from a derived
+     * aggregate over a family so a remote-materialized key forces a recompute. `null`
+     * until the first family is registered.
+     */
+    fun membershipEpoch(): CellHandle<Long>? = membershipEpochCell
+
+    /** The materialized keys of family [namespace], in first-materialization order. */
+    fun familyKeys(namespace: String): List<NodeKey> =
+        familyMembers[namespace]?.toList() ?: emptyList()
+
+    /** The current converged value of family entry `namespace/keySuffix`. */
+    fun <V : Any> familyValueLww(namespace: String, keySuffix: String): V? {
+        val key = NodeKey.fromSegments(listOf(namespace, keySuffix))
+        val node = keyToNode[key] ?: return null
+        return typedValue<V>(node)
+    }
+
+    /**
+     * Insert or update local LWW family entry `namespace/keySuffix` to [value],
+     * returning the [CrdtOp] to broadcast (or `null` for a value-preserving update).
+     * Materializes the entry (and bumps membership) on first insert.
+     */
+    @Suppress("UNCHECKED_CAST")
+    fun <V : Any> familySetLww(namespace: String, keySuffix: String, value: V): CrdtOp? {
+        val ctx = familyCtx ?: error("register the family before setting entries")
+        val factory = families[namespace] as? LwwFamilyFactory<V>
+            ?: error("no family registered for namespace '$namespace'")
+        val key = NodeKey.fromSegments(listOf(namespace, keySuffix))
+        keyToNode[key]?.let { return localUpdate(it, value) }
+        // First local insert: seed a fresh entry at a real stamp and emit the op.
+        val node = mintFamilyNode()
+        val stamp = clock.tick()
+        val reg = LwwRegister(factory.codec)
+        reg.merge(value, stamp)
+        val handle = CellHandle<V>(ctx.cellAny(value))
+        val cell = ReplicatedCell(ctx, handle, reg, factory.codec, clock)
+        register(node, key, cell)
+        recordFamilyMember(namespace, key)
+        bumpMembershipEpoch()
+        val op = CrdtOp(node = node, key = key, stamp = stamp, state = IpcValue.Inline(factory.codec.encode(value)))
+        recordNew(op, node)
+        return op
+    }
+
+    private fun mintFamilyNode(): NodeId {
+        while (true) {
+            val candidate = nextFamilyNode
+            nextFamilyNode++
+            if (!typedCells.containsKey(candidate) && !rawState.containsKey(candidate)) return candidate
+        }
+    }
+
+    private fun recordFamilyMember(namespace: String, key: NodeKey) {
+        val members = familyMembers.getOrPut(namespace) { mutableListOf() }
+        if (!members.contains(key)) members.add(key)
+    }
+
+    private fun bumpMembershipEpoch() {
+        val cell = membershipEpochCell ?: return
+        val ctx = familyCtx ?: return
+        val current = ctx.getCellAny(cell.id) as? Long ?: 0L
+        ctx.setCellAny(cell.id, current + 1L)
+    }
+
+    /**
+     * If [op] is a keyed op belonging to a registered family whose entry is not yet
+     * registered locally, materialize it (fresh local node, indexed by the wire key)
+     * and return `(node, cell)`; otherwise `null`.
+     */
+    private fun maybeMaterializeFamily(op: CrdtOp): Pair<NodeId, ReplicatedCell<*>>? {
+        val key = op.key ?: return null
+        val namespace = key.segments().firstOrNull() ?: return null
+        val factory = families[namespace] ?: return null
+        val ctx = familyCtx ?: return null
+        val node = mintFamilyNode()
+        val cell = factory.materialize(ctx, op)
+        register(node, key, cell)
+        recordFamilyMember(namespace, key)
+        bumpMembershipEpoch()
+        return node to cell
     }
 
     // -- internals -----------------------------------------------------------
