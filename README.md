@@ -7,7 +7,7 @@ IPC wire types, a reactive full-Harel state chart, an `AsyncContext` async
 reactive graph, a lock-backed `ThreadSafeContext`, an in-process `ShmBlobArena`
 blob host, and an agent-doc state-projection consumer.
 
-`io.github.lazily:lazily` · Kotlin 2.0.21 · JVM 21 · v0.12.2
+`io.github.lazily:lazily` · Kotlin 2.0.21 · JVM 21 · v0.14.0
 
 ## Feature Set
 
@@ -20,7 +20,7 @@ canonical matrix with per-cell notes and platform carve-outs lives in
 | Feature | Rust | Python | Kotlin | JS | Dart | Zig | Go | C++ |
 | --------- | :----: | :------: | :------: | :--: | :----: | :---: | :--: | :---: |
 | Reactive graph — `Cell` / `Slot` / `Signal` / `Effect` / memo / batch | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Reactive family (`ReactiveFamily`) — keyed cell/slot family + materialization mode (`#lzmatmode`) | ✅ | — | — | — | — | — | — | — |
+| Reactive family (`ReactiveFamily`) — keyed cell/slot family + materialization mode (`#lzmatmode`) | ✅ | — | ✅ | ✅ | — | — | — | ✅ |
 | Thread-safe context (lock-backed) | ✅ | ✅ | ✅ | — | — | ✅ | ✅ | ✅ |
 | Async reactive context | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Flat state machine | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
