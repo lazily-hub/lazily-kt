@@ -85,6 +85,27 @@ and coroutine-backed async (`AsyncContext`).
   clonable value-class handles; per-thread (`ThreadLocal`) dependency tracking;
   reentrant callbacks; atomic cross-thread `batch`. `ThreadSafeStateMachine.kt`
   mirrors `StateMachine` over it (flat FSM safe from any sharing thread).
+- `ReactiveFamily.kt` — the unified keyed reactive family (`#lzmatmode`,
+  counterpart of `lazily-rs::ReactiveFamily<K, V, H>`): keys `K` map to per-entry
+  reactive nodes over `EntryKind` (`CellEntry` input cells / `SlotEntry` derived
+  slots) governed by `MaterializationMode` (eager default / lazy opt-in). Kotlin
+  picks the handle kind by factory: `eager`/`lazy`/`new` build a slot family,
+  `cells` the input-cell specialization. Laws: eager/lazy contract, observational
+  transparency, present-set monotonicity (proved in `lazily-formal`
+  `Materialization`).
+- `ThreadSafeReactiveFamily.kt` — the `Send + Sync` flavor (`#lzmatmode`,
+  counterpart of `lazily-rs::ThreadSafeReactiveFamily`): the same family over
+  `ThreadSafeContext` with a `ReentrantLock`-guarded present set, so a keyed
+  family can live in a cross-thread owner. Adds **materialization confluence**
+  (order-independent present set + observed values;
+  `materialize_present_comm`/`materialize_observe_comm`). `ThreadSafeCellEntry`/
+  `ThreadSafeSlotEntry`; replayed by `ThreadSafeReactiveFamilyConformanceTest`.
+- `AsyncReactiveFamily.kt` — the `AsyncContext` flavor (`#lzmatmode`, counterpart
+  of `lazily-rs::AsyncReactiveFamily`): derived slots resolve asynchronously so
+  `observe` returns a nullable `V?` (`null` while pending) and `observeAsync`
+  drives resolution — the **eventual-transparency** law (proved in
+  `lazily-formal` `AsyncMaterialization`). `AsyncCellEntry`/`AsyncSlotEntry`;
+  replayed by `AsyncReactiveFamilyConformanceTest`.
 - `StateGraphMirror.kt` — pure native mirror that applies `snapshot`/`delta`.
 - `StateProjectionClient.kt` / `StateProjectionBridgeSupport.kt` — agent-doc
   state-projection consumers.
