@@ -129,6 +129,14 @@ data class ShmBlobRef(
     val generation: Long,
     val epoch: Long,
     val checksum: Long,
+    /**
+     * Which pluggable [BlobBackend] resolves this descriptor (`#lzzcpy` wire
+     * routing metadata). Optional; defaults to [BlobBackendKind.Shm] and is
+     * **omitted on the wire when `Shm`** so legacy descriptors validate
+     * unchanged. The arena header itself is backend-agnostic and does not store
+     * `backend`.
+     */
+    val backend: BlobBackendKind = BlobBackendKind.Shm,
 ) {
     fun toJson(): JsonObject = buildJsonObject {
         put("offset", offset)
@@ -136,6 +144,7 @@ data class ShmBlobRef(
         put("generation", generation)
         put("epoch", epoch)
         put("checksum", checksum)
+        if (!backend.isDefault) put("backend", backend.wire)
     }
 
     companion object {
@@ -147,6 +156,9 @@ data class ShmBlobRef(
                 generation = obj.longField("generation"),
                 epoch = obj.longField("epoch"),
                 checksum = obj.longField("checksum"),
+                backend = (obj["backend"] as? JsonPrimitive)?.contentOrNull
+                    ?.let { BlobBackendKind.fromWire(it) }
+                    ?: BlobBackendKind.Shm,
             )
         }
     }
