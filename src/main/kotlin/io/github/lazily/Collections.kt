@@ -65,7 +65,9 @@ private val UNSET: Any = UnsetSentinel
 class CellMap<K : Any, V : Any>(
     private val ctx: Context,
     entries: List<Pair<K, V>> = emptyList(),
-) {
+) : ReactiveMap<K, V> {
+    /** [CellMap] is the input-cell specialization of [ReactiveMap]. */
+    override val entryKind: EntryKind get() = EntryKind.Cell
     private val entryCells: MutableMap<K, CellHandle<Any>> = LinkedHashMap()
     private val membershipCell: CellHandle<Any> = ctx.allocCell().also { cell ->
         ctx.setCellAny(cell.id, entries.map { it.first }.toLinkedSet())
@@ -113,6 +115,21 @@ class CellMap<K : Any, V : Any>(
 
     /** Whether [key] is currently a member (non-reactive snapshot). */
     fun containsNow(key: K): Boolean = key in (ctx.cellValue(membershipCell.id) as Set<*>)
+
+    // -- ReactiveMap present-set surface ----------------------------------
+    //
+    // A CellMap materializes an input cell per member key, so the "present"
+    // set is exactly the current membership / order (input cells are always
+    // materialized).
+
+    /** Whether [key] is currently materialized (present). Non-reactive; alias of [containsNow]. */
+    override fun isPresent(key: K): Boolean = containsNow(key)
+
+    /** The currently-materialized keys, in order. Non-reactive; alias of [keysNow]. */
+    override fun presentKeys(): List<K> = keysNow()
+
+    /** Number of currently-materialized entries. Non-reactive. */
+    override val presentCount: Int get() = keysNow().size
 
     // -- Order plane ------------------------------------------------------
 
@@ -274,24 +291,6 @@ private fun <K> List<K>.movedAfter(key: K, anchor: K): List<K> {
 }
 
 private fun <K> Iterable<K>.toLinkedSet(): Set<K> = linkedSetOf<K>().apply { addAll(this@toLinkedSet) }
-
-/**
- * Factory for same-typed [CellMap]s — the lazily-spec `CellFamily`. A family
- * fixes the value type [V] (and optionally a default) and mints collection
- * instances over it; entries remain ordinary cells, so the family adds no new
- * merge unit (`cell = merge unit` still holds per entry).
- */
-class CellFamily<V : Any>(private val default: (() -> V)? = null) {
-    /** Mint an empty [CellMap]. */
-    fun <K : Any> map(ctx: Context): CellMap<K, V> = CellMap(ctx)
-
-    /** Mint a [CellMap] seeded with [entries] in order. */
-    fun <K : Any> map(ctx: Context, entries: List<Pair<K, V>>): CellMap<K, V> = CellMap(ctx, entries)
-
-    /** Default value for newly-inserted entries, if configured. */
-    fun defaultOrThrow(): V = default?.invoke()
-        ?: error("CellFamily has no default value")
-}
 
 // -- Ordered keyed tree ------------------------------------------------------
 

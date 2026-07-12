@@ -286,7 +286,7 @@ lazily-kt replays the shared [`lazily-spec`][spec] conformance fixtures:
   tracking) — the spec's `thread_safe = host` row — is covered by
   `ThreadSafeContextTest`, including multi-thread convergence, cross-thread
   handle reads, and a thread-safe `ThreadSafeStateMachine`.
-- The keyed cell collections layer (`CellMap` / `CellFamily` / `CellTree` /
+- The keyed cell collections layer (`CellMap` / `SlotMap` / `CellTree` /
   keyed reconciliation) replays the shared `conformance/collections/` fixtures
   (`CollectionsConformanceTest`) — value / set-membership / order reactivity
   independence, stable handles, and atomic move.
@@ -380,7 +380,7 @@ mergeable sequence and text surfaces — the native counterparts of the
 
 ## Keyed cell collections
 
-`CellMap` (+ the `CellFamily` factory) and `CellTree` are the native
+`CellMap` / `SlotMap` and `CellTree` are the native
 implementation of the [`lazily-spec`][spec] keyed cell collections layer
 ([Cell Model § Keyed cell collections](https://github.com/lazily-hub/lazily-spec/blob/main/cell-model.md#keyed-cell-collections)) — a **composition of cells**, not a new cell kind. Each entry is an ordinary cell; a dedicated membership cell tracks the key set; a dedicated order cell tracks the ordered key list. The three reactive planes are independent by construction:
 
@@ -523,7 +523,7 @@ models lazily-kt is bound to:
   shares.
 - `test-lazily-formal` — `lazily-formal`: the full Harel state chart, the
   reactive-graph kernel (Slot/Cell/Signal/Effect), the keyed collection
-  (CellMap/CellFamily), the ordered tree (CellTree), keyed reconciliation (LIS),
+  (CellMap/SlotMap), the ordered tree (CellTree), keyed reconciliation (LIS),
   and the async slot state machine — the executable reference behind the
   conformance fixtures lazily-kt replays.
 

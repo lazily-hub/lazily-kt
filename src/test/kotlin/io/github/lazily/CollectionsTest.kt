@@ -102,10 +102,9 @@ class CollectionsTest {
     }
 
     @Test
-    fun `cell family mints typed maps`() {
+    fun `cell map mints typed maps`() {
         val ctx = Context()
-        val fam = CellFamily<Int>()
-        val map = fam.map<String>(ctx)
+        val map = CellMap<String, Int>(ctx)
         map.insert("x", 7)
         assertEquals(7, map.get("x"))
     }
