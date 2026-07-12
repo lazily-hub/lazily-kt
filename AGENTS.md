@@ -67,6 +67,15 @@ and coroutine-backed async (`AsyncContext`).
   and the multi-writer `CrdtSync` plane: `WireStamp`/`CrdtOp`/`CrdtSync` +
   `IpcMessage.CrdtSyncMessage`), kotlinx-serialization-free hand-rolled JSON
   that is byte-compatible with lazily-rs.
+- `ReliableSync.kt` — reliable sync (`#lzsync`, counterpart of
+  `lazily-rs::reliable_sync`): the pure-protocol `ResyncCoordinator` (gap → resync
+  decision table), at-least-once `DurableOutbox` (+ `InMemoryOutbox`), and
+  `OrSet`/`WireLwwRegister` liveness cells; plus the full-duplex `SyncDriver` loop
+  (`#sync-driver`) over the `IpcSink`/`IpcSource` transport seam
+  (`#lzsync-transport-seam`) — append-before-send, retain-and-stall on sink
+  failure, resync-on-reconnect replay, and receiver-cursor advertisement, driven
+  by host-injected `Clock`/`SnapshotProvider`. `SyncDriverTest` mirrors the Rust
+  SimWorld loop-shape tests.
 - `ShmBlobArena.kt` — in-process host for the shared-memory blob plane
   (counterpart of `lazily-rs::ShmBlobArena`): 40-byte LZSH header + FNV-1a-64,
   byte-compatible across rs/py/zig/kt (pinned by `arena_blob.json`).
