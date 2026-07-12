@@ -49,6 +49,8 @@ class WebRtcSink(
                 IpcMessage.DeltaMessage(msg.delta.filterReadable(permissions, peer))
             is IpcMessage.CrdtSyncMessage ->
                 IpcMessage.CrdtSyncMessage(msg.sync.filterReadable(permissions, peer))
+            // Reliable-sync control frames carry no node content; filtering is identity.
+            is IpcMessage.ResyncRequestMessage, is IpcMessage.OutboxAckMessage -> msg
         }
         val frame = try {
             filtered.encodeJson()

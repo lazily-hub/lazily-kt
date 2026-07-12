@@ -259,6 +259,8 @@ fun spillMessage(
             }
             IpcMessage.CrdtSyncMessage(message.sync.copy(ops = ops))
         }
+        // Reliable-sync control frames carry no blob payload to spill.
+        is IpcMessage.ResyncRequestMessage, is IpcMessage.OutboxAckMessage -> message
     }
     return SpillResult(next, total)
 }

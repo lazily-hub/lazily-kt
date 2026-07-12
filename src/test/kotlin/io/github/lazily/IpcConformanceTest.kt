@@ -286,6 +286,8 @@ class IpcConformanceTest {
                     assertEquals(it, sync.ops.size.toLong(), "op_count")
                 }
             }
+            // Reliable-sync control frames carry no assertion metadata here.
+            is IpcMessage.ResyncRequestMessage, is IpcMessage.OutboxAckMessage -> {}
         }
     }
 }

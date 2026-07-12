@@ -64,7 +64,9 @@ enum class LazilyFfiMessageKind(val code: Int) {
     Unknown(0),
     Snapshot(1),
     Delta(2),
-    CrdtSync(3);
+    CrdtSync(3),
+    ResyncRequest(4),
+    OutboxAck(5);
 
     companion object {
         fun fromCode(code: Int): LazilyFfiMessageKind =
@@ -132,6 +134,8 @@ object LazilyFfiChannel {
         is IpcMessage.SnapshotMessage -> LazilyFfiMessageKind.Snapshot
         is IpcMessage.DeltaMessage -> LazilyFfiMessageKind.Delta
         is IpcMessage.CrdtSyncMessage -> LazilyFfiMessageKind.CrdtSync
+        is IpcMessage.ResyncRequestMessage -> LazilyFfiMessageKind.ResyncRequest
+        is IpcMessage.OutboxAckMessage -> LazilyFfiMessageKind.OutboxAck
     }
 
     /**

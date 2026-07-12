@@ -512,6 +512,13 @@ data class Delta(
     fun isNextAfter(lastEpoch: Long): Boolean =
         baseEpoch == lastEpoch && epoch == baseEpoch + 1
 
+    /**
+     * The accepted-event span this delta advances: `epoch - baseEpoch` (usually 1,
+     * `> 1` for a coalesced multi-epoch-span delta; `#lzsync`, spec §
+     * Multi-epoch-span delta). Coerced to `>= 0` for a malformed backward delta.
+     */
+    fun span(): Long = (epoch - baseEpoch).coerceAtLeast(0)
+
     fun applyStatus(lastEpoch: Long): DeltaApplyStatus =
         if (isNextAfter(lastEpoch)) {
             DeltaApplyStatus.Apply
@@ -667,6 +674,33 @@ data class CrdtSync(
     }
 }
 
+/**
+ * Reliable-sync reverse-channel control frame: request a covering [Snapshot] on a
+ * detected gap (`#lzsync`, spec § ResyncCoordinator). Carries no node content.
+ */
+data class ResyncRequest(val fromEpoch: Long) {
+    fun toJson(): JsonObject = buildJsonObject { put("from_epoch", fromEpoch) }
+
+    companion object {
+        fun fromJson(element: JsonElement): ResyncRequest =
+            ResyncRequest(element.asObject("ResyncRequest").longField("from_epoch"))
+    }
+}
+
+/**
+ * Reliable-sync reverse-channel control frame: prove receipt through `throughEpoch`
+ * (`#lzsync`, spec § DurableOutbox). Advances the sender's outbox retention cursor
+ * and doubles as the reconnect resume cursor. Carries no node content.
+ */
+data class OutboxAck(val throughEpoch: Long) {
+    fun toJson(): JsonObject = buildJsonObject { put("through_epoch", throughEpoch) }
+
+    companion object {
+        fun fromJson(element: JsonElement): OutboxAck =
+            OutboxAck(element.asObject("OutboxAck").longField("through_epoch"))
+    }
+}
+
 sealed interface IpcMessage {
     fun toJson(): JsonObject
 
@@ -688,6 +722,20 @@ sealed interface IpcMessage {
         }
     }
 
+    /** Reliable-sync control frame (reverse channel): request a covering snapshot. */
+    data class ResyncRequestMessage(val request: ResyncRequest) : IpcMessage {
+        override fun toJson(): JsonObject = buildJsonObject {
+            put("ResyncRequest", request.toJson())
+        }
+    }
+
+    /** Reliable-sync control frame (reverse channel): ack / resume cursor. */
+    data class OutboxAckMessage(val ack: OutboxAck) : IpcMessage {
+        override fun toJson(): JsonObject = buildJsonObject {
+            put("OutboxAck", ack.toJson())
+        }
+    }
+
     fun encodeJson(): ByteArray =
         ipcJson.encodeToString(JsonElement.serializer(), toJson()).encodeToByteArray()
 
@@ -695,6 +743,8 @@ sealed interface IpcMessage {
         fun ofSnapshot(snapshot: Snapshot): IpcMessage = SnapshotMessage(snapshot)
         fun ofDelta(delta: Delta): IpcMessage = DeltaMessage(delta)
         fun ofCrdtSync(sync: CrdtSync): IpcMessage = CrdtSyncMessage(sync)
+        fun ofResyncRequest(request: ResyncRequest): IpcMessage = ResyncRequestMessage(request)
+        fun ofOutboxAck(ack: OutboxAck): IpcMessage = OutboxAckMessage(ack)
 
         fun decodeJson(data: ByteArray): IpcMessage =
             fromJson(ipcJson.parseToJsonElement(data.decodeToString()))
@@ -710,6 +760,8 @@ sealed interface IpcMessage {
                 "Snapshot" -> SnapshotMessage(Snapshot.fromJson(body))
                 "Delta" -> DeltaMessage(Delta.fromJson(body))
                 "CrdtSync" -> CrdtSyncMessage(CrdtSync.fromJson(body))
+                "ResyncRequest" -> ResyncRequestMessage(ResyncRequest.fromJson(body))
+                "OutboxAck" -> OutboxAckMessage(OutboxAck.fromJson(body))
                 else -> error("unknown IpcMessage variant: $tag")
             }
         }
