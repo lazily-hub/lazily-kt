@@ -236,4 +236,33 @@ class AgentDocStateConformanceTest {
         assertEquals("agent_doc.transport.patch", patch.typeTag)
         assertEquals("applied", payloadPhase(decodePayloadObject((patch.state as NodeState.Payload).bytes)))
     }
+
+    @Test
+    fun `GraphReplica folds the native fixtures to the same canonical projection`() {
+        // Pin the generic GraphReplica (`#lzsync` 3B clean split) to the SAME canonical
+        // native fixtures the hand-fold above uses: folding the native Snapshot then Delta
+        // must reach the identical node projection. This is what agent-doc's plugin
+        // projection now reads instead of the bespoke base64 WireDelta mirror.
+        val snapshot = (parseWire(loadFixture("snapshot_agent_doc_state.json")) as IpcMessage.SnapshotMessage).snapshot
+        val delta = (parseWire(loadFixture("delta_agent_doc_state.json")) as IpcMessage.DeltaMessage).delta
+
+        val replica = GraphReplica()
+        replica.applySnapshot(snapshot)
+        assertEquals(3, replica.nodeCount)
+        assertEquals(3L, replica.epoch)
+
+        replica.applyDelta(delta)
+        assertEquals(4, replica.nodeCount)
+        assertEquals(6L, replica.epoch)
+
+        fun phaseOf(id: Long): String? =
+            payloadPhase(decodePayloadObject(replica.node(id)!!.payload!!.map { it.toInt() and 0xff }))
+
+        assertEquals("agent_doc.closeout.cycle", replica.node(102L)!!.typeTag)
+        assertEquals("committed", phaseOf(102L))
+        assertEquals("agent_doc.queue.head", replica.node(103L)!!.typeTag)
+        assertEquals("completed", phaseOf(103L))
+        assertEquals("agent_doc.transport.patch", replica.node(104L)!!.typeTag)
+        assertEquals("applied", phaseOf(104L))
+    }
 }
