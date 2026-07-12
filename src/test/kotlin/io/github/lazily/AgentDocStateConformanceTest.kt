@@ -238,15 +238,15 @@ class AgentDocStateConformanceTest {
     }
 
     @Test
-    fun `GraphReplica folds the native fixtures to the same canonical projection`() {
-        // Pin the generic GraphReplica (`#lzsync` 3B clean split) to the SAME canonical
+    fun `GraphView folds the native fixtures to the same canonical projection`() {
+        // Pin the generic GraphView (`#lzsync` 3B clean split) to the SAME canonical
         // native fixtures the hand-fold above uses: folding the native Snapshot then Delta
         // must reach the identical node projection. This is what agent-doc's plugin
         // projection now reads instead of the bespoke base64 WireDelta mirror.
         val snapshot = (parseWire(loadFixture("snapshot_agent_doc_state.json")) as IpcMessage.SnapshotMessage).snapshot
         val delta = (parseWire(loadFixture("delta_agent_doc_state.json")) as IpcMessage.DeltaMessage).delta
 
-        val replica = GraphReplica()
+        val replica = GraphView()
         replica.applySnapshot(snapshot)
         assertEquals(3, replica.nodeCount)
         assertEquals(3L, replica.epoch)

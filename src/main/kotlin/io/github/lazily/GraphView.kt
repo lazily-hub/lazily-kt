@@ -17,7 +17,7 @@ package io.github.lazily
  * now layers its own projection on top of this generic replica rather than welding
  * domain logic into a lazily class.
  */
-class GraphReplica {
+class GraphView {
     /** A tracked node: its id, `type_tag`, and the producer's raw published payload bytes. */
     data class Node(val id: NodeId, val typeTag: String, val payload: ByteArray?) {
         override fun equals(other: Any?): Boolean =

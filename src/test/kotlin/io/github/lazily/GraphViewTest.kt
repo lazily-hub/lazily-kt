@@ -5,10 +5,10 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-class GraphReplicaTest {
+class GraphViewTest {
     @Test
     fun applies_native_snapshot_then_delta() {
-        val replica = GraphReplica()
+        val replica = GraphView()
         assertEquals(false, replica.isInitialized)
 
         replica.applySnapshot(
@@ -52,7 +52,7 @@ class GraphReplicaTest {
 
     @Test
     fun reemitted_delta_is_idempotent() {
-        val replica = GraphReplica()
+        val replica = GraphView()
         replica.applySnapshot(
             Snapshot(epoch = 1, nodes = listOf(NodeSnapshot(1L, "t", NodeState.Payload("a".toByteArray()))))
         )
