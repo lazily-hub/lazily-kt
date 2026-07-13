@@ -425,25 +425,199 @@ class QueueReaderHandles(
 )
 
 // ---------------------------------------------------------------------------
-// TopicCell / WorkQueueCell — future-work stubs
+// TopicCell — broadcast log with independent reactive subscriber cursors
 // ---------------------------------------------------------------------------
 
-// `TopicCell` (SPMC broadcast / MPMC pub-sub) and `WorkQueueCell` (true MPMC
-// with exclusive handoff) are genuinely distinct primitives — they differ in
-// *invalidation model and handoff semantics*, not in producer/consumer
-// cardinality (see `lazily-spec/cell-model.md` § "Future queue primitives").
-//
-// They are reserved for future work and are NOT in v1 conformance:
-//
-// - **TopicCell** — every subscriber receives every pushed element. Each
-//   subscriber maintains its own cursor; the topic retains elements until all
-//   cursors have advanced past them (GC frontier = slowest subscriber). Lands
-//   with the distributed-queue PRD Phase 3. Formal stub:
-//   `lazily-formal/LazilyFormal/TopicCell.lean`.
-//
-// - **WorkQueueCell** — N consumers compete for elements from a shared FIFO;
-//   each element is delivered to exactly one consumer (exclusive handoff). This
-//   requires an authority (designated leader peer) to serialize pop-assignment —
-//   pure CRDT cannot provide it. Lands with the distributed-queue PRD Phase 2
-//   (consensus core). Formal stub:
-//   `lazily-formal/LazilyFormal/WorkQueueCell.lean`.
+/** Whether a [TopicCell] subscription survives disconnect and holds safe GC. */
+enum class TopicDurability {
+    /** Cursor state persists while disconnected and participates in retention. */
+    Durable,
+
+    /** Session state is removed on disconnect and never participates in retention. */
+    Ephemeral,
+}
+
+/** Public state for one stable topic subscriber. */
+data class TopicSubscriptionSnapshot(
+    /** Absolute offset of the next element to read. */
+    val cursor: Long,
+    val durability: TopicDurability,
+    val connected: Boolean,
+)
+
+/** Atomic state required to recreate a [TopicCell] without moving durable cursors. */
+data class TopicSnapshot<T : Any>(
+    val baseOffset: Long = 0,
+    val elements: List<T> = emptyList(),
+    val subscriptions: Map<String, TopicSubscriptionSnapshot> = emptyMap(),
+)
+
+/** Result of subscribing one stable identity. */
+enum class TopicSubscribeOutcome {
+    Created,
+    Reconnected,
+    AlreadyConnected,
+}
+
+private data class TopicSubscription(
+    var cursor: Long,
+    val durability: TopicDurability,
+    var connected: Boolean,
+)
+
+/**
+ * Broadcast topic: every subscriber receives every published element using an
+ * independent, non-destructive cursor (`#lztopiccell`).
+ *
+ * Each subscriber owns a demand-driven reactive unread-suffix Slot. Publishing
+ * invalidates every connected subscriber; advance/disconnect/reconnect invalidate
+ * only the named subscriber. Safe GC removes only offsets below the slowest
+ * durable cursor and invalidates no subscriber.
+ */
+class TopicCell<T : Any>(
+    private val ctx: Context,
+    initial: TopicSnapshot<T> = TopicSnapshot(),
+) {
+    private var baseOffset: Long = initial.baseOffset
+    private val retained = ArrayDeque<T>(initial.elements.size)
+    private val subscriptions = LinkedHashMap<String, TopicSubscription>()
+    private val readers = HashMap<String, SlotHandle<List<T>>>()
+
+    init {
+        require(baseOffset >= 0) { "TopicCell baseOffset must be non-negative" }
+        retained.addAll(initial.elements)
+        val end = baseOffset + retained.size
+        for ((id, sub) in initial.subscriptions) {
+            require(sub.cursor in baseOffset..end) {
+                "TopicCell cursor for `$id` must be within the retained absolute offset range"
+            }
+            subscriptions[id] = TopicSubscription(sub.cursor, sub.durability, sub.connected)
+        }
+        for (id in subscriptions.keys) ensureReader(id)
+    }
+
+    private fun ensureReader(id: String): SlotHandle<List<T>> =
+        readers.getOrPut(id) {
+            SlotHandle(
+                ctx.slotAny(memo = true) {
+                    val sub = subscriptions[id]
+                    if (sub == null || !sub.connected) {
+                        emptyList<T>()
+                    } else {
+                        retained.drop((sub.cursor - baseOffset).coerceAtLeast(0).toInt())
+                    }
+                },
+            )
+        }
+
+    /**
+     * Create a cursor at the current tail, or reconnect an existing durable id
+     * without moving its cursor. Existing state owns the id's durability.
+     */
+    fun subscribe(id: String, durability: TopicDurability): TopicSubscribeOutcome {
+        val existing = subscriptions[id]
+        if (existing != null) {
+            if (existing.connected) return TopicSubscribeOutcome.AlreadyConnected
+            existing.connected = true
+            ctx.invalidateSlots(intArrayOf(ensureReader(id).id))
+            return TopicSubscribeOutcome.Reconnected
+        }
+        subscriptions[id] = TopicSubscription(endOffset(), durability, connected = true)
+        ensureReader(id)
+        return TopicSubscribeOutcome.Created
+    }
+
+    /** Reconnect a durable id; unknown ids are created at the current tail. */
+    fun reconnect(id: String): TopicSubscribeOutcome = subscribe(id, TopicDurability.Durable)
+
+    /**
+     * Disconnect one subscriber. Durable state remains offline at the same
+     * cursor; ephemeral state is removed. Returns whether state changed.
+     */
+    fun disconnect(id: String): Boolean {
+        val sub = subscriptions[id] ?: return false
+        if (!sub.connected) return false
+        if (sub.durability == TopicDurability.Ephemeral) subscriptions.remove(id) else sub.connected = false
+        val reader = if (sub.durability == TopicDurability.Ephemeral) readers.remove(id) else readers[id]
+        if (reader != null) ctx.invalidateSlots(intArrayOf(reader.id))
+        return true
+    }
+
+    /** Append exactly one element, leaving every cursor unchanged. */
+    fun publish(value: T): Long {
+        val offset = endOffset()
+        retained.addLast(value)
+        val roots =
+            subscriptions
+                .filterValues { it.connected && it.cursor <= offset }
+                .keys
+                .mapNotNull { readers[it]?.id }
+                .toIntArray()
+        ctx.invalidateSlots(roots)
+        return offset
+    }
+
+    /** Reactive unread suffix for one connected subscriber. */
+    @Suppress("UNCHECKED_CAST")
+    fun readStream(id: String): List<T> {
+        val reader = readers[id] ?: return emptyList()
+        return ctx.getSlotAny(reader.id) as List<T>
+    }
+
+    /** Reactive element at the subscriber's cursor, or null at the tail/offline. */
+    fun read(id: String): T? = readStream(id).firstOrNull()
+
+    /** Advance only [id], returning the element it passed. */
+    fun advance(id: String): T? {
+        val sub = subscriptions[id] ?: return null
+        if (!sub.connected || sub.cursor >= endOffset()) return null
+        val value = retained.elementAt((sub.cursor - baseOffset).toInt())
+        sub.cursor += 1
+        readers[id]?.let { ctx.invalidateSlots(intArrayOf(it.id)) }
+        return value
+    }
+
+    /**
+     * Remove the prefix below the minimum durable cursor, or everything when no
+     * durable subscription exists. Absolute cursors remain unchanged.
+     */
+    fun gc(): Int {
+        val frontier =
+            subscriptions.values
+                .asSequence()
+                .filter { it.durability == TopicDurability.Durable }
+                .map { it.cursor }
+                .minOrNull() ?: endOffset()
+        val remove = (frontier - baseOffset).toInt()
+        repeat(remove) { retained.removeFirst() }
+        baseOffset = frontier
+        return remove
+    }
+
+    fun baseOffset(): Long = baseOffset
+
+    fun endOffset(): Long = baseOffset + retained.size
+
+    /** Non-reactive retained-log snapshot. */
+    fun elements(): List<T> = retained.toList()
+
+    fun subscription(id: String): TopicSubscriptionSnapshot? =
+        subscriptions[id]?.let { TopicSubscriptionSnapshot(it.cursor, it.durability, it.connected) }
+
+    /** Handle to [id]'s demand-driven reactive unread suffix. */
+    fun readerHandle(id: String): SlotHandle<List<T>>? = readers[id]
+
+    /** Atomic durable/live-state snapshot suitable for restart. */
+    fun snapshot(): TopicSnapshot<T> =
+        TopicSnapshot(
+            baseOffset = baseOffset,
+            elements = retained.toList(),
+            subscriptions =
+                subscriptions.mapValues { (_, sub) ->
+                    TopicSubscriptionSnapshot(sub.cursor, sub.durability, sub.connected)
+                },
+        )
+}
+
+// WorkQueueCell remains separate future work: exclusive handoff across N
+// consumers requires an authority to serialize assignment.
