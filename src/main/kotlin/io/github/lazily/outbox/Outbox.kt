@@ -12,18 +12,20 @@ import io.github.lazily.OutboxStore
  * relay-role `Outbox<T>` type.
  */
 open class Outbox<S : OutboxStore>(val store: S) : DurableOutbox {
-    var ackedThrough: Long = store.loadCursor()
-        private set
+    private var localAckedThrough: Long = store.loadCursor()
+
+    val ackedThrough: Long
+        get() = maxOf(localAckedThrough, store.loadCursor())
 
     override fun append(epoch: Long, msg: IpcMessage) {
         store.put(epoch, msg.encodeJson())
     }
 
     override fun ackThrough(epoch: Long) {
-        if (epoch <= ackedThrough) return
-        store.saveCursor(epoch)
-        store.deleteThrough(epoch)
-        ackedThrough = epoch
+        val target = maxOf(epoch, localAckedThrough, store.loadCursor())
+        if (target > localAckedThrough) store.saveCursor(target)
+        store.deleteThrough(target)
+        localAckedThrough = target
     }
 
     override fun replayFrom(cursor: Long): List<Pair<Long, IpcMessage>> =

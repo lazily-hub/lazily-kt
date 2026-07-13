@@ -52,6 +52,11 @@ interface RoomOutboxDao {
 
     fun loadCursor(channel: String): Long?
 
+    /**
+     * Atomically persist `max(storedCursor, epoch)` for [channel]. A plain
+     * replace/upsert is invalid because a stale Room handle could overwrite a
+     * newer acknowledgement committed by another handle.
+     */
     fun saveCursor(channel: String, epoch: Long)
 }
 

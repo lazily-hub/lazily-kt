@@ -99,6 +99,17 @@ class CrdtTreeAndOutboxStoreTest {
     }
 
     @Test
+    fun staleRoomHandleCannotRegressSerializedCursor() {
+        val dao = FakeRoomDao()
+        val stale = Outbox(RoomStore(dao, "doc"))
+        val current = Outbox(RoomStore(dao, "doc"))
+        current.ackThrough(9)
+        stale.ackThrough(3)
+        assertEquals(9, stale.ackedThrough)
+        assertEquals(9, Outbox(RoomStore(dao, "doc")).ackedThrough)
+    }
+
+    @Test
     fun crdtTreeCanonicalFixtureReplay() {
         val scenarios = fixture("/conformance/crdt-tree/algebra.json")["scenarios"]!!.jsonArray
         val mergeScenario = scenarios[0].jsonObject
@@ -154,6 +165,18 @@ class CrdtTreeAndOutboxStoreTest {
         for (scenarioElement in scenarios) {
             val scenario = scenarioElement.jsonObject
             val store = InMemoryStore()
+            scenario["save_cursor"]?.jsonArray?.let { writes ->
+                val handles = mapOf("stale" to Outbox(store), "current" to Outbox(store))
+                for (writeElement in writes) {
+                    val write = writeElement.jsonObject
+                    handles.getValue(write["handle"]!!.jsonPrimitive.content)
+                        .ackThrough(write["epoch"]!!.jsonPrimitive.long)
+                }
+                val loaded = scenario["expect"]!!.jsonObject["loaded_cursor"]!!.jsonPrimitive.long
+                assertEquals(loaded, Outbox(store).ackedThrough)
+                return@let
+            }
+            if (scenario["save_cursor"] != null) continue
             val outbox = Outbox(store)
             for (epochElement in scenario["put_epochs"]!!.jsonArray) {
                 val epoch = epochElement.jsonPrimitive.long
