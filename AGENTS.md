@@ -170,6 +170,11 @@ and coroutine-backed async (`AsyncContext`).
   implements reader-kind independence for free. Conformance fixtures in
   `conformance/collections/` (`queuecell_*.json`, loaded from the sibling
   `lazily-spec` submodule) are replayed by `QueueCellConformanceTest`.
+- `WorkQueue.kt` — `WorkQueueCell` competing-consumer local authority
+  (`#lzworkqueue`): exclusive FIFO leases, stable item/fresh delivery ids,
+  worker-owned ack/nack, strict timeout redelivery, bounded attempts + DLQ,
+  and independent reactive lifecycle reader kinds. `WorkQueueConformanceTest`
+  replays the canonical `workqueue_*.json` fixtures.
 - The five CRDT/semantic collection fixtures (`seqcrdt_convergence`,
   `textcrdt_convergence`, `textcrdt_delta_sync`, `semtree_incremental`,
   `stableid_alignment`) are replayed by `CollectionsCrdtConformanceTest`;

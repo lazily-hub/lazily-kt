@@ -33,6 +33,7 @@ canonical matrix with per-cell notes and platform carve-outs lives in
 | Stable-id alignment (manufactured identity) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Reactive queue (`QueueCell` SPSC/MPSC + `QueueStorage` adapter) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Broadcast topic (`TopicCell`) — independent cursors + durable replay + safe GC (`#lztopiccell`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Competing-consumer work queue (`WorkQueueCell`) — exclusive leases + ack/nack + redelivery + DLQ (`#lzworkqueue`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Merge algebra + `MergeCell` — associative `MergePolicy` (`KeepLatest`/`Sum`/`Max`/`SetUnion`/`RawFifo`), `Cell ≡ MergeCell<KeepLatest>`, `Reactive`/`Source` split (`#relaycell`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | RelayCell — conflating relay + `BackpressurePolicy` + `SpillStore` + `Transport` + Inbox/Outbox + Rate/Window/Expiry/Priority/keyed policies (`#relaycell`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Free-text character CRDT (`TextCrdt`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -474,6 +475,22 @@ The shell / storage split (`QueueStorage` interface + `VecDequeStorage` default)
 is the integration seam for future backends — a distributed `RaftQueueStorage`
 or an external-broker adapter (`KafkaStorage`, etc.) plugs into the same
 reactive shell without changing the API.
+
+`WorkQueueCell` supplies the competing-consumer sibling: workers pull exclusive
+FIFO leases, settle them with worker-owned delivery IDs, and unacked items
+redeliver after the strict visibility deadline. Repeated failures route to the
+DLQ at `maxDeliveries`; `pendingLen`, `isEmpty`, `inFlightLen`, and
+`deadLetterLen` are independent reactive reads.
+
+```kotlin
+val work = WorkQueueCell<String>(ctx, visibilityTimeout = 30, maxDeliveries = 3)
+work.push("render-report")
+val delivery = requireNotNull(work.claim("worker-a", now = 100))
+check(work.ack("worker-a", delivery.deliveryId))
+```
+
+The instance is the local serialization point. Distributed/HA assignment must
+put `claim` behind a leader or consensus log.
 
 ## Distributed CRDT plane
 
