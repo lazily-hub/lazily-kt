@@ -56,7 +56,7 @@ class TextCrdt private constructor(
     private val elems: MutableMap<OpId, Elem>,
     private var peer: Long,
     private var counter: Long,
-) {
+) : CrdtTree<TextCrdt, Map<Long, Long>, List<TextOp>, String> {
     /** An empty buffer owned by [peer]. */
     constructor(peer: Long) : this(LinkedHashMap(), peer, 0L)
 
@@ -192,7 +192,7 @@ class TextCrdt private constructor(
      * deletion this replica holds, the greatest counter seen from that peer. An op
      * `(c, p)` is unknown to a partner iff `c > theirVv[p]` (0 when absent).
      */
-    fun versionVector(): Map<Long, Long> {
+    override fun versionVector(): Map<Long, Long> {
         val vv = HashMap<Long, Long>()
         fun bump(id: OpId) { vv[id.peer] = maxOf(vv[id.peer] ?: 0L, id.counter) }
         for ((id, e) in elems) {
@@ -208,7 +208,7 @@ class TextCrdt private constructor(
      * the partner converges the two replicas. A whole-state snapshot is
      * `deltaSince(emptyMap())`.
      */
-    fun deltaSince(theirVv: Map<Long, Long>): List<TextOp> {
+    override fun deltaSince(theirVv: Map<Long, Long>): List<TextOp> {
         fun seen(id: OpId) = id.counter <= (theirVv[id.peer] ?: 0L)
         val out = ArrayList<TextOp>()
         for ((id, e) in elems) {
@@ -224,7 +224,7 @@ class TextCrdt private constructor(
      * idempotent — the same convergence contract as [merge], from the transport
      * form. Returns whether the visible text changed.
      */
-    fun applyDelta(ops: List<TextOp>): Boolean {
+    override fun applyDelta(ops: List<TextOp>): Boolean {
         val before = text()
         for (op in ops) {
             counter = maxOf(counter, op.id.counter)
@@ -242,6 +242,10 @@ class TextCrdt private constructor(
         }
         return text() != before
     }
+
+    override fun value(): String = text()
+
+    override fun mergeFrom(other: TextCrdt): Boolean = merge(other)
 
     /**
      * Garbage-collect causally-stable deletion tombstones (#lztombgc).

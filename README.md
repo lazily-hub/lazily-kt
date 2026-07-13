@@ -372,7 +372,9 @@ mergeable sequence and text surfaces — the native counterparts of the
   concurrent free-text edits. Each character is an element with a unique `OpId`
   + left-origin; order is a pure deterministic function of the element set, so
   merge (a union of elements, tombstones sticky) converges regardless of
-  delivery order. Includes causally-stable tombstone GC.
+  delivery order. Includes causally-stable tombstone GC. It also implements the
+  `CrdtTree` document contract: identity-preserving merge, version-vector delta,
+  empty-frontier snapshot, and materialized value share one state model.
 - **`SemTree`** — a memoized semantic derivation over a `CellTree` (`#lzsemtree`).
   One memo slot per node folds `(node value, child derived values)`; editing one
   node recomputes only its **ancestor chain** (a sibling subtree stays cached),
@@ -382,6 +384,15 @@ mergeable sequence and text surfaces — the native counterparts of the
   text (survive reflow/reorder), and word-LCS similarity alignment (≥ 0.5 ⇒
   `Edited`, else `Inserted`). `assignStableKeys` flows identity through an edit
   so the reconciler emits `Update`, not remove+insert.
+
+## Durable outbox stores
+
+`io.github.lazily.outbox.Outbox<S>` owns the shared append/ack/prune/replay
+protocol while `OutboxStore` supplies ordered byte persistence. The default
+`InMemoryOutbox` follows that same protocol. Android hosts can implement the
+small `RoomOutboxDao` boundary and wrap it in `RoomStore`; Room annotations and
+database ownership stay in the application, so the portable JVM artifact does
+not acquire an Android dependency.
 
 ## Keyed cell collections
 

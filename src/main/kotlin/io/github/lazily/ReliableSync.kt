@@ -107,27 +107,6 @@ interface DurableOutbox {
     fun retainedEpochs(): List<Long>
 }
 
-/** In-memory [DurableOutbox] — correct within a process lifetime; the default. */
-class InMemoryOutbox : DurableOutbox {
-    private val entries = mutableListOf<Pair<Long, IpcMessage>>()
-    var ackedThrough: Long = 0
-        private set
-
-    override fun append(epoch: Long, msg: IpcMessage) {
-        entries.add(epoch to msg)
-    }
-
-    override fun ackThrough(epoch: Long) {
-        if (epoch > ackedThrough) ackedThrough = epoch
-        entries.retainAll { (e, _) -> e > ackedThrough }
-    }
-
-    override fun replayFrom(cursor: Long): List<Pair<Long, IpcMessage>> =
-        entries.filter { (e, _) -> e > cursor }.sortedBy { it.first }
-
-    override fun retainedEpochs(): List<Long> = entries.map { it.first }.sorted()
-}
-
 /**
  * An observed-remove set (OR-set) liveness cell. A `(doc, pid)` is present iff some
  * add-tag is not shadowed by a remove that observed it (add-wins over a stale

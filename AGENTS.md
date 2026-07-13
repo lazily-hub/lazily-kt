@@ -69,13 +69,17 @@ and coroutine-backed async (`AsyncContext`).
   that is byte-compatible with lazily-rs.
 - `ReliableSync.kt` — reliable sync (`#lzsync`, counterpart of
   `lazily-rs::reliable_sync`): the pure-protocol `ResyncCoordinator` (gap → resync
-  decision table), at-least-once `DurableOutbox` (+ `InMemoryOutbox`), and
+  decision table), at-least-once `DurableOutbox`, and
   `OrSet`/`WireLwwRegister` liveness cells; plus the full-duplex `SyncDriver` loop
   (`#sync-driver`) over the `IpcSink`/`IpcSource` transport seam
   (`#lzsync-transport-seam`) — append-before-send, retain-and-stall on sink
   failure, resync-on-reconnect replay, and receiver-cursor advertisement, driven
   by host-injected `Clock`/`SnapshotProvider`. `SyncDriverTest` mirrors the Rust
   SimWorld loop-shape tests.
+- `Outbox.kt` + `outbox/Outbox.kt` — storage-independent durable outbox
+  (`#lzdurableoutbox`): the five-operation ordered-byte `OutboxStore`, one shared
+  `Outbox<S>` append/ack/prune/replay protocol, `InMemoryStore`, and the
+  application-owned Room boundary (`RoomOutboxDao` / `RoomStore`).
 - `ShmBlobArena.kt` — in-process host for the shared-memory blob plane
   (counterpart of `lazily-rs::ShmBlobArena`): 40-byte LZSH header + FNV-1a-64,
   byte-compatible across rs/py/zig/kt (pinned by `arena_blob.json`).
@@ -148,7 +152,9 @@ and coroutine-backed async (`AsyncContext`).
   tombstones, causally-stable GC. Delta sync (`#lztextsync`):
   `versionVector` / `deltaSince` / `applyDelta` — a whole-state snapshot is
   `deltaSince({})`, and `applyDelta`-ing it rebuilds a mergeable replica
-  (OpIds preserved), pinned by the `textcrdt_delta_sync.json` fixture.
+  (OpIds preserved), pinned by the `textcrdt_delta_sync.json` fixture. It
+  implements the `CrdtTree` lossless-document contract (`CrdtTree.kt`), replayed
+  with the canonical `conformance/crdt-tree/algebra.json` fixture.
 - `SemTree.kt` — memoized semantic tree over a `CellTree` (`#lzsemtree`): one
   memo slot per node; an edit recomputes only the ancestor chain and the memo
   guard stops propagation when the fold is unchanged.
