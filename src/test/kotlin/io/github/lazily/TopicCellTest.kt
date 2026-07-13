@@ -2,6 +2,7 @@ package io.github.lazily
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -104,5 +105,49 @@ class TopicCellTest {
         topic.publish(2)
         assertFalse(ctx.isSet(alpha))
         assertFalse(ctx.isSet(beta))
+    }
+
+    @Test
+    fun tailAndOfflineAdvanceAreNoOps() {
+        val ctx = Context()
+        val topic = TopicCell<String>(ctx)
+        topic.subscribe("worker", TopicDurability.Durable)
+        topic.publish("a")
+
+        assertEquals("a", topic.advance("worker"))
+        assertNull(topic.advance("worker"))
+        assertEquals(1, topic.subscription("worker")?.cursor)
+
+        assertTrue(topic.disconnect("worker"))
+        topic.publish("b")
+        assertTrue(topic.readStream("worker").isEmpty())
+        assertNull(topic.advance("worker"))
+        assertEquals(1, topic.subscription("worker")?.cursor)
+
+        assertEquals(TopicSubscribeOutcome.Reconnected, topic.reconnect("worker"))
+        assertEquals(listOf("b"), topic.readStream("worker"))
+        assertEquals(1, topic.gc())
+        assertEquals(1, topic.baseOffset())
+        assertEquals(1, topic.subscription("worker")?.cursor)
+    }
+
+    @Test
+    fun snapshotRejectsDisconnectedEphemeralSubscription() {
+        assertFailsWith<IllegalArgumentException> {
+            TopicCell(
+                Context(),
+                TopicSnapshot(
+                    subscriptions =
+                        mapOf(
+                            "viewer" to
+                                TopicSubscriptionSnapshot(
+                                    cursor = 0,
+                                    durability = TopicDurability.Ephemeral,
+                                    connected = false,
+                                ),
+                        ),
+                ),
+            )
+        }
     }
 }

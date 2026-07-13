@@ -491,6 +491,9 @@ class TopicCell<T : Any>(
             require(sub.cursor in baseOffset..end) {
                 "TopicCell cursor for `$id` must be within the retained absolute offset range"
             }
+            require(sub.durability != TopicDurability.Ephemeral || sub.connected) {
+                "Disconnected ephemeral TopicCell subscription `$id` must be removed"
+            }
             subscriptions[id] = TopicSubscription(sub.cursor, sub.durability, sub.connected)
         }
         for (id in subscriptions.keys) ensureReader(id)
