@@ -79,6 +79,7 @@ class Context {
     @PublishedApi
     internal var batchDepth: Int = 0
     private val batchedCells: MutableSet<Int> = HashSet()
+    private val batchedSlots: MutableSet<Int> = HashSet()
 
     // -- Creation ----------------------------------------------------------
 
@@ -192,8 +193,10 @@ class Context {
             if (isBatching()) {
                 batchedCells.add(id)
             } else {
-                invalidateCellDependentsNow(id)
-                flushEffects()
+                // Store-without-cascade: flush only when the dependent cone holds
+                // an Effect; a cell with no active reactor stores its value +
+                // dirty-marks lazy slots but pays no flush (§4.0 merge cost law).
+                if (invalidateCellDependentsNow(id)) flushEffects()
             }
         }
     }
@@ -220,11 +223,32 @@ class Context {
     private fun flushBatched() {
         val cells = batchedCells.toList()
         batchedCells.clear()
+        val slots = batchedSlots.toList()
+        batchedSlots.clear()
         for (id in cells) invalidateCellDependentsNow(id)
+        for (id in slots) markSlotDirty(id, force = true)
         flushEffects()
     }
 
     private fun isBatching(): Boolean = batchDepth > 0
+
+    /**
+     * Batch-aware external invalidation of derived slots (used by demand-driven
+     * readers like [QueueCell] reader-kinds that derive from an out-of-graph
+     * mutation source). Marks each slot dirty and cascades to dependents, then
+     * flushes effects exactly once. Inside a [batch] the flush is deferred to the
+     * boundary. A slot with no subscriber cascades to nothing — an unobserved op
+     * pays effectively nothing.
+     */
+    internal fun invalidateSlots(ids: IntArray) {
+        if (isBatching()) {
+            for (id in ids) batchedSlots.add(id)
+            return
+        }
+        var scheduled = false
+        for (id in ids) if (markSlotDirty(id, force = true)) scheduled = true
+        if (scheduled) flushEffects()
+    }
 
     // -- Dispose -----------------------------------------------------------
 
@@ -327,31 +351,52 @@ class Context {
 
     private fun notifySlotValueChanged(id: Int) {
         val deps = (nodes[id] as? Node.Slot)?.dependents?.toList() ?: return
-        for (d in deps) invalidateDependentFromChangedValue(d)
+        for (d in deps) {
+            // Skip a dependent that is currently on the tracking stack: it is
+            // mid-recompute and reading this slot right now, so it will observe
+            // the fresh value directly — re-invalidating it would redundantly
+            // re-run it (glitch-free guarantee). This matters when a demand-driven
+            // reader Slot recomputes inside the very Effect reading it.
+            if (d in trackingStack) continue
+            invalidateDependentFromChangedValue(d)
+        }
     }
 
     // -- Internals: invalidation propagation ------------------------------
 
-    private fun invalidateCellDependentsNow(id: Int) {
-        val deps = (nodes[id] as? Node.Cell)?.dependents?.toList() ?: return
-        for (d in deps) invalidateDependentFromChangedValue(d)
+    /** Returns true iff at least one Effect was scheduled (store-without-cascade
+     *  fast path: a false result means no flush is owed). */
+    private fun invalidateCellDependentsNow(id: Int): Boolean {
+        val deps = (nodes[id] as? Node.Cell)?.dependents?.toList() ?: return false
+        var scheduled = false
+        for (d in deps) if (invalidateDependentFromChangedValue(d)) scheduled = true
+        return scheduled
     }
 
-    private fun invalidateDependentFromChangedValue(id: Int) {
-        if (nodes[id] is Node.Effect) scheduleEffect(id, force = true)
-        else markSlotDirty(id, force = true)
+    private fun invalidateDependentFromChangedValue(id: Int): Boolean {
+        if (nodes[id] is Node.Effect) {
+            scheduleEffect(id, force = true)
+            return true
+        }
+        return markSlotDirty(id, force = true)
     }
 
-    private fun markSlotDirty(id: Int, force: Boolean) {
-        val node = nodes[id] as? Node.Slot ?: return
+    private fun markSlotDirty(id: Int, force: Boolean): Boolean {
+        val node = nodes[id] as? Node.Slot ?: return false
         val shouldPropagate = !node.dirty || (force && !node.forceRecompute)
         node.dirty = true
         if (force) node.forceRecompute = true
-        if (!shouldPropagate) return
+        if (!shouldPropagate) return false
+        var scheduled = false
         for (d in node.dependents.toList()) {
-            if (nodes[d] is Node.Effect) scheduleEffect(d, force = false)
-            else markSlotDirty(d, force = false)
+            if (nodes[d] is Node.Effect) {
+                scheduleEffect(d, force = false)
+                scheduled = true
+            } else if (markSlotDirty(d, force = false)) {
+                scheduled = true
+            }
         }
+        return scheduled
     }
 
     // -- Internals: effect scheduling / flush ------------------------------

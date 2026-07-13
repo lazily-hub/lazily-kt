@@ -134,14 +134,18 @@ interface QueueStorage<T : Any> {
      */
     fun tryPop(): QueuePop<T>
 
-    /** Peek the current head element without removing it. `null` when empty. */
-    fun peek(): T?
+    /**
+     * **Optional capability.** Peek the current head element without removing
+     * it, `null` when empty. The default returns `null` — a backend that cannot
+     * peek (a raw channel) is fully conforming and simply has no `head` reader.
+     */
+    fun peek(): T? = null
 
-    /** Current number of buffered elements. */
+    /** Current number of buffered elements. **Required.** */
     fun len(): Int
 
-    /** Bounded capacity, or `null` for an unbounded backend. When non-null, the shell exposes `is_full` as a reactive read. */
-    fun capacity(): Int?
+    /** **Optional capability.** Bounded capacity, or `null` for an unbounded backend (the default). When non-null, the shell exposes `is_full` as a reactive read. */
+    fun capacity(): Int? = null
 
     /** Whether the queue has been closed. Close is terminal — once true, it stays true. */
     fun isClosed(): Boolean
@@ -244,24 +248,30 @@ class QueueCell<T : Any, S : QueueStorage<T>>(
     /** The backing storage (exposed for [VecDequeStorage]-specific extensions). */
     internal val storage: S = storage
 
-    // Reader-kind version cells. The shell re-derives these from storage after
-    // each op; the `==` guard on `setCell` means a cell whose value did not
-    // change is not invalidated — this is what implements reader-kind
-    // independence for free.
-    private val headCell: CellHandle<Any>
-    private val lenCell: CellHandle<Int>
-    private val isEmptyCell: CellHandle<Boolean>
-    private val isFullCell: CellHandle<Boolean>
+    // Demand-driven reader-kinds: memoized Slots deriving from storage (were
+    // eagerly-Set Cells). Each re-derives on first read after invalidation; the
+    // shell invalidates only the ones that provably changed on an op (see
+    // [invalidateReaders]). `closed` stays a Cell (a direct input, set by
+    // [close]). The head slot holds either [NO_HEAD] (empty / no peek) or a real
+    // element (it is typed `Any` because a Slot value cannot be null).
+    private val headSlot: SlotHandle<Any>
+    private val lenSlot: SlotHandle<Int>
+    private val isEmptySlot: SlotHandle<Boolean>
+    private val isFullSlot: SlotHandle<Boolean>
     private val closedCell: CellHandle<Boolean>
 
+    // `capacity` is an optional, fixed backend capability — cache it once.
+    private val cap: Int?
+
     init {
-        val len0 = storage.len()
-        val cap0 = storage.capacity()
-        headCell = CellHandle(ctx.cellAny(storage.peek() ?: NO_HEAD))
-        lenCell = ctx.cell(len0)
-        isEmptyCell = ctx.cell(len0 == 0)
-        isFullCell = ctx.cell(cap0?.let { len0 >= it } ?: false)
-        closedCell = ctx.cell(storage.isClosed())
+        val s = storage
+        cap = s.capacity()
+        val bound = cap
+        headSlot = ctx.memo { s.peek() ?: NO_HEAD }
+        lenSlot = ctx.memo { s.len() }
+        isEmptySlot = ctx.memo { s.len() == 0 }
+        isFullSlot = ctx.memo { bound?.let { s.len() >= it } ?: false }
+        closedCell = ctx.cell(s.isClosed())
     }
 
     companion object {
@@ -289,22 +299,19 @@ class QueueCell<T : Any, S : QueueStorage<T>>(
      * law. `closed` is intentionally NOT touched here: it only changes via
      * [close].
      */
-    private fun syncContent() {
-        val s = storage
-        val lenVal = s.len()
-        val isFullVal = s.capacity()?.let { lenVal >= it } ?: false
-        val headVal = s.peek() ?: NO_HEAD
-        val isEmptyVal = lenVal == 0
-        // Batch the writes: a push/pop is a single atomic op, so its reader-kind
-        // cells must transition together. Without the batch, each setCell
-        // flushes effects immediately and an observer could glitch (len bumped
-        // before is_full flips).
-        ctx.batch {
-            setCellAny(headCell.id, headVal)
-            setCell(lenCell, lenVal)
-            setCell(isEmptyCell, isEmptyVal)
-            setCell(isFullCell, isFullVal)
-        }
+    private fun invalidateReaders(lenBefore: Int, lenAfter: Int, headChanged: Boolean) {
+        // Collect the ids of exactly the reader Slots whose value provably
+        // changed, then invalidate them together (one flush) so an observer never
+        // sees a partial state. No reader value is derived here — each Slot
+        // re-derives lazily on its next read; an unobserved reader pays nothing.
+        val ids = IntArray(4)
+        var n = 0
+        ids[n++] = lenSlot.id // len always changes on a successful op
+        if ((lenBefore == 0) != (lenAfter == 0)) ids[n++] = isEmptySlot.id
+        val bound = cap
+        if (bound != null && (lenBefore >= bound) != (lenAfter >= bound)) ids[n++] = isFullSlot.id
+        if (headChanged) ids[n++] = headSlot.id
+        ctx.invalidateSlots(ids.copyOf(n))
     }
 
     /**
@@ -320,8 +327,10 @@ class QueueCell<T : Any, S : QueueStorage<T>>(
      * capacity. Does not touch `closed`.
      */
     fun tryPush(value: T): QueuePushError? {
+        val lenBefore = storage.len()
         val err = storage.tryPush(value)
-        if (err == null) syncContent()
+        // Head changes on a push only when the queue was empty.
+        if (err == null) invalidateReaders(lenBefore, lenBefore + 1, lenBefore == 0)
         return err
     }
 
@@ -338,8 +347,10 @@ class QueueCell<T : Any, S : QueueStorage<T>>(
      * when transitioning off capacity.
      */
     fun tryPop(): QueuePop<T> {
+        val lenBefore = storage.len()
         val result = storage.tryPop()
-        if (result is QueuePop.Value) syncContent()
+        // A successful pop always advances head and decrements len.
+        if (result is QueuePop.Value) invalidateReaders(lenBefore, lenBefore - 1, true)
         return result
     }
 
@@ -362,33 +373,33 @@ class QueueCell<T : Any, S : QueueStorage<T>>(
     /** Reactive read of the current head value. `null` when the queue is empty. A reader is invalidated when the head value *changes* — every pop, and a push only when transitioning from empty. */
     @Suppress("UNCHECKED_CAST")
     fun head(): T? {
-        val v = ctx.getCell(headCell)
+        val v = ctx.get(headSlot)
         return if (v === NO_HEAD) null else v as T
     }
 
     /** Reactive read of the number of buffered elements. Invalidated whenever the count changes (every successful push/pop). */
-    fun len(): Int = ctx.getCell(lenCell)
+    fun len(): Int = ctx.get(lenSlot)
 
     /** Reactive emptiness check. Invalidated only on the empty ↔ non-empty transition. */
-    fun isEmpty(): Boolean = ctx.getCell(isEmptyCell)
+    fun isEmpty(): Boolean = ctx.get(isEmptySlot)
 
     /** Reactive fullness check (only meaningful when the backend is bounded). Invalidated on the full ↔ not-full transition — this is the backpressure signal: a producer observes `isFull` and backs off; a consumer's pop that transitions full → not-full invalidates the producer's `isFull` subscription and the producer resumes. For an unbounded backend this is always `false` and never invalidates. */
-    fun isFull(): Boolean = ctx.getCell(isFullCell)
+    fun isFull(): Boolean = ctx.get(isFullSlot)
 
     /** Reactive read of the closed flag. Invalidated only on the open → closed transition. */
     fun isClosed(): Boolean = ctx.getCell(closedCell)
 
-    /** Handle to the `head` reader-kind cell, for wiring derived computeds directly. Subscribe-to-head semantics: invalidated on head-value change. */
-    fun headHandle(): CellHandle<Any> = headCell
+    /** Handle to the `head` reader-kind Slot, for wiring derived computeds directly. Subscribe-to-head semantics: invalidated on head-value change. */
+    fun headHandle(): SlotHandle<Any> = headSlot
 
     // -- Non-reactive storage access ---------------------------------------
 
-    /** The backend's capacity, or `null` if unbounded. */
-    fun capacity(): Int? = storage.capacity()
+    /** The backend's capacity, or `null` if unbounded. Cached at construction. */
+    fun capacity(): Int? = cap
 
-    /** Handles to the reader-kind cells, for advanced wiring (e.g. effects that subscribe to multiple reader kinds). */
+    /** Handles to the reader-kinds, for advanced wiring (e.g. effects that subscribe to multiple reader kinds). The four derived reader-kinds are Slots; `closed` is a Cell. */
     fun readerHandles(): QueueReaderHandles =
-        QueueReaderHandles(headCell, lenCell, isEmptyCell, isFullCell, closedCell)
+        QueueReaderHandles(headSlot, lenSlot, isEmptySlot, isFullSlot, closedCell)
 }
 
 /**
@@ -399,16 +410,16 @@ class QueueCell<T : Any, S : QueueStorage<T>>(
  */
 fun <T : Any> QueueCell<T, VecDequeStorage<T>>.elements(): List<T> = storage.elements()
 
-/** Handles to all five reader-kind cells of a [QueueCell], for effects that need to subscribe to several reader kinds at once. */
+/** Handles to all five reader-kinds of a [QueueCell], for effects that need to subscribe to several reader kinds at once. The four derived reader-kinds are demand-driven Slots; `closed` is a Cell (a direct input). */
 class QueueReaderHandles(
-    /** The head value cell (`NO_HEAD` sentinel when empty). */
-    val head: CellHandle<Any>,
-    /** The element count cell. */
-    val len: CellHandle<Int>,
+    /** The head value slot (`NO_HEAD` sentinel when empty). */
+    val head: SlotHandle<Any>,
+    /** The element count slot. */
+    val len: SlotHandle<Int>,
     /** Whether the queue is empty. */
-    val isEmpty: CellHandle<Boolean>,
+    val isEmpty: SlotHandle<Boolean>,
     /** Whether the queue is at capacity (bounded backpressure signal). */
-    val isFull: CellHandle<Boolean>,
+    val isFull: SlotHandle<Boolean>,
     /** Whether the queue has been closed. */
     val closed: CellHandle<Boolean>,
 )

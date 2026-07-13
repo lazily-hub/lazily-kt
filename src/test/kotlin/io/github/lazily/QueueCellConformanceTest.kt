@@ -311,6 +311,75 @@ class QueueCellConformanceTest {
         assertEquals(2, q.head(), "head after pop")
     }
 
+    /**
+     * A raw-channel-style backend implementing ONLY the required contract —
+     * tryPush / tryPop / len / isClosed / close — using the default (absent)
+     * peek/capacity. Proves the minimal contract (Phase 0 #relaycell): fully
+     * conforming, with no head reader and never full.
+     */
+    private class MinimalFifo<T : Any> : QueueStorage<T> {
+        private val buf = ArrayDeque<T>()
+        private var closed = false
+
+        override fun tryPush(value: T): QueuePushError? {
+            if (closed) return QueuePushError.Closed
+            buf.addLast(value)
+            return null
+        }
+
+        override fun tryPop(): QueuePop<T> =
+            if (buf.isNotEmpty()) QueuePop.Value(buf.removeFirst())
+            else if (closed) QueuePop.Failed(QueuePopError.Closed)
+            else QueuePop.Failed(QueuePopError.Empty)
+
+        override fun len(): Int = buf.size
+        override fun isClosed(): Boolean = closed
+        override fun close() {
+            closed = true
+        }
+        // NB: no peek(), no capacity() — the interface defaults apply.
+    }
+
+    @Test fun `raw channel backend conforms to minimal contract`() {
+        val ctx = Context()
+        val q = QueueCell<Int, MinimalFifo<Int>>(ctx, MinimalFifo())
+
+        assertTrue(q.isEmpty(), "new minimal queue is empty")
+        assertNullError(q.tryPush(1), "push 1")
+        assertNullError(q.tryPush(2), "push 2")
+        assertEquals(2, q.len(), "len after pushes")
+
+        // No peek → no head reader (null); no capacity → never full.
+        assertEquals(null, q.head(), "no peek capability → head is null")
+        assertFalse(q.isFull(), "unbounded → never full")
+        assertEquals(null, q.capacity(), "no capacity capability → unbounded")
+
+        assertEquals(1, (q.tryPop() as QueuePop.Value).value, "FIFO pop 1")
+        assertEquals(2, (q.tryPop() as QueuePop.Value).value, "FIFO pop 2")
+        assertTrue(q.isEmpty(), "empty after drain")
+
+        q.close()
+        assertTrue(q.isClosed(), "closed after close()")
+        assertEquals(QueuePushError.Closed, q.tryPush(3), "push after close rejected")
+        assertTrue(q.tryPop() is QueuePop.Failed, "pop on closed empty fails")
+    }
+
+    @Test fun `raw channel reader kinds stay reactive`() {
+        val ctx = Context()
+        val q = QueueCell<Int, MinimalFifo<Int>>(ctx, MinimalFifo())
+        val log = mutableListOf<Int>()
+        ctx.effect {
+            log.add(q.len())
+            null
+        }
+
+        assertEquals(listOf(0), log, "initial len sample")
+        q.tryPush(10)
+        assertEquals(listOf(0, 1), log, "push invalidates len reader")
+        q.tryPop()
+        assertEquals(listOf(0, 1, 0), log, "pop invalidates len reader")
+    }
+
     @Test fun `vecdeque storage snapshot is fifo order`() {
         val storage = VecDequeStorage<Int>(4)
         assertNullError(storage.tryPush(1), "push 1")
