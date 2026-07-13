@@ -170,6 +170,21 @@ and coroutine-backed async (`AsyncContext`).
   together with `CollectionsConformanceTest` they cover all eight
   `conformance/collections/` fixtures (plus the five `queuecell_*.json`
   fixtures replayed by `QueueCellConformanceTest`).
+- `Merge.kt` — RelayCell Phase 1 (`#relaycell`): the `MergePolicy` merge algebra
+  (associative `⊕`, `commutative`/`idempotent`/`conflates` flags), policies
+  (`keepLatest`/`sum`/`max`/`setUnion`/`rawFifo`), `MergeCell<T>` (`Cell ≡
+  MergeCell(KeepLatest)`, backed by a cell so it inherits the store-guard), and
+  the `Reactive<T>` read supertype + `Source<T>` write sub-interface. Law-tests +
+  `mergecell_algebra.json` fixture replay in `MergeTest`.
+- `Relay.kt` — RelayCell Phases 2–6 (`#relaycell`): the in-proc `RelayCell<T>`
+  conflating relay (hot head + reactive `BackpressurePolicy` cells + `Overflow`
+  Block/DropNewest/DropOldest/Conflate/Spill + demand-driven `depth`/`isFull`/
+  `isEmpty` slots; construction rejects Conflate for `rawFifo`); `SpillStore<T>`
+  paged durable tail (`SpillMode`, `reconstruct`=spill_lossless,
+  `replayUnacked`=idempotent); `RelayTransport<T>` seam (`InProcTransport`/
+  `FramedTransport`); `Outbox<T>`/`Inbox<T>` role facades; and the Phase-6
+  policies (`RatePolicy`/`WindowPolicy`/`ExpiryPolicy`/`PriorityStorage<T>`/
+  `KeyedRelay<K,T>`). Logical-clock time for determinism. Spike in `RelayTest`.
 
 ### Benchmarks
 - `Benchmarks.kt` — reactive-core microbenchmark harness (parity with lazily-rs
