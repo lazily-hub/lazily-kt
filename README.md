@@ -7,7 +7,7 @@ IPC wire types, a reactive full-Harel state chart, an `AsyncContext` async
 reactive graph, a lock-backed `ThreadSafeContext`, an in-process `ShmBlobArena`
 blob host, and an agent-doc state-projection consumer.
 
-`io.github.lazily:lazily` · Kotlin 2.0.21 · JVM 21 · v0.19.0
+`io.github.lazily:lazily` · Kotlin 2.0.21 · JVM 21 · v0.29.0
 
 ## Feature Set
 
@@ -19,7 +19,7 @@ canonical matrix with per-cell notes and platform carve-outs lives in
 <!-- coverage-table:start -->
 | Feature | Rust | Python | Kotlin | JS | Dart | Zig | Go | C++ |
 | --------- | :----: | :------: | :------: | :--: | :----: | :---: | :--: | :---: |
-| Reactive graph — `Cell` / `Slot` / `Signal` / `Effect` / memo / batch | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Reactive graph — core `Cell` / `Slot` / `Effect` (+ derived `Signal` = `Slot.eager`) / memo / batch | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Keyed-map materialization (`SlotMap`) — mint-on-access derived slots: transparency + deferral (`#lzmatmode`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Thread-safe keyed map (`ThreadSafeSlotMap`) — `Send + Sync` + materialization confluence (`#lzmatmode`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Async keyed map (`AsyncSlotMap`) — eventual transparency (`#lzmatmode`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -59,6 +59,14 @@ canonical matrix with per-cell notes and platform carve-outs lives in
 | Permission boundary (`PeerPermissions` / `RemoteOp`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Capability negotiation (`SessionHandshake`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Instrumentation / benchmarks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Temporal sources — `TimerCell` / `IntervalCell` / `CronCell` / `DeadlineCell` over a logical clock (`#lztime`) | ✅ | — | ✅ | ✅ | — | — | — | — |
+| Rate-shaping operators — `DebounceCell` / `ThrottleCell` / `SampleCell` / `ProbabilisticSampleCell` (`#lzrateshape`) | ✅ | — | ✅ | ✅ | — | — | — | — |
+| Membership + failure detection — `MembershipCell` (SWIM + Phi-accrual) / `PeerSet` / `PeerChangeEvent` (`#lzmemb`) | ✅ | — | ✅ | ✅ | — | — | — | — |
+| Distributed coordination — `LeaseCell` / `LeaderCell` / `LockCell` / `SemaphoreCell` / `BarrierCell`+`QuorumCell` (`#lzcoord`) | ✅ | — | ✅ | ✅ | — | — | — | — |
+| Presence + ephemeral plane — `PresenceCell` / `AwarenessCell` / `EphemeralCell` + `Ephemeral`/`Durable` markers (`#lzpresence`) | ✅ | — | ✅ | ✅ | — | — | — | — |
+| Stream windowing — `TumblingWindow` / `SlidingWindow` / `SessionWindow` over the merge algebra (`#lzwindow`) | ✅ | — | ✅ | ✅ | — | — | — | — |
+| Fault tolerance — `CircuitBreakerCell` / `RetryPolicyCell` / `BulkheadCell` / `TimeoutCell` (`#lzresilience`) | ✅ | — | ✅ | ✅ | — | — | — | — |
+| Embedded-service plane — `HealthCell` / `ReadinessCell` / `DiscoveryCell` / `ServiceRegistry` (`#lzservice`) | ✅ | — | ✅ | ✅ | — | — | — | — |
 <!-- coverage-table:end -->
 
 CRDT convergence and the wire protocol are pinned by the shared conformance fixtures
@@ -73,15 +81,18 @@ lazily-kt mirrors lazily-rs `Context` semantics across all three context layers
   after an upstream change.
 - **Cell** — a mutable source value that invalidates dependent Slots/Signals
   when it changes.
-- **Signal** — an *eager* derived value (a memo Slot plus a puller Effect) that
-  recomputes the instant a dependency changes — the value is materialized by the
-  time `setCell` / `batch` returns, with no intermediate unset value.
 - **Effect** — a side-effecting observer that reruns whenever a tracked
   dependency invalidates; a cleanup closure runs before each rerun and on
   dispose.
 
-Values are **lazy by default**; reach for `Signal` when you need eager push
-semantics. Handles (`SlotHandle` / `CellHandle` / `SignalHandle` /
+The core primitives are **Cell** / **Slot** / **Effect**. **`Signal` is a
+derived construct, not a core primitive** — `Signal ≡ Slot.eager`, a memo Slot
+plus a puller Effect that recomputes the instant a dependency changes, so its
+value is materialized by the time `setCell` / `batch` returns (no intermediate
+unset value).
+
+Values are **lazy by default**; reach for the derived `Signal` when you need
+eager push semantics. Handles (`SlotHandle` / `CellHandle` / `SignalHandle` /
 `EffectHandle`) are lightweight ids over a shared node table, like lazily-rs.
 
 ### Why it behaves the way it does
