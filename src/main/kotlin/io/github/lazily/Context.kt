@@ -21,6 +21,8 @@ class SignalHandle<T : Any> @PublishedApi internal constructor(val slot: SlotHan
 
 // -- Context -----------------------------------------------------------------
 
+private const val INITIAL_NODE_CAPACITY = 16
+
 /**
  * A reactive dependency graph: the lazily-rs `Context` semantics ported to
  * native Kotlin.
@@ -46,27 +48,31 @@ class SignalHandle<T : Any> @PublishedApi internal constructor(val slot: SlotHan
  */
 class Context {
     private sealed interface Node {
-        class Cell(var value: Any?, val dependents: MutableSet<Int> = mutableSetOf()) : Node
+        class Cell(var value: Any?, val dependents: ArrayList<Int> = ArrayList()) : Node
         class Slot(
             var value: Any? = null,
             var hasValue: Boolean = false,
             val memo: Boolean = false,
             val compute: Context.() -> Any? = { null },
-            val dependencies: MutableSet<Int> = mutableSetOf(),
-            val dependents: MutableSet<Int> = mutableSetOf(),
+            val dependencies: ArrayList<Int> = ArrayList(),
+            val dependents: ArrayList<Int> = ArrayList(),
             var dirty: Boolean = false,
             var forceRecompute: Boolean = false,
             var inProgress: Boolean = false,
         ) : Node
         class Effect(
             val run: Context.() -> (() -> Unit)?,
-            val dependencies: MutableSet<Int> = mutableSetOf(),
+            val dependencies: ArrayList<Int> = ArrayList(),
             var cleanup: (() -> Unit)? = null,
             var forceRun: Boolean = false,
         ) : Node
     }
 
-    private val nodes: MutableMap<Int, Node> = HashMap()
+    // Dense node arena indexed directly by id (mirrors lazily-rs
+    // `Vec<Option<Node>>` context.rs ~161-175). ids are dense 1..nextId with
+    // LIFO recycling via [freeIds], so a direct array index replaces the
+    // `HashMap<Int,Node>` lookup and eliminates Int autoboxing on every op.
+    private var nodes: Array<Node?> = arrayOfNulls(INITIAL_NODE_CAPACITY)
     private var nextId: Int = 1
     private val freeIds: ArrayDeque<Int> = ArrayDeque()
 
@@ -221,12 +227,20 @@ class Context {
     }
 
     private fun flushBatched() {
-        val cells = batchedCells.toList()
+        // Merged frontier: collect invalidation roots from ALL batched cells +
+        // slots into ONE DFS pass (#lzbatchborrow, mirrors lazily-rs
+        // flush_batched_invalidations). Avoids N separate DFS walks for N
+        // batched cells.
+        val stack = ArrayDeque<Int>()
+        val forceStack = ArrayDeque<Boolean>()
+        for (cellId in batchedCells) {
+            val cell = nodes[cellId] as? Node.Cell ?: continue
+            for (dep in cell.dependents) { stack.addLast(dep); forceStack.addLast(true) }
+        }
         batchedCells.clear()
-        val slots = batchedSlots.toList()
+        for (slotId in batchedSlots) { stack.addLast(slotId); forceStack.addLast(true) }
         batchedSlots.clear()
-        for (id in cells) invalidateCellDependentsNow(id)
-        for (id in slots) markSlotDirty(id, force = true)
+        runFrontier(stack, forceStack)
         flushEffects()
     }
 
@@ -245,8 +259,10 @@ class Context {
             for (id in ids) batchedSlots.add(id)
             return
         }
-        var scheduled = false
-        for (id in ids) if (markSlotDirty(id, force = true)) scheduled = true
+        val stack = ArrayDeque<Int>()
+        val forceStack = ArrayDeque<Boolean>()
+        for (id in ids) { stack.addLast(id); forceStack.addLast(true) }
+        val scheduled = runFrontier(stack, forceStack)
         if (scheduled) flushEffects()
     }
 
@@ -257,9 +273,10 @@ class Context {
         val id = handle.id
         pendingEffects.remove(id)
         scheduledEffects.remove(id)
-        val node = nodes.remove(id) as? Node.Effect ?: return
+        val node = nodes[id] as? Node.Effect ?: return
+        nodes[id] = null
         freeIds.addLast(id)
-        for (dep in node.dependencies.toList()) removeDependentEdge(dep, id)
+        for (dep in node.dependencies) removeDependentEdge(dep, id)
         node.cleanup?.invoke()
     }
 
@@ -278,27 +295,48 @@ class Context {
 
     // -- Internals: id + edges --------------------------------------------
 
-    private fun allocId(): Int = freeIds.removeLastOrNull() ?: nextId++
+    private fun allocId(): Int {
+        val id = freeIds.removeLastOrNull() ?: nextId++
+        if (id >= nodes.size) {
+            var newCap = nodes.size
+            while (newCap <= id) newCap *= 2
+            nodes = nodes.copyOf(newCap)
+        }
+        return id
+    }
 
     private fun currentFrame(): Int? = trackingStack.lastOrNull()
 
+    // Small edge containers: most nodes carry 0-2 edges, so a flat ArrayList
+    // with linear dedup beats a LinkedHashSet (mirrors lazily-rs SmallVec<[_;2]>
+    // + edge_insert/edge_remove context.rs ~26-68). Order-preserving to match
+    // the former LinkedHashSet effect-scheduling order.
+    private fun addEdge(edges: ArrayList<Int>, id: Int) {
+        if (id !in edges) edges.add(id)
+    }
+
+    private fun removeEdge(edges: ArrayList<Int>, id: Int) {
+        val i = edges.indexOf(id)
+        if (i >= 0) edges.removeAt(i)
+    }
+
     private fun registerDependency(depId: Int, parentId: Int) {
         when (val dep = nodes[depId]) {
-            is Node.Cell -> dep.dependents.add(parentId)
-            is Node.Slot -> dep.dependents.add(parentId)
+            is Node.Cell -> addEdge(dep.dependents, parentId)
+            is Node.Slot -> addEdge(dep.dependents, parentId)
             else -> {}
         }
         when (val parent = nodes[parentId]) {
-            is Node.Slot -> parent.dependencies.add(depId)
-            is Node.Effect -> parent.dependencies.add(depId)
+            is Node.Slot -> addEdge(parent.dependencies, depId)
+            is Node.Effect -> addEdge(parent.dependencies, depId)
             else -> {}
         }
     }
 
     private fun removeDependentEdge(depId: Int, parentId: Int) {
         when (val dep = nodes[depId]) {
-            is Node.Cell -> dep.dependents.remove(parentId)
-            is Node.Slot -> dep.dependents.remove(parentId)
+            is Node.Cell -> removeEdge(dep.dependents, parentId)
+            is Node.Slot -> removeEdge(dep.dependents, parentId)
             else -> {}
         }
     }
@@ -307,6 +345,13 @@ class Context {
 
     private fun refreshSlot(id: Int): Boolean {
         val node = nodes[id] as? Node.Slot ?: return false
+        // Fast path: clean cache hit. When the slot holds a value and is
+        // neither dirty nor force-recompute, no upstream value can have changed
+        // since the last compute — invalidation always sets dirty=true on
+        // dependents. The dependency-refresh walk, cycle guard, and dirty-flag
+        // clear are all unnecessary on this path (mirrors lazily-rs context.rs
+        // refresh_slot fast path).
+        if (node.hasValue && !node.dirty && !node.forceRecompute) return false
         if (node.inProgress) {
             error("lazily: circular dependency detected at slot $id; a computed/memo slot depends on itself")
         }
@@ -329,7 +374,7 @@ class Context {
     }
 
     private fun recomputeSlotNow(id: Int, node: Node.Slot): Boolean {
-        for (dep in node.dependencies.toList()) removeDependentEdge(dep, id)
+        for (dep in node.dependencies) removeDependentEdge(dep, id)
         node.dependencies.clear()
         val compute = node.compute
         trackingStack.addLast(id)
@@ -350,7 +395,9 @@ class Context {
     }
 
     private fun notifySlotValueChanged(id: Int) {
-        val deps = (nodes[id] as? Node.Slot)?.dependents?.toList() ?: return
+        val deps = (nodes[id] as? Node.Slot)?.dependents ?: return
+        val stack = ArrayDeque<Int>()
+        val forceStack = ArrayDeque<Boolean>()
         for (d in deps) {
             // Skip a dependent that is currently on the tracking stack: it is
             // mid-recompute and reading this slot right now, so it will observe
@@ -358,45 +405,56 @@ class Context {
             // re-run it (glitch-free guarantee). This matters when a demand-driven
             // reader Slot recomputes inside the very Effect reading it.
             if (d in trackingStack) continue
-            invalidateDependentFromChangedValue(d)
+            stack.addLast(d); forceStack.addLast(true)
         }
+        runFrontier(stack, forceStack)
     }
 
     // -- Internals: invalidation propagation ------------------------------
 
-    /** Returns true iff at least one Effect was scheduled (store-without-cascade
-     *  fast path: a false result means no flush is owed). */
-    private fun invalidateCellDependentsNow(id: Int): Boolean {
-        val deps = (nodes[id] as? Node.Cell)?.dependents?.toList() ?: return false
+    /**
+     * Iterative DFS frontier dirty-marking (#lzbatchborrow, mirrors lazily-rs
+     * mark_frontier_locked). Roots carry their seeded `force` flag (true for
+     * invalidation/clear roots, false for transitive descendants). Marks
+     * dirty/forceRecompute in place and iterates each node's dependents directly
+     * — the marking walk never mutates a dependents edge set, so no per-node
+     * snapshot copy is needed. Effects are scheduled inline; returns true iff at
+     * least one Effect was scheduled (store-without-cascade gate).
+     */
+    private fun runFrontier(stack: ArrayDeque<Int>, forceStack: ArrayDeque<Boolean>): Boolean {
         var scheduled = false
-        for (d in deps) if (invalidateDependentFromChangedValue(d)) scheduled = true
-        return scheduled
-    }
-
-    private fun invalidateDependentFromChangedValue(id: Int): Boolean {
-        if (nodes[id] is Node.Effect) {
-            scheduleEffect(id, force = true)
-            return true
-        }
-        return markSlotDirty(id, force = true)
-    }
-
-    private fun markSlotDirty(id: Int, force: Boolean): Boolean {
-        val node = nodes[id] as? Node.Slot ?: return false
-        val shouldPropagate = !node.dirty || (force && !node.forceRecompute)
-        node.dirty = true
-        if (force) node.forceRecompute = true
-        if (!shouldPropagate) return false
-        var scheduled = false
-        for (d in node.dependents.toList()) {
-            if (nodes[d] is Node.Effect) {
-                scheduleEffect(d, force = false)
-                scheduled = true
-            } else if (markSlotDirty(d, force = false)) {
-                scheduled = true
+        while (stack.isNotEmpty()) {
+            val id = stack.removeLast()
+            val force = forceStack.removeLast()
+            when (val node = nodes[id]) {
+                is Node.Slot -> {
+                    val shouldPropagate = !node.dirty || (force && !node.forceRecompute)
+                    node.dirty = true
+                    if (force) node.forceRecompute = true
+                    if (shouldPropagate) {
+                        for (dep in node.dependents) {
+                            stack.addLast(dep); forceStack.addLast(false)
+                        }
+                    }
+                }
+                is Node.Effect -> {
+                    scheduleEffect(id, force)
+                    scheduled = true
+                }
+                else -> {}
             }
         }
         return scheduled
+    }
+
+    /** Returns true iff at least one Effect was scheduled (store-without-cascade
+     *  fast path: a false result means no flush is owed). */
+    private fun invalidateCellDependentsNow(id: Int): Boolean {
+        val deps = (nodes[id] as? Node.Cell)?.dependents ?: return false
+        val stack = ArrayDeque<Int>()
+        val forceStack = ArrayDeque<Boolean>()
+        for (d in deps) { stack.addLast(d); forceStack.addLast(true) }
+        return runFrontier(stack, forceStack)
     }
 
     // -- Internals: effect scheduling / flush ------------------------------
@@ -424,13 +482,12 @@ class Context {
     private fun runEffect(id: Int) {
         if (!effectShouldRun(id)) return
         val node = nodes[id] as? Node.Effect ?: return
-        val oldDeps = node.dependencies.toList()
+        for (dep in node.dependencies) removeDependentEdge(dep, id)
         node.dependencies.clear()
         val cleanup = node.cleanup
         node.cleanup = null
         node.forceRun = false
         val run = node.run
-        for (dep in oldDeps) removeDependentEdge(dep, id)
         cleanup?.invoke()
         trackingStack.addLast(id)
         val nextCleanup = try {

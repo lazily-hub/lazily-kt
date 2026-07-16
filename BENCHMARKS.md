@@ -58,40 +58,40 @@ Wall-clock per-op. Mirrors the lazily-rs `benches/context.rs` groups.
 
 | Benchmark | per-op | What it measures |
 |-----------|-------:|------------------|
-| `cached_reads/context` | 274.7 ns | Warm-cache slot re-read (single-threaded `Context`). |
-| `cached_reads/thread_safe_context` | 163.4 ns | Warm-cache slot re-read (lock-backed). |
-| `cold_first_get/context` | 865.6 ns | Fresh `Context` + one slot + first read per iteration. |
-| `cold_first_get/thread_safe_context` | 1.147 us | Fresh `ThreadSafeContext` + one slot + first read. |
+| `cached_reads/context` | 47.3 ns | Warm-cache slot re-read (single-threaded `Context`). |
+| `cached_reads/thread_safe_context` | 58.5 ns | Warm-cache slot re-read (lock-backed). |
+| `cold_first_get/context` | 648.5 ns | Fresh `Context` + one slot + first read per iteration. |
+| `cold_first_get/thread_safe_context` | 824.9 ns | Fresh `ThreadSafeContext` + one slot + first read. |
 
 ### Dependency fan-out (invalidate a root, read all `N` dependents)
 
 | Benchmark | per-op | What it measures |
 |-----------|-------:|------------------|
-| `dependency_fan_out/context/32` | 742.2 ns | 32 derived slots. |
-| `dependency_fan_out/thread_safe_context/32` | 1.732 us | 32 derived slots (lock-backed). |
-| `dependency_fan_out/context/256` | 8.180 us | 256 derived slots. |
-| `dependency_fan_out/thread_safe_context/256` | 14.340 us | 256 derived slots (lock-backed). |
+| `dependency_fan_out/context/32` | 181.8 ns | 32 derived slots. |
+| `dependency_fan_out/thread_safe_context/32` | 391.0 ns | 32 derived slots (lock-backed). |
+| `dependency_fan_out/context/256` | 821.1 ns | 256 derived slots. |
+| `dependency_fan_out/thread_safe_context/256` | 2.958 us | 256 derived slots (lock-backed). |
 
 ### Set-cell invalidation / memo suppression / effect flushing / batch storms
 
 | Benchmark | per-op | What it measures |
 |-----------|-------:|------------------|
-| `set_cell_invalidation/high_fan_out/512` | 129.7 ns | Invalidate one cell with 512 lazy dependents (no eager recompute — invalidation is lazy). |
-| `memo_equality_suppression/context` | 766.2 ns | A 32-deep memo chain whose recompute is unchanged — the `==` guard suppresses the downstream cascade. |
-| `memo_equality_suppression/thread_safe_context` | 1.005 us | Same, lock-backed. |
-| `effect_flushing/context` | 56.3 ns | One `setCell` → one effect rerun + flush. |
-| `effect_flushing/thread_safe_context` | 44.0 ns | Same, lock-backed. |
-| `batch_storms/context/64` | 333.2 ns | Batch of 64 `setCell` → one coalesced flush. |
-| `batch_storms/thread_safe_context/64` | 1.071 us | Same, lock-backed. |
+| `set_cell_invalidation/high_fan_out/512` | 73.8 ns | Invalidate one cell with 512 lazy dependents (no eager recompute — invalidation is lazy). |
+| `memo_equality_suppression/context` | 49.8 ns | A 32-deep memo chain whose recompute is unchanged — the `==` guard suppresses the downstream cascade. |
+| `memo_equality_suppression/thread_safe_context` | 37.4 ns | Same, lock-backed. |
+| `effect_flushing/context` | 41.1 ns | One `setCell` → one effect rerun + flush. |
+| `effect_flushing/thread_safe_context` | 39.3 ns | Same, lock-backed. |
+| `batch_storms/context/64` | 280.0 ns | Batch of 64 `setCell` → one coalesced flush. |
+| `batch_storms/thread_safe_context/64` | 1.136 us | Same, lock-backed. |
 
 ### Typed cache reads (steady state)
 
 | Benchmark | per-op | What it measures |
 |-----------|-------:|------------------|
-| `typed_cache_reads/context_slot` | 28.6 ns | Cached slot read (`Context`). |
-| `typed_cache_reads/context_cell` | 23.2 ns | Cached cell read (`Context`). |
-| `typed_cache_reads/thread_safe_slot` | 52.6 ns | Cached slot read (lock-backed). |
-| `typed_cache_reads/thread_safe_cell` | 39.8 ns | Cached cell read (lock-backed). |
+| `typed_cache_reads/context_slot` | 18.2 ns | Cached slot read (`Context`). |
+| `typed_cache_reads/context_cell` | 19.0 ns | Cached cell read (`Context`). |
+| `typed_cache_reads/thread_safe_slot` | 39.8 ns | Cached slot read (lock-backed). |
+| `typed_cache_reads/thread_safe_cell` | 36.5 ns | Cached cell read (lock-backed). |
 
 ### Thread-safe contention (`workers` threads sharing one `ThreadSafeContext`)
 
@@ -99,18 +99,18 @@ Each worker does `128` invalidate-then-read iterations per sample.
 
 | Benchmark / workers | 1 | 2 | 4 | 8 | 16 |
 |---|---:|---:|---:|---:|---:|
-| `same_slot_write_read` | 123.8 us | 210.2 us | 334.4 us | 561.7 us | 1126.7 us |
-| `independent_slots` | 62.2 us | 160.6 us | 220.5 us | 498.7 us | 1111.3 us |
-| `read_mostly_waiters` | 66.7 us | 118.1 us | 147.3 us | 232.0 us | 593.4 us |
-| `batched_write_bursts` | 116.9 us | 382.9 us | 1001.4 us | 3199.9 us | 11818.5 us |
+| `same_slot_write_read` | 42.5 us | 129.1 us | 202.8 us | 293.5 us | 696.8 us |
+| `independent_slots` | 55.9 us | 103.5 us | 124.5 us | 325.8 us | 545.7 us |
+| `read_mostly_waiters` | 33.7 us | 70.5 us | 94.8 us | 259.6 us | 469.8 us |
+| `batched_write_bursts` | 94.0 us | 230.4 us | 659.6 us | 2140.7 us | 9914.6 us |
 
 ### Thread-safe effect contention (8 / 16 workers)
 
 | Benchmark / workers | 8 | 16 |
 |---|---:|---:|
-| `queue_coalescing` | 2918.9 us | 11713.0 us |
-| `cleanup_execution` | 929.6 us | 2873.3 us |
-| `batch_flush` | 4580.5 us | 13596.4 us |
+| `queue_coalescing` | 1802.0 us | 8304.2 us |
+| `cleanup_execution` | 714.2 us | 1855.5 us |
+| `batch_flush` | 2502.5 us | 11459.9 us |
 
 ## Spreadsheet-scale bench (`make benchmark-scale`)
 
@@ -120,16 +120,16 @@ Default `N = 1,000,000` (~2M reactive nodes).
 
 | Case | elapsed | per-element | What it measures |
 |------|--------:|------------:|------------------|
-| `build` | 199.5 ms | 199.5 ns | Construct all `2N` nodes from scratch. |
-| `cold_full_recalc` | 933.6 ms | 933.6 ns | First read of every formula (forces every compute). |
-| `viewport_recalc` | 6.2 ms | 6.2 ns | Edit one input, read only a 1,000-formula window — the lazy-pull win: off-viewport formulas stay dirty and never recompute. |
-| `full_recalc_invalidate_all` | 3721.1 ms | 3.721 us | Touch every input, then read every formula (worst-case full-sheet edit). |
+| `build` | 103.0 ms | 103.0 ns | Construct all `2N` nodes from scratch. |
+| `cold_full_recalc` | 207.7 ms | 207.7 ns | First read of every formula (forces every compute). |
+| `viewport_recalc` | 2.4 ms | 2.4 ns | Edit one input, read only a 1,000-formula window — the lazy-pull win: off-viewport formulas stay dirty and never recompute. |
+| `full_recalc_invalidate_all` | 1587.2 ms | 1.587 us | Touch every input, then read every formula (worst-case full-sheet edit). |
 
 The **viewport curve is flat** relative to graph size: editing one input and
-reading a bounded window costs ~6 ms whether the sheet is 100K or 1M rows,
+reading a bounded window costs ~2 ms whether the sheet is 100K or 1M rows,
 because lazily only recomputes the formulas actually read. Compare
-`viewport_recalc` (6.2 ns/element) against `full_recalc_invalidate_all`
-(3.721 us/element) — a ~600× win for the lazy pull.
+`viewport_recalc` (2.4 ns/element) against `full_recalc_invalidate_all`
+(1.587 us/element) — a ~660× win for the lazy pull.
 
 ## Related
 
