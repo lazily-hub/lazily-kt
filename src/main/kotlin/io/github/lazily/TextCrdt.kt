@@ -56,6 +56,11 @@ class TextCrdt private constructor(
     private val elems: MutableMap<OpId, Elem>,
     private var peer: Long,
     private var counter: Long,
+    // Cached visible orderings (#lztextordcache). Both null after every mutation;
+    // populated lazily on the next read. Repeated text() between mutations drops
+    // O(N log N) -> O(1) (after the first rebuild) instead of rebuilding per call.
+    private var orderedLiveCache: List<OpId>? = null,
+    private var orderedAllCache: List<OpId>? = null,
 ) : CrdtTree<TextCrdt, Map<Long, Long>, List<TextOp>, String> {
     /** An empty buffer owned by [peer]. */
     constructor(peer: Long) : this(LinkedHashMap(), peer, 0L)
@@ -68,6 +73,11 @@ class TextCrdt private constructor(
 
     /** Clone this buffer's state keeping the same peer identity (deep copy). */
     fun clone(): TextCrdt = TextCrdt(copyElems(), peer, counter)
+
+    private fun invalidateOrdered() {
+        orderedLiveCache = null
+        orderedAllCache = null
+    }
 
     private fun copyElems(): MutableMap<OpId, Elem> {
         val out = LinkedHashMap<OpId, Elem>()
@@ -89,11 +99,26 @@ class TextCrdt private constructor(
         val origin = if (index == 0) null else visible.getOrNull(index - 1)
         val id = nextId()
         elems[id] = Elem(ch, origin)
+        invalidateOrdered()
     }
 
-    /** Insert all of [s] starting at visible index [index]. */
+    /**
+     * Insert all of [s] starting at visible index [index] with origin chaining
+     * (#lztextinsertchain): one `orderedIds()` pass + N chain appends instead of
+     * N full-tree rebuilds. Sequential chars chain naturally — char i+1's
+     * left-origin is char i's just-minted OpId — so DFS visits them in chain
+     * order (counter strictly increases under one peer). Concurrent inserts at
+     * the same point still sort by peer tiebreak (standard CRDT convergence).
+     */
     fun insertString(index: Int, s: String) {
-        for ((i, ch) in s.withIndex()) insert(index + i, ch)
+        val visible = orderedIds(includeDeleted = false)
+        var origin: OpId? = if (index == 0) null else visible.getOrNull(index - 1)
+        for (ch in s) {
+            val id = nextId()
+            elems[id] = Elem(ch, origin)
+            origin = id
+        }
+        invalidateOrdered()
     }
 
     /** Tombstone the visible character at [index]. No-op if out of range. */
@@ -102,7 +127,12 @@ class TextCrdt private constructor(
         val id = visible.getOrNull(index) ?: return
         val del = nextId()
         val e = elems[id] ?: return
-        if (e.deleted == null) e.deleted = del
+        if (e.deleted == null) {
+            e.deleted = del
+            // Tombstone flip changes the live (filtered) ordering but not the
+            // full DFS — only invalidate the live cache.
+            orderedLiveCache = null
+        }
     }
 
     /** The current visible text in sequence order. */
@@ -128,6 +158,12 @@ class TextCrdt private constructor(
      * (needed so later origins still resolve), else they are filtered.
      */
     private fun orderedIds(includeDeleted: Boolean): List<OpId> {
+        // Cache hit (#lztextordcache).
+        if (includeDeleted) {
+            orderedAllCache?.let { return it }
+        } else {
+            orderedLiveCache?.let { return it }
+        }
         // children[origin] = ids inserted directly after `origin`.
         val children = HashMap<OpId?, MutableList<OpId>>()
         for ((id, e) in elems) {
@@ -152,6 +188,7 @@ class TextCrdt private constructor(
                 kids.reversed().forEach { stack.addLast(it) }
             }
         }
+        if (includeDeleted) orderedAllCache = out else orderedLiveCache = out
         return out
     }
 
@@ -163,6 +200,7 @@ class TextCrdt private constructor(
      */
     fun merge(other: TextCrdt): Boolean {
         val before = text()
+        var anyChange = false
         for ((id, oe) in other.elems) {
             counter = maxOf(counter, id.counter)
             // Delete OpIds advance the clock too, so a local insert after a
@@ -173,15 +211,19 @@ class TextCrdt private constructor(
                 // Tombstone is sticky and order-independent: keep whichever
                 // delete id is smaller so concurrent deletes converge
                 // (commutative/associative) instead of depending on merge order.
+                val prevDeleted = e.deleted
                 e.deleted = when {
                     e.deleted != null && oe.deleted != null -> minOf(e.deleted!!, oe.deleted!!)
                     e.deleted != null -> e.deleted
                     else -> oe.deleted
                 }
+                if (e.deleted != prevDeleted) anyChange = true
             } else {
                 elems[id] = Elem(oe.ch, oe.origin).apply { deleted = oe.deleted }
+                anyChange = true
             }
         }
+        if (anyChange) invalidateOrdered()
         return text() != before
     }
 
@@ -226,20 +268,25 @@ class TextCrdt private constructor(
      */
     override fun applyDelta(ops: List<TextOp>): Boolean {
         val before = text()
+        var anyChange = false
         for (op in ops) {
             counter = maxOf(counter, op.id.counter)
             op.deleted?.let { counter = maxOf(counter, it.counter) }
             val e = elems[op.id]
             if (e != null) {
+                val prevDeleted = e.deleted
                 e.deleted = when {
                     e.deleted != null && op.deleted != null -> minOf(e.deleted!!, op.deleted!!)
                     e.deleted != null -> e.deleted
                     else -> op.deleted
                 }
+                if (e.deleted != prevDeleted) anyChange = true
             } else {
                 elems[op.id] = Elem(op.ch, op.origin).apply { deleted = op.deleted }
+                anyChange = true
             }
         }
+        if (anyChange) invalidateOrdered()
         return text() != before
     }
 
@@ -270,6 +317,7 @@ class TextCrdt private constructor(
                 removed += 1
             }
         }
+        if (removed > 0) invalidateOrdered()
         return removed
     }
 }

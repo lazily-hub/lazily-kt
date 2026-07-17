@@ -159,6 +159,12 @@ class LosslessTreeCrdt private constructor(
     private val frontier: TreeVersionFrontier,
     private val log: MutableList<TreeOp>,
     private val buffered: MutableList<TreeOp>,
+    // Secondary parent->children index (#lzlivelchildidx). Replaces the O(N)
+    // full-scan in liveChildren that made render() O(N^2). Stores child ids
+    // (not records) so the index survives record-body replacement on
+    // LeafEdit / SplitLeaf; tombstone/reorder mutate the underlying record
+    // in place, so the index only needs parent->child membership.
+    private val childrenByParent: MutableMap<TreeNodeId, MutableList<TreeNodeId>>,
 ) {
     /** A fresh document owned by [peer]: just the root element. */
     constructor(peer: Long) : this(
@@ -177,17 +183,27 @@ class LosslessTreeCrdt private constructor(
         TreeVersionFrontier(),
         mutableListOf(),
         mutableListOf(),
+        HashMap(),  // root has no parent → empty index
     )
 
     /** Fork this replica's full state under a new owning [peer] (deep copy, new identity). */
-    fun fork(peer: Long): LosslessTreeCrdt = LosslessTreeCrdt(
-        peer,
-        counter,
-        copyNodes(),
-        frontier.deepCopy(),
-        ArrayList(log),
-        ArrayList(buffered),
-    )
+    fun fork(peer: Long): LosslessTreeCrdt {
+        val copiedNodes = copyNodes()
+        val index = HashMap<TreeNodeId, MutableList<TreeNodeId>>()
+        for ((id, r) in copiedNodes) {
+            val parent = r.parent ?: continue
+            index.getOrPut(parent) { mutableListOf() }.add(id)
+        }
+        return LosslessTreeCrdt(
+            peer,
+            counter,
+            copiedNodes,
+            frontier.deepCopy(),
+            ArrayList(log),
+            ArrayList(buffered),
+            index,
+        )
+    }
 
     private fun copyNodes(): MutableMap<TreeNodeId, NodeRecord> {
         val out = HashMap<TreeNodeId, NodeRecord>(nodes.size)
@@ -201,17 +217,28 @@ class LosslessTreeCrdt private constructor(
         return out
     }
 
+    /** Insert child [id] under [parent] in this crdt's index (idempotent under apply replay). */
+    private fun indexAdd(parent: TreeNodeId, id: TreeNodeId) {
+        childrenByParent.getOrPut(parent) { mutableListOf() }.let { bucket ->
+            if (id !in bucket) bucket.add(id)
+        }
+    }
+
     private fun nextOpId(): TreeOpId {
         counter += 1
         return TreeOpId(counter, peer)
     }
 
     /** The live children of [parent], in rendered (SortKey) order. */
-    private fun liveChildren(parent: TreeNodeId): List<TreeNodeId> =
-        nodes.entries
-            .filter { (_, r) -> r.parent == parent && r.tomb == null }
-            .sortedBy { it.value.sort }
-            .map { it.key }
+    private fun liveChildren(parent: TreeNodeId): List<TreeNodeId> {
+        val bucket = childrenByParent[parent] ?: return emptyList()
+        // Tombstones stay in the bucket (logical delete); filter + sort at read.
+        return bucket
+            .mapNotNull { id -> nodes[id]?.let { id to it } }
+            .filter { (_, r) -> r.tomb == null }
+            .sortedBy { (_, r) -> r.sort }
+            .map { (id, _) -> id }
+    }
 
     /** Render the whole document by concatenating live-leaf text in tree order. */
     fun render(): String {
@@ -442,6 +469,7 @@ class LosslessTreeCrdt private constructor(
                     tomb = null,
                     textHead = op.id,
                 )
+                indexAdd(k.parent, k.id)
             }
             is TreeOpKind.Tombstone -> {
                 val rec = nodes[k.node] ?: return
@@ -480,6 +508,7 @@ class LosslessTreeCrdt private constructor(
         // rebuild byte-identical leaf state.
         rec.body = NodeBody.Leaf(kind, TextCrdt(node.op.peer, head))
         rec.textHead = opId
+        val existedBefore = nodes.containsKey(new)
         nodes.putIfAbsent(
             new,
             NodeRecord(
@@ -491,6 +520,7 @@ class LosslessTreeCrdt private constructor(
                 textHead = opId,
             ),
         )
+        if (!existedBefore && parent != null) indexAdd(parent, new)
     }
 
     private fun applyMerge(left: TreeNodeId, right: TreeNodeId, opId: TreeOpId) {
