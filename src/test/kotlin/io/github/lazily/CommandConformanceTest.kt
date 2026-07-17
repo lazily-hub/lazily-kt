@@ -77,7 +77,7 @@ class CommandConformanceTest {
             policy = CommandPolicy(DedupePolicy.SameIdempotencyKey, supersede = false, cancelOnPreempt = true),
             payloadType = "agent-doc.editor_route.v1",
             payloadHash = "sha256:deadbeef",
-            payload = IpcValue.Inline(listOf(1, 2, 3)),
+            payload = IpcValue.Inline(byteArrayOf(1, 2, 3)),
             requiredFeatures = listOf("causal-receipts"),
         )
 

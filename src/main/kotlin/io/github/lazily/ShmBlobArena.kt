@@ -145,8 +145,10 @@ class ShmBlobArena private constructor(
 /** FNV-1a-64 over the payload, identical to every lazily binding. */
 fun checksum(payload: ByteArray): ULong {
     var hash = FNV_OFFSET_BASIS
-    for (b in payload) {
-        hash = (hash xor (b.toInt() and 0xff).toULong()) * FNV_PRIME
+    // #lzktindexedloop: indexed loop over the primitive ByteArray so each byte
+    // is read directly (a `for-in` would pull through a boxed Byte iterator).
+    for (i in payload.indices) {
+        hash = (hash xor (payload[i].toInt() and 0xff).toULong()) * FNV_PRIME
     }
     return hash
 }

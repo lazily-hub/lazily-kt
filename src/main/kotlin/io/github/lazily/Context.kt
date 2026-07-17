@@ -358,7 +358,13 @@ class Context {
         node.inProgress = true
         try {
             var dependencyChanged = false
-            for (dep in node.dependencies.toList()) {
+            // #lzktdepslist: iterate the dependency list by index instead of
+            // copying it via toList(). Refreshing a dependency never mutates
+            // *this* node's dependency list (it clears the dep's own list), so
+            // an index view is stable here — saves an ArrayList + N boxed Ints.
+            val deps = node.dependencies
+            for (i in deps.indices) {
+                val dep = deps[i]
                 if (nodes[dep] is Node.Slot && refreshSlot(dep)) dependencyChanged = true
             }
             val needsRecompute = !node.hasValue || node.forceRecompute || dependencyChanged

@@ -96,11 +96,9 @@ class AgentDocStateConformanceTest {
     private fun JsonObject.assertionStringList(key: String): List<String> =
         (this[key] as? kotlinx.serialization.json.JsonArray)?.map { it.jsonPrimitive.content } ?: emptyList()
 
-    /** Decode a `Payload`/`Inline` byte list (`serde_json(struct)` bytes) as a JSON object. */
-    private fun decodePayloadObject(bytes: List<Int>): JsonObject {
-        val arr = ByteArray(bytes.size) { bytes[it].toByte() }
-        return json.parseToJsonElement(String(arr, Charsets.UTF_8)).jsonObject
-    }
+    /** Decode a `Payload`/`Inline` byte payload (`serde_json(struct)` bytes) as a JSON object. */
+    private fun decodePayloadObject(bytes: ByteArray): JsonObject =
+        json.parseToJsonElement(String(bytes, Charsets.UTF_8)).jsonObject
 
     private fun payloadPhase(obj: JsonObject): String? =
         (obj["phase"] as? JsonPrimitive)?.contentOrNull
@@ -256,7 +254,7 @@ class AgentDocStateConformanceTest {
         assertEquals(6L, replica.epoch)
 
         fun phaseOf(id: Long): String? =
-            payloadPhase(decodePayloadObject(replica.node(id)!!.payload!!.map { it.toInt() and 0xff }))
+            payloadPhase(decodePayloadObject(replica.node(id)!!.payload!!))
 
         assertEquals("agent_doc.closeout.cycle", replica.node(102L)!!.typeTag)
         assertEquals("committed", phaseOf(102L))

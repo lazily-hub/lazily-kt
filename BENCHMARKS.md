@@ -131,6 +131,49 @@ because lazily only recomputes the formulas actually read. Compare
 `viewport_recalc` (2.4 ns/element) against `full_recalc_invalidate_all`
 (1.587 us/element) — a ~660× win for the lazy pull.
 
+## Phase-2 perf quick wins (`make benchmark`)
+
+Six localized hot-path wins (tags `#lzktbytearray`, `#lzktsublistclear`,
+`#lzktclocklock`, `#lzktdepslist`, `#lzktindexedloop`, `#lzktreliableset`),
+each covered by a dedicated micro-bench group. Same harness/JVM as above; the
+shapes (linear reclaim, fixed-cost HLC op) are what carry across runs.
+
+### IPC payload construction + serialization (`#lzktbytearray` / `#lzktindexedloop`)
+
+`IpcValue.Inline` / `NodeState.Payload` now hold a primitive `ByteArray`
+(one byte per byte, no boxed `Integer` per byte) with no eager `init`
+validation, and `bytesToJson` walks it by index. Construct + serialize a
+256-byte inline payload:
+
+| Benchmark | per-op | What it measures |
+|-----------|-------:|------------------|
+| `ipc_payload/inline_serialize/256` | 6.020 us | Build an `IpcValue.Inline(ByteArray)` and serialize it to wire JSON (indexed `bytesToJson`). |
+| `ipc_payload/payload_serialize/256` | 5.838 us | Build a `NodeState.Payload(ByteArray)` and serialize it to wire JSON. |
+
+### Relay reclaim sweep (`#lzktsublistclear`)
+
+Build a `SpillStore`, spill `N` cold pages, ack the whole tail, then reclaim.
+Previously `N × removeAt(0)` (an O(N²) sweep over a reclaim cycle); now one
+`subList.clear()` bulk drop, so the per-op cost scales **linearly** with the
+page count (256 → 4096 ≈ 6.3× more pages → 6.3× more time, not 64×):
+
+| Benchmark | per-op | What it measures |
+|-----------|-------:|------------------|
+| `relay_reclaim/append_reclaim/256` | 13.032 us | Spill + ack + reclaim 256 pages. |
+| `relay_reclaim/append_reclaim/1024` | 23.633 us | Spill + ack + reclaim 1,024 pages. |
+| `relay_reclaim/append_reclaim/4096` | 81.607 us | Spill + ack + reclaim 4,096 pages. |
+
+### HLC clock throughput (`#lzktclocklock`)
+
+`CrdtClock.tick`/`observe` no longer take a monitor (the reactive `Context`
+driving a replica is single-threaded), so each op is the raw wall-read +
+compare/increment — no monitor-enter cost. One op per sample:
+
+| Benchmark | per-op | What it measures |
+|-----------|-------:|------------------|
+| `hlc_tick/tick` | 46.1 ns | Advance the HLC and mint a fresh `WireStamp` (no `@Synchronized`). |
+| `hlc_tick/observe` | 31.1 ns | Fold a remote stamp into the HLC (no `@Synchronized`). |
+
 ## Related
 
 - [`lazily-rs` `benches/`](../lazily-rs/benches/) — the canonical Criterion-backed

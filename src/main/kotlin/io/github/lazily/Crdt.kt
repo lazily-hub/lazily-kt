@@ -295,15 +295,15 @@ class PnCounter : CrdtRegister<Long>() {
 /**
  * Hybrid logical clock for a local peer — wall-clock for human-meaningful
  * ordering, a logical counter for causal tiebreaks. Monotonic across calls on a
- * single replica; thread-safe via a coarse monitor (the reactive [Context] is
- * single-threaded; the clock only needs monotonicity, not lock-freedom).
+ * single replica. The reactive [Context] that drives a replica is
+ * single-threaded, so [tick]/[observe] need no monitor (#lzktclocklock) — the
+ * JVM's lack of locking removes the per-op monitor-enter cost.
  */
 class CrdtClock(private val peer: PeerId) {
     private var wall: Long = 0L
     private var logical: Long = 0L
 
     /** Advance the clock and return a fresh, strictly-increasing [WireStamp]. */
-    @Synchronized
     fun tick(): WireStamp {
         val now = System.currentTimeMillis()
         if (now > wall) { wall = now; logical = 0L } else { logical++ }
@@ -311,7 +311,6 @@ class CrdtClock(private val peer: PeerId) {
     }
 
     /** Observe a remote [stamp] so future local stamps causally succeed it. */
-    @Synchronized
     fun observe(stamp: WireStamp) {
         val now = System.currentTimeMillis()
         logical = when {

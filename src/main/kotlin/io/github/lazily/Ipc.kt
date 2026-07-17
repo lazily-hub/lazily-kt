@@ -38,21 +38,25 @@ private fun JsonObject.longField(name: String): Long =
 private fun JsonObject.stringField(name: String): String =
     required(name).jsonPrimitive.content
 
-private fun bytesToJson(bytes: List<Int>): JsonArray = buildJsonArray {
-    for (byte in bytes) {
-        require(byte in 0..255) { "byte value out of range: $byte" }
-        add(JsonPrimitive(byte))
+// #lzktindexedloop: indexed loop over the primitive ByteArray (a `for-in` would
+// box each element through an iterator).
+private fun bytesToJson(bytes: ByteArray): JsonArray = buildJsonArray {
+    for (i in bytes.indices) {
+        add(JsonPrimitive(bytes[i].toInt() and 0xff))
     }
 }
 
-private fun bytesFromJson(element: JsonElement): List<Int> =
-    element.asArray("byte payload").map { value ->
-        val byte = value.jsonPrimitive.int
-        require(byte in 0..255) { "byte value out of range: $byte" }
-        byte
+// #lzktindexedloop: indexed decode into a primitive ByteArray (no boxed List).
+private fun bytesFromJson(element: JsonElement): ByteArray {
+    val arr = element.asArray("byte payload")
+    val out = ByteArray(arr.size)
+    for (i in arr.indices) {
+        val v = arr[i].jsonPrimitive.int
+        require(v in 0..255) { "byte value out of range: $v" }
+        out[i] = v.toByte()
     }
-
-private fun ByteArray.toWireBytes(): List<Int> = map { it.toInt() and 0xff }
+    return out
+}
 
 /** Maximum encoded byte length of a [NodeKey] path. */
 const val NODE_KEY_MAX_LEN: Int = 1024
@@ -167,18 +171,21 @@ data class ShmBlobRef(
 sealed interface NodeState {
     fun toJson(): JsonElement
 
-    data class Payload(val bytes: List<Int>) : NodeState {
-        constructor(bytes: ByteArray) : this(bytes.toWireBytes())
-
-        init {
-            bytesToJson(bytes)
-        }
-
-        fun toByteArray(): ByteArray = ByteArray(bytes.size) { bytes[it].toByte() }
+    // #lzktbytearray: store the payload as a primitive ByteArray (one byte per
+    // byte) instead of a List<Int> (one boxed Integer per byte). The eager
+    // `init { bytesToJson(bytes) }` range validation is dropped — a ByteArray
+    // holds valid bytes by construction.
+    data class Payload(val bytes: ByteArray) : NodeState {
+        fun toByteArray(): ByteArray = bytes
 
         override fun toJson(): JsonElement = buildJsonObject {
             put("Payload", bytesToJson(bytes))
         }
+
+        override fun equals(other: Any?): Boolean =
+            other is Payload && bytes.contentEquals(other.bytes)
+
+        override fun hashCode(): Int = bytes.contentHashCode()
     }
 
     data class SharedBlob(val blob: ShmBlobRef) : NodeState {
@@ -214,18 +221,19 @@ sealed interface NodeState {
 sealed interface IpcValue {
     fun toJson(): JsonElement
 
-    data class Inline(val bytes: List<Int>) : IpcValue {
-        constructor(bytes: ByteArray) : this(bytes.toWireBytes())
-
-        init {
-            bytesToJson(bytes)
-        }
-
-        fun toByteArray(): ByteArray = ByteArray(bytes.size) { bytes[it].toByte() }
+    // #lzktbytearray: primitive ByteArray payload — no boxed Integer per byte,
+    // no eager init validation (bytes are valid by construction).
+    data class Inline(val bytes: ByteArray) : IpcValue {
+        fun toByteArray(): ByteArray = bytes
 
         override fun toJson(): JsonElement = buildJsonObject {
             put("Inline", bytesToJson(bytes))
         }
+
+        override fun equals(other: Any?): Boolean =
+            other is Inline && bytes.contentEquals(other.bytes)
+
+        override fun hashCode(): Int = bytes.contentHashCode()
     }
 
     data class SharedBlob(val blob: ShmBlobRef) : IpcValue {

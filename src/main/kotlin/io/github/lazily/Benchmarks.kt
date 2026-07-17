@@ -104,6 +104,10 @@ private const val CONTENTION_BATCH_CELLS_PER_WORKER = 4
 private val THREAD_WORKERS = intArrayOf(1, 2, 4, 8, 16)
 private val EFFECT_THREAD_WORKERS = intArrayOf(8, 16)
 
+// Phase-2 perf-quick-win bench constants.
+private const val IPC_PAYLOAD_BYTES = 256
+private val RELAY_RECLAIM_PAGES = intArrayOf(256, 1024, 4096)
+
 // -- Setup helpers ----------------------------------------------------------
 
 private data class FanOutFixture(
@@ -659,6 +663,78 @@ fun benchEffectContention(): List<BenchmarkResult> {
     return out
 }
 
+// -- Phase-2 perf quick wins (#lzktbytearray / #lzktsublistclear / #lzktclocklock) --
+
+/**
+ * IPC payload construction + serialization (#lzktbytearray / #lzktindexedloop):
+ * `IpcValue.Inline`/`NodeState.Payload` now hold a primitive `ByteArray` with no
+ * eager init validation, and `bytesToJson` walks it by index. Measures the
+ * realistic construct-then-serialize cost of a small inline payload.
+ */
+fun benchIpcPayloadSerialization(): List<BenchmarkResult> {
+    val group = "ipc_payload"
+    val payload = ByteArray(IPC_PAYLOAD_BYTES) { it.toByte() }
+    return listOf(
+        timeOp(Benchmark(group, "inline_serialize/$IPC_PAYLOAD_BYTES", setup = { payload }) { hole, fixture ->
+            val src = fixture as ByteArray
+            hole.consume(IpcValue.Inline(src).toJson())
+        }),
+        timeOp(Benchmark(group, "payload_serialize/$IPC_PAYLOAD_BYTES", setup = { payload }) { hole, fixture ->
+            val src = fixture as ByteArray
+            hole.consume(NodeState.Payload(src).toJson())
+        }),
+    )
+}
+
+/**
+ * Build a fresh [SpillStore], spill [pages] cold pages, ack the whole tail, and
+ * reclaim (#lzktsublistclear). The reclaim sweep was O(N²) (N `removeAt(0)`
+ * shifts); `subList.clear()` makes the whole sweep O(N), so the per-op cost
+ * scales linearly with the page count instead of quadratically.
+ */
+private fun runRelayReclaimCycle(pages: Int): Long {
+    val store = SpillStore<Long>(SpillMode.AppendCompact, pageSize = Long.MAX_VALUE, keepLatest())
+    var lastId = 0L
+    for (i in 0 until pages) {
+        store.spill(i.toLong(), 1L)
+        lastId = i.toLong()
+    }
+    store.ackThrough(lastId)
+    store.reclaim()
+    return store.pageCount().toLong()
+}
+
+fun benchRelayReclaim(): List<BenchmarkResult> {
+    val group = "relay_reclaim"
+    val out = ArrayList<BenchmarkResult>()
+    for (pages in RELAY_RECLAIM_PAGES) {
+        out += timeOp(Benchmark(group, "append_reclaim/$pages", warmup = 50, samples = 200) { hole, _ ->
+            hole.consume(runRelayReclaimCycle(pages))
+        })
+    }
+    return out
+}
+
+/**
+ * HLC clock throughput (#lzktclocklock): [CrdtClock.tick]/[observe] no longer
+ * take a monitor (the reactive [Context] driving a replica is single-threaded),
+ * so each op is the raw wall-read + compare/increment. One op per sample.
+ */
+fun benchHlcTick(): List<BenchmarkResult> {
+    val group = "hlc_tick"
+    return listOf(
+        timeOp(Benchmark(group, "tick", setup = { CrdtClock(peer = 1) }) { hole, fixture ->
+            val clock = fixture as CrdtClock
+            hole.consume(clock.tick())
+        }),
+        timeOp(Benchmark(group, "observe", setup = { CrdtClock(peer = 1) to WireStamp(0L, 0L, 2L) }) { hole, fixture ->
+            val (clock, stamp) = fixture as Pair<CrdtClock, WireStamp>
+            clock.observe(stamp)
+            hole.consume(clock)
+        }),
+    )
+}
+
 // -- Entry point ------------------------------------------------------------
 
 /**
@@ -677,7 +753,10 @@ fun runBenchmarks(): List<BenchmarkResult> =
         benchBatchStorms() +
         benchTypedCacheReads() +
         benchThreadSafeContention() +
-        benchEffectContention()
+        benchEffectContention() +
+        benchIpcPayloadSerialization() +
+        benchRelayReclaim() +
+        benchHlcTick()
 
 fun main() {
     println("lazily-kt benchmarks")

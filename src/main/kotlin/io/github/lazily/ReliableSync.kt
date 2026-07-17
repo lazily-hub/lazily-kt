@@ -114,8 +114,11 @@ interface DurableOutbox {
  * duplicate delivery converge (`ReliableSync.joinOR_*`).
  */
 class OrSet {
-    private val adds = sortedSetOf<String>()
-    private val removes = sortedSetOf<String>()
+    // #lzktreliableset: hash-backed sets — `present()`/`add`/membership are O(1)
+    // (the OR-set is only ever queried by membership and union, never iterated
+    // in order, so the TreeSet's O(log n) ordering is unused overhead).
+    private val adds = hashSetOf<String>()
+    private val removes = hashSetOf<String>()
 
     fun add(tag: String) {
         adds.add(tag)

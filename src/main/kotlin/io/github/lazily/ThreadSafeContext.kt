@@ -382,7 +382,13 @@ class ThreadSafeContext {
         node.inProgress = true
         try {
             var dependencyChanged = false
-            for (dep in node.dependencies.toList()) {
+            // #lzktdepslist: index iteration over the dependency list (no toList()
+            // copy). The held ReentrantLock serializes the whole graph, and
+            // refreshing a dependency clears that dep's own list — not this
+            // node's — so the index view is stable across the loop.
+            val deps = node.dependencies
+            for (i in deps.indices) {
+                val dep = deps[i]
                 if (nodes[dep] is Node.Slot && refreshSlot(dep)) dependencyChanged = true
             }
             val needsRecompute = !node.hasValue || node.forceRecompute || dependencyChanged

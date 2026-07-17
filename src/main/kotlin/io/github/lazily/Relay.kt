@@ -265,7 +265,9 @@ class SpillStore<T : Any>(
     /** Drop acked pages (durable reclaim). Manifest/cursor stay consistent. */
     fun reclaim() {
         if (acked > 0) {
-            repeat(acked) { pages.removeAt(0) }
+            // #lzktsublistclear: one O(acked) bulk drop instead of acked × O(N)
+            // removeAt(0) shifts (was O(N²) over a reclaim sweep).
+            pages.subList(0, acked).clear()
             acked = 0
         }
     }
