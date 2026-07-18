@@ -19,6 +19,151 @@ class EffectHandle @PublishedApi internal constructor(val id: Int)
  */
 class SignalHandle<T : Any> @PublishedApi internal constructor(val slot: SlotHandle<T>, val effect: EffectHandle)
 
+// -- SmallEdgeList -----------------------------------------------------------
+
+// #lzktsmalledgelist: most reactive nodes carry 0-2 dependency edges, so
+// inline those (zero allocation for the common case) and only promote to an
+// ArrayList on the 3rd add. Mirrors lazily-rs `SmallVec<[_; 2]>`
+// (context.rs ~26-68). Preserves insertion order and dedup to match the former
+// ArrayList + `addEdge` linear-scan guard (effect-scheduling order matters,
+// per the comment at the former Context.addEdge site). Mutable in place.
+private class SmallEdgeList : MutableIterable<Int> {
+    // State encoding:
+    //   count == 0 : empty
+    //   count == 1 : [a] holds element 0
+    //   count == 2 : [a] holds element 0, [b] holds element 1
+    //   count >= 3 : [list] holds every element; a/b unused
+    private var a: Int = 0
+    private var b: Int = 0
+    private var list: ArrayList<Int>? = null
+    private var count: Int = 0
+
+    val size: Int get() = count
+
+    val indices: IntRange get() = 0 until count
+
+    fun isEmpty(): Boolean = count == 0
+
+    fun isNotEmpty(): Boolean = count != 0
+
+    operator fun get(index: Int): Int {
+        val l = list
+        return when {
+            l != null -> l[index]
+            index == 0 -> a
+            index == 1 -> b
+            else -> throw IndexOutOfBoundsException("SmallEdgeList[$index] (size=$count)")
+        }
+    }
+
+    operator fun contains(element: Int): Boolean {
+        val l = list
+        return when {
+            l != null -> element in l
+            count == 0 -> false
+            count == 1 -> a == element
+            else -> a == element || b == element // count == 2
+        }
+    }
+
+    /**
+     * Insertion-order append with linear dedup (mirrors the former
+     * `if (id !in edges) edges.add(id)` guard in `addEdge`). Returns true iff
+     * the element was newly added.
+     */
+    fun add(element: Int): Boolean {
+        if (contains(element)) return false
+        val l = list
+        if (l != null) {
+            l.add(element)
+            count++
+            return true
+        }
+        when (count) {
+            0 -> { a = element; count = 1 }
+            1 -> { b = element; count = 2 }
+            else -> {
+                // count == 2 → promote to ArrayList on the 3rd add.
+                val newList = ArrayList<Int>(4)
+                newList.add(a)
+                newList.add(b)
+                newList.add(element)
+                list = newList
+                count = 3
+            }
+        }
+        return true
+    }
+
+    /** Remove [element] if present; order of subsequent elements is preserved. */
+    fun remove(element: Int): Boolean {
+        val l = list
+        if (l != null) {
+            val i = l.indexOf(element)
+            if (i < 0) return false
+            l.removeAt(i)
+            count--
+            return true
+        }
+        when (count) {
+            0 -> return false
+            1 -> {
+                if (a != element) return false
+                a = 0
+                count = 0
+                return true
+            }
+            else -> { // count == 2
+                when {
+                    a == element -> {
+                        a = b
+                        b = 0
+                        count = 1
+                        return true
+                    }
+                    b == element -> {
+                        b = 0
+                        count = 1
+                        return true
+                    }
+                    else -> return false
+                }
+            }
+        }
+    }
+
+    fun clear() {
+        a = 0
+        b = 0
+        list = null
+        count = 0
+    }
+
+    /** Snapshot to an immutable list (defensive copy). */
+    fun toList(): List<Int> {
+        val l = list
+        return when {
+            l != null -> ArrayList(l)
+            count == 0 -> emptyList()
+            count == 1 -> listOf(a)
+            else -> listOf(a, b)
+        }
+    }
+
+    override fun iterator(): MutableIterator<Int> = object : MutableIterator<Int> {
+        private var index = 0
+        override fun hasNext(): Boolean = index < count
+        override fun next(): Int {
+            if (index >= count) throw NoSuchElementException("SmallEdgeList iterator exhausted")
+            val v = this@SmallEdgeList[index]
+            index++
+            return v
+        }
+        override fun remove() =
+            throw UnsupportedOperationException("SmallEdgeList iterator.remove is not supported")
+    }
+}
+
 // -- Context -----------------------------------------------------------------
 
 private const val INITIAL_NODE_CAPACITY = 16
@@ -48,21 +193,21 @@ private const val INITIAL_NODE_CAPACITY = 16
  */
 class Context {
     private sealed interface Node {
-        class Cell(var value: Any?, val dependents: ArrayList<Int> = ArrayList()) : Node
+        class Cell(var value: Any?, val dependents: SmallEdgeList = SmallEdgeList()) : Node
         class Slot(
             var value: Any? = null,
             var hasValue: Boolean = false,
             val memo: Boolean = false,
             val compute: Context.() -> Any? = { null },
-            val dependencies: ArrayList<Int> = ArrayList(),
-            val dependents: ArrayList<Int> = ArrayList(),
+            val dependencies: SmallEdgeList = SmallEdgeList(),
+            val dependents: SmallEdgeList = SmallEdgeList(),
             var dirty: Boolean = false,
             var forceRecompute: Boolean = false,
             var inProgress: Boolean = false,
         ) : Node
         class Effect(
             val run: Context.() -> (() -> Unit)?,
-            val dependencies: ArrayList<Int> = ArrayList(),
+            val dependencies: SmallEdgeList = SmallEdgeList(),
             var cleanup: (() -> Unit)? = null,
             var forceRun: Boolean = false,
         ) : Node
@@ -307,17 +452,17 @@ class Context {
 
     private fun currentFrame(): Int? = trackingStack.lastOrNull()
 
-    // Small edge containers: most nodes carry 0-2 edges, so a flat ArrayList
-    // with linear dedup beats a LinkedHashSet (mirrors lazily-rs SmallVec<[_;2]>
-    // + edge_insert/edge_remove context.rs ~26-68). Order-preserving to match
-    // the former LinkedHashSet effect-scheduling order.
-    private fun addEdge(edges: ArrayList<Int>, id: Int) {
-        if (id !in edges) edges.add(id)
+    // Small edge containers (#lzktsmalledgelist): most nodes carry 0-2 edges,
+    // so SmallEdgeList inlines those and only allocates an ArrayList on the
+    // 3rd add. Mirrors lazily-rs SmallVec<[_;2]> + edge_insert/edge_remove
+    // (context.rs ~26-68). Order-preserving to match the former LinkedHashSet
+    // effect-scheduling order; dedup is built into SmallEdgeList.add.
+    private fun addEdge(edges: SmallEdgeList, id: Int) {
+        edges.add(id)
     }
 
-    private fun removeEdge(edges: ArrayList<Int>, id: Int) {
-        val i = edges.indexOf(id)
-        if (i >= 0) edges.removeAt(i)
+    private fun removeEdge(edges: SmallEdgeList, id: Int) {
+        edges.remove(id)
     }
 
     private fun registerDependency(depId: Int, parentId: Int) {
