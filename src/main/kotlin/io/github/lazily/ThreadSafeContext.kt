@@ -297,8 +297,9 @@ class ThreadSafeContext {
     /** Dispose an effect: deschedule, drop edges, run its cleanup, recycle the id. */
     fun disposeEffect(handle: ThreadSafeEffectHandle) = locked {
         val id = handle.id
-        pendingEffects.remove(id)
-        scheduledEffects.remove(id)
+        // O(1) scheduled check before the queue scan; see Context.disposeEffect
+        // for why the unguarded form was quadratic in fan-out (`#lzspecedgeindex`).
+        if (scheduledEffects.remove(id)) pendingEffects.remove(id)
         val node = nodes[id] as? Node.Effect ?: return@locked
         nodes[id] = null
         freeIds.addLast(id)

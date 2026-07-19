@@ -271,8 +271,17 @@ class Context {
     /** Dispose an effect: deschedule, drop edges, run its cleanup, recycle the id. */
     fun disposeEffect(handle: EffectHandle) {
         val id = handle.id
-        pendingEffects.remove(id)
-        scheduledEffects.remove(id)
+        // Only search the pending queue when the effect is actually in it
+        // (`#lzspecedgeindex`). `scheduledEffects` already answers that in O(1),
+        // and the unguarded scan was quadratic in fan-out for a reason that is
+        // not obvious: `kotlin.collections.ArrayDeque.indexOf` computes
+        // `tail = (head + size) % capacity` and takes its wraparound branch on
+        // `head >= tail`, which an *empty* deque satisfies (`tail == head`). It
+        // then scans `head until capacity` plus `0 until tail` — the whole
+        // backing array. The deque never shrinks, so after one wide flush every
+        // later dispose scanned width slots looking for an id that could not be
+        // there, and tearing down a width-W fan-out cost O(W^2).
+        if (scheduledEffects.remove(id)) pendingEffects.remove(id)
         val node = nodes[id] as? Node.Effect ?: return
         nodes[id] = null
         freeIds.addLast(id)

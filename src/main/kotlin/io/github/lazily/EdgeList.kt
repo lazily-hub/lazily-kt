@@ -65,6 +65,30 @@ internal val EDGE_INDEX_DEMOTE_THRESHOLD: Int =
         ?: ((EDGE_INDEX_THRESHOLD * 3) / 4)
 
 /**
+ * Audit lever: force edge *removal* back to the pre-index linear form
+ * (`-Dlazily.forceScanRemove=true`), while leaving registration indexed.
+ *
+ * Registration and removal are separate quadratics and **do not compose**.
+ * `lazily-zig` fixed registration, reverted `remove` to a scan, and watched
+ * teardown return to its unfixed baseline — so a passing registration ladder
+ * says nothing about the removal path. The only way to show removal is genuinely
+ * O(1) is to put the scan back and measure the delta, which is what this flag is
+ * for; [EdgeAudit] drives it.
+ *
+ * The forced path stays *correct*, not just slow: it removes in list order and
+ * then repairs every index position after the hole, which is what an index
+ * carrying membership but not positions is obliged to do. That is the shape
+ * `lazily-dart` had before it started storing each dependent's position. So the
+ * delta this flag exposes is purely the O(degree)-vs-O(1) cost, with no
+ * behavioural difference to confound it.
+ *
+ * Static final, read once at class init, so the JIT folds it away entirely when
+ * unset — the default path pays nothing for this being here.
+ */
+internal val EDGE_FORCE_SCAN_REMOVE: Boolean =
+    System.getProperty("lazily.forceScanRemove")?.toBoolean() ?: false
+
+/**
  * Open-addressed `int -> int` map, element to its position in the edge list.
  *
  * A `HashMap<Int, Int>` would box both halves of every entry, which at width 1M
@@ -327,6 +351,17 @@ internal class SmallEdgeList : MutableIterable<Int> {
         if (l != null) {
             if (count > EDGE_INDEX_DEMOTE_THRESHOLD) {
                 val idx = index
+                if (idx != null && EDGE_FORCE_SCAN_REMOVE) {
+                    // Audit-only naive form; see EDGE_FORCE_SCAN_REMOVE.
+                    val i = l.indexOf(element)
+                    if (i < 0) return false
+                    l.removeAt(i)
+                    count--
+                    idx.remove(element)
+                    for (k in i until l.size) idx.put(l[k], k)
+                    if (count <= EDGE_INDEX_DEMOTE_THRESHOLD) index = null
+                    return true
+                }
                 if (idx != null) {
                     val pos = idx.remove(element)
                     if (pos < 0) return false

@@ -70,6 +70,28 @@ tasks.register<JavaExec>("edgeIndexLoad") {
     }
 }
 
+// Edge removal + effect-flush fan-out audit (#lzspecedgeindex): wide vs narrow
+// fan-out at equal node count, so a per-edge quadratic separates from the cache
+// and GC growth that an absolute width ladder cannot distinguish it from.
+tasks.register<JavaExec>("edgeAudit") {
+    group = "benchmark"
+    description = "Audit edge removal + effect flush for fan-out quadratics (manual, not CI)."
+    mainClass.set("io.github.lazily.EdgeAudit")
+    classpath = sourceSets.main.get().runtimeClasspath
+    standardOutput = System.out
+    errorOutput = System.err
+    maxHeapSize = (project.findProperty("lazily.loadHeap") as String?) ?: "8g"
+    (project.findProperty("lazily.forceScanRemove") as String?)?.let {
+        systemProperty("lazily.forceScanRemove", it)
+    }
+    (project.findProperty("lazily.auditMaxWidth") as String?)?.let {
+        systemProperty("lazily.auditMaxWidth", it)
+    }
+    (project.findProperty("lazily.edgeIndexThreshold") as String?)?.let {
+        systemProperty("lazily.edgeIndexThreshold", it)
+    }
+}
+
 // Edge-index crossover sweep (#lzspecedgeindex): the same fan-out width measured
 // with the index forced off and forced on, so the crossover degree is measured
 // rather than copied from another binding.

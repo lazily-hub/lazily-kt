@@ -202,6 +202,93 @@ class EdgeIndexTest {
         for (i in 0 until width) assertEquals(100 + i, ctx.get(subs[i]))
     }
 
+    // -- Descheduling on dispose (`#lzspecedgeindex`) ----------------------
+    //
+    // `disposeEffect` now consults `scheduledEffects` before searching the
+    // pending queue, because the unguarded search was O(retained capacity) even
+    // when the queue was empty and made teardown of a wide fan-out quadratic.
+    // The cost is invisible to a unit test; what a unit test can pin is that the
+    // guard did not cost correctness, i.e. that disposing an effect which *is*
+    // currently queued still stops it running. The timing half lives in the
+    // manual `edgeAudit` ladder.
+
+    @Test
+    fun `disposing a queued effect while flushing still deschedules it`() {
+        val ctx = Context()
+        val c = ctx.cell(0)
+        var victimRuns = 0
+        var disposerRan = false
+        // The frontier pops LIFO, so the *last* registered effect runs first.
+        // The disposer must therefore be registered last for the victim to still
+        // be queued when the dispose happens.
+        val victim = ctx.effect { ctx.getCell(c); victimRuns++; null }
+        val disposer = ctx.effect {
+            ctx.getCell(c)
+            disposerRan = true
+            ctx.disposeEffect(victim)
+            null
+        }
+        assertEquals(1, victimRuns, "victim runs once at registration")
+
+        ctx.setCell(c, 1)
+        // Guard against a vacuous pass: if the victim ran before the disposer,
+        // the dispose never happened against a queued effect and this test would
+        // prove nothing.
+        assertTrue(disposerRan, "disposer must have run")
+        assertEquals(1, victimRuns, "victim was disposed while queued and must not rerun")
+        assertFalse(ctx.isEffectActive(victim), "victim should be inactive")
+        assertTrue(ctx.isEffectActive(disposer))
+    }
+
+    @Test
+    fun `disposing an unqueued effect leaves other pending effects intact`() {
+        // The guard must not skip descheduling work it still owes: disposing an
+        // effect that is not queued must leave every queued sibling running.
+        val ctx = Context()
+        val c = ctx.cell(0)
+        val runs = IntArray(3)
+        val hs = (0 until 3).map { i -> ctx.effect { ctx.getCell(c); runs[i]++; null } }
+        ctx.disposeEffect(hs[1])
+        ctx.setCell(c, 1)
+        assertEquals(2, runs[0])
+        assertEquals(1, runs[1], "disposed effect must not rerun")
+        assertEquals(2, runs[2])
+    }
+
+    @Test
+    fun `wide teardown after a wide flush leaves the graph consistent`() {
+        // Reproduces the shape that was quadratic: one topic, a wide effect
+        // fan-out, a publish that fills and drains the pending queue, then a
+        // full teardown. Every dispose used to rescan the drained queue's
+        // retained capacity.
+        val ctx = Context()
+        val width = EDGE_INDEX_THRESHOLD * 8
+        val topic = ctx.cell(0)
+        val runs = IntArray(width)
+        val hs = (0 until width).map { i -> ctx.effect { ctx.getCell(topic); runs[i]++; null } }
+        ctx.setCell(topic, 1)
+        for (i in 0 until width) assertEquals(2, runs[i], "effect $i should have rerun once")
+
+        for (h in hs) ctx.disposeEffect(h)
+        for (h in hs) assertFalse(ctx.isEffectActive(h))
+        ctx.setCell(topic, 2)
+        for (i in 0 until width) assertEquals(2, runs[i], "disposed effect $i re-ran after teardown")
+    }
+
+    @Test
+    fun `thread-safe context deschedules a queued effect on dispose`() {
+        val ctx = ThreadSafeContext()
+        val c = ctx.cell(0)
+        var victimRuns = 0
+        var disposerRan = false
+        val victim = ctx.effect { ctx.getCell(c); victimRuns++; null }
+        ctx.effect { ctx.getCell(c); disposerRan = true; ctx.disposeEffect(victim); null }
+        assertEquals(1, victimRuns)
+        ctx.setCell(c, 1)
+        assertTrue(disposerRan, "disposer must have run")
+        assertEquals(1, victimRuns, "victim was disposed while queued and must not rerun")
+    }
+
     @Test
     fun `wide fan-in refreshes every dependency`() {
         // The other axis: one slot reading many cells, so it is the slot's
