@@ -40,6 +40,8 @@ jobs:
           test -d ../lazily-spec/conformance || { echo "::error::../lazily-spec/conformance missing — the conformance replays cannot run"; exit 1; }
           test -d ../lazily-spec/conformance/message-passing || { echo "::error::../lazily-spec/conformance/message-passing missing — CommandConformanceTest would not replay"; exit 1; }
           test -f ../lazily-spec/conformance/receipts/causal_receipts.json || { echo "::error::receipts/causal_receipts.json missing — ReceiptTest would not replay"; exit 1; }
+          test -d ../lazily-spec/conformance/reactive-graph || { echo "::error::../lazily-spec/conformance/reactive-graph missing — ReactiveGraphConformanceTest would not replay"; exit 1; }
+          test -f ../lazily-spec/conformance/reactive-graph/transitive_invalidation_reaches_depth.json || { echo "::error::reactive-graph/transitive_invalidation_reaches_depth.json missing — the invalidation-cascade replay across the sync/thread-safe/async contexts would not run"; exit 1; }
           test -f ../lazily-spec/schemas/agent-doc-state.json || { echo "::error::schemas/agent-doc-state.json missing — the type_tag vocabulary check would not run"; exit 1; }
 
       - name: Build

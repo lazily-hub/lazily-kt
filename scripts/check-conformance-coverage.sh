@@ -20,11 +20,19 @@ manifest="${1:-build/conformance-fixtures-loaded.txt}"
 
 # Minimum total fixtures replayed. Raise this when areas are added; never lower
 # it to make a red build green — a drop means a replay stopped running.
-MIN_FIXTURES="${MIN_FIXTURES:-96}"
+# 96 before reactive-graph, +1 for the one reactive-graph fixture lazily-kt can
+# replay today (transitive_invalidation_reaches_depth). The other 8 are skipped
+# for named unsupported ops and are deliberately NOT counted — the manifest
+# means "actually replayed", so raise this as those ops land.
+MIN_FIXTURES="${MIN_FIXTURES:-97}"
 
 # Areas lazily-kt replays. message-passing and receipts are listed explicitly
 # because they were the areas that silently skipped for the entire life of the
-# bundled-fixture fallback.
+# bundled-fixture fallback. reactive-graph is listed because lazily-kt replayed
+# NONE of it until ReactiveGraphConformanceTest existed — lazily-rs was the only
+# binding executing that corpus, which is how an invalidation-cascade defect
+# shipped undetected in lazily-dart and lazily-go against a fixture that was
+# already on disk.
 REQUIRED_AREAS=(
   agent-doc
   collections
@@ -38,6 +46,7 @@ REQUIRED_AREAS=(
   message-passing
   presence
   rateshape
+  reactive-graph
   receipts
   reliable-sync
   resilience
