@@ -1,5 +1,5 @@
 {
-  "description": "CrdtTree contract (#lzcrdttree): the document join and delta fold are commutative, associative, and idempotent; delta_since(empty) is the identity-preserving snapshot.",
+  "description": "CrdtTree contract (#lzcrdttree): the document join and delta fold are commutative, associative, and idempotent; delta_since(empty) is the identity-preserving snapshot; delta_since(own frontier) is empty.",
   "kind": "CrdtTree",
   "model": "TextCrdt",
   "scenarios": [

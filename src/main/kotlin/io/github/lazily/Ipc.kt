@@ -671,7 +671,11 @@ data class CrdtSync(
         fun fromJson(element: JsonElement): CrdtSync {
             val obj = element.asObject("CrdtSync")
             return CrdtSync(
-                frontier = obj.required("frontier").asArray("frontier").map { entry ->
+                // `frontier` is optional (#lzspecfrontiersuppress): an omitted
+                // frontier is equivalent to `[]` and means "unchanged since the
+                // last accepted frame" — the receiver reuses its last-merged one.
+                frontier = (obj["frontier"] ?: JsonArray(emptyList()))
+                    .asArray("frontier").map { entry ->
                     val pair = entry.asArray("frontier entry")
                     require(pair.size == 2) { "frontier entry must be a [peer, stamp] pair" }
                     pair[0].jsonPrimitive.long to WireStamp.fromJson(pair[1])

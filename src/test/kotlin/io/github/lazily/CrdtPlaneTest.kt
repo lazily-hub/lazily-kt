@@ -3,7 +3,10 @@ package io.github.lazily
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -44,19 +47,39 @@ class CrdtPlaneTest {
             val sync = assertIs<IpcMessage.CrdtSyncMessage>(message).sync
 
             val assertions = frame.getValue("assertions").jsonObject
-            assertEquals(
-                assertions.getValue("frontier_len").jsonPrimitive.int,
-                sync.frontier.size,
-                "frontier_len mismatch for $label",
-            )
+            assertions["frontier_len"]?.let {
+                assertEquals(it.jsonPrimitive.int, sync.frontier.size, "frontier_len mismatch for $label")
+            }
+            assertions["frontier_omitted"]?.let {
+                // #lzspecfrontiersuppress: an omitted frontier decodes as empty.
+                assertTrue(it.jsonPrimitive.boolean, "frontier_omitted must assert true for $label")
+                assertTrue(sync.frontier.isEmpty(), "frontier must decode empty for $label")
+            }
             assertEquals(
                 assertions.getValue("op_count").jsonPrimitive.int,
                 sync.ops.size,
                 "op_count mismatch for $label",
             )
-            // Byte-for-byte JSON round-trip through the externally-tagged envelope.
-            assertEquals(wire, message.toJson(), "wire round-trip mismatch for $label")
+            // JSON round-trip through the externally-tagged envelope. Byte-for-byte
+            // except for schema-declared-equivalent encodings (conformance.md §
+            // Round-trip equivalence exemptions): `CrdtSync.frontier` omitted ≡ [].
+            assertEquals(canonicalizeCrdtSyncWire(wire), message.toJson(), "wire round-trip mismatch for $label")
             assertEquals(message, IpcMessage.decodeJson(message.encodeJson()))
+        }
+    }
+
+    /**
+     * Fill in the declared default for `CrdtSync.frontier` so an omitted frontier
+     * compares equal to the canonical empty encoding (#lzspecfrontiersuppress).
+     */
+    private fun canonicalizeCrdtSyncWire(wire: JsonObject): JsonObject {
+        val inner = wire["CrdtSync"]?.jsonObject ?: return wire
+        if ("frontier" in inner) return wire
+        return buildJsonObject {
+            put("CrdtSync", buildJsonObject {
+                put("frontier", JsonArray(emptyList()))
+                inner.forEach { (k, v) -> put(k, v) }
+            })
         }
     }
 

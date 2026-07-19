@@ -31,6 +31,25 @@ jobs:
       - name: Test
         run: ./gradlew test --no-daemon
 
+  fixture-sync:
+    name: Conformance fixtures in sync with lazily-spec
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Checkout canonical lazily-spec
+        uses: actions/checkout@v4
+        with:
+          repository: lazily-hub/lazily-spec
+          path: lazily-spec
+
+      # The test job replays fixtures bundled under src/test/resources/conformance
+      # because it has no lazily-spec sibling. Without this check a fixture the
+      # spec has changed keeps replaying its stale local copy and stays green.
+      - name: Check bundled fixtures against lazily-spec
+        run: ./scripts/check-fixture-sync.sh lazily-spec
+
   lean:
     name: Lean formal models (#lzleanformal)
     runs-on: ubuntu-latest
