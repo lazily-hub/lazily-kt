@@ -49,6 +49,49 @@ tasks.register<JavaExec>("benchmarkScale") {
     if (scaleN != null) environment("LAZILY_SCALE_N", scaleN)
 }
 
+// Edge-index width ladder (#lzspecedgeindex). Manual / on-demand only — this is
+// deliberately NOT part of `make check` or CI: it climbs to millions of nodes and
+// wants a large explicit heap.
+//
+//   ./gradlew edgeIndexLoad -Plazily.loadMaxWidth=1000000 -Plazily.loadHeap=12g
+tasks.register<JavaExec>("edgeIndexLoad") {
+    group = "benchmark"
+    description = "Run the edge-index pub/sub width ladder (manual, not CI)."
+    mainClass.set("io.github.lazily.EdgeIndexLoad")
+    classpath = sourceSets.main.get().runtimeClasspath
+    standardOutput = System.out
+    errorOutput = System.err
+    maxHeapSize = (project.findProperty("lazily.loadHeap") as String?) ?: "8g"
+    (project.findProperty("lazily.loadMaxWidth") as String?)?.let {
+        systemProperty("lazily.loadMaxWidth", it)
+    }
+    (project.findProperty("lazily.edgeIndexThreshold") as String?)?.let {
+        systemProperty("lazily.edgeIndexThreshold", it)
+    }
+}
+
+// Edge-index crossover sweep (#lzspecedgeindex): the same fan-out width measured
+// with the index forced off and forced on, so the crossover degree is measured
+// rather than copied from another binding.
+tasks.register<JavaExec>("edgeIndexCrossover") {
+    group = "benchmark"
+    description = "Measure the scan-vs-index crossover degree (manual, not CI)."
+    mainClass.set("io.github.lazily.EdgeIndexCrossover")
+    classpath = sourceSets.main.get().runtimeClasspath
+    standardOutput = System.out
+    errorOutput = System.err
+    maxHeapSize = (project.findProperty("lazily.loadHeap") as String?) ?: "4g"
+    (project.findProperty("lazily.edgeIndexThreshold") as String?)?.let {
+        systemProperty("lazily.edgeIndexThreshold", it)
+    }
+    (project.findProperty("lazily.crossoverDegrees") as String?)?.let {
+        systemProperty("lazily.crossoverDegrees", it)
+    }
+    (project.findProperty("lazily.edgeIndexDemoteThreshold") as String?)?.let {
+        systemProperty("lazily.edgeIndexDemoteThreshold", it)
+    }
+}
+
 kotlin {
     jvmToolchain(21)
 }

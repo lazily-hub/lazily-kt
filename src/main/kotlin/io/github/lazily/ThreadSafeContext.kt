@@ -85,21 +85,21 @@ private const val INITIAL_NODE_CAPACITY = 16
  */
 class ThreadSafeContext {
     private sealed interface Node {
-        class Cell(var value: Any?, val dependents: ArrayList<Int> = ArrayList()) : Node
+        class Cell(var value: Any?, val dependents: SmallEdgeList = SmallEdgeList()) : Node
         class Slot(
             var value: Any? = null,
             var hasValue: Boolean = false,
             val memo: Boolean = false,
             val compute: ThreadSafeContext.() -> Any? = { null },
-            val dependencies: ArrayList<Int> = ArrayList(),
-            val dependents: ArrayList<Int> = ArrayList(),
+            val dependencies: SmallEdgeList = SmallEdgeList(),
+            val dependents: SmallEdgeList = SmallEdgeList(),
             var dirty: Boolean = false,
             var forceRecompute: Boolean = false,
             var inProgress: Boolean = false,
         ) : Node
         class Effect(
             val run: ThreadSafeContext.() -> (() -> Unit)?,
-            val dependencies: ArrayList<Int> = ArrayList(),
+            val dependencies: SmallEdgeList = SmallEdgeList(),
             var cleanup: (() -> Unit)? = null,
             var forceRun: Boolean = false,
         ) : Node
@@ -339,14 +339,17 @@ class ThreadSafeContext {
 
     private fun currentFrame(): Int? = trackingStack.get().lastOrNull()
 
-    // Small edge containers (mirrors Context + lazily-rs SmallVec<[_;2]>).
-    private fun addEdge(edges: ArrayList<Int>, id: Int) {
-        if (id !in edges) edges.add(id)
+    // Edge containers: see EdgeList.kt. Shared with Context — SmallEdgeList
+    // inlines the 0-2 edge case, scans for dedup while the degree is small, and
+    // promotes to a hash index above EDGE_INDEX_THRESHOLD (#lzspecedgeindex).
+    // Before this, both add and remove were an unconditional linear scan, so a
+    // width-N fan-out cost ~N^2/2 comparisons to build.
+    private fun addEdge(edges: SmallEdgeList, id: Int) {
+        edges.add(id)
     }
 
-    private fun removeEdge(edges: ArrayList<Int>, id: Int) {
-        val i = edges.indexOf(id)
-        if (i >= 0) edges.removeAt(i)
+    private fun removeEdge(edges: SmallEdgeList, id: Int) {
+        edges.remove(id)
     }
 
     private fun registerDependency(depId: Int, parentId: Int) {
