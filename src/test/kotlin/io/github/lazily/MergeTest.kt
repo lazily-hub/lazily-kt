@@ -21,13 +21,7 @@ import kotlinx.serialization.json.jsonPrimitive
  */
 class MergeTest {
     private fun loadFixture(name: String): String {
-        val specPath = Path.of("../lazily-spec/conformance/collections/$name")
-        return if (Files.exists(specPath)) {
-            Files.readString(specPath)
-        } else {
-            javaClass.getResource("/conformance/collections/$name")?.readText()
-                ?: error("missing conformance fixture: $name")
-        }
+        return ConformanceFixtures.read("collections/$name")
     }
 
     @Test

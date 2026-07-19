@@ -33,47 +33,32 @@ import kotlin.test.assertTrue
 class AgentDocStateConformanceTest {
     private val json = Json
 
-    private val conformanceDir: Path = Path.of("../lazily-spec/conformance/agent-doc")
-    private val schemaPath: Path = Path.of("../lazily-spec/schemas/agent-doc-state.json")
+    private val schemaPath: Path = ConformanceFixtures.root.resolveSibling("schemas/agent-doc-state.json")
 
     private fun loadFixture(name: String): JsonObject {
-        val specPath = conformanceDir.resolve(name)
-        val text = if (Files.exists(specPath)) {
-            Files.readString(specPath)
-        } else {
-            val resource = javaClass.getResource("/conformance/agent-doc/$name")
-                ?: error("missing agent-doc conformance fixture: $name")
-            resource.readText()
-        }
+        val text = ConformanceFixtures.read("agent-doc/$name")
         val fixture = json.parseToJsonElement(text).jsonObject
         assertEquals("1", fixture.getValue("protocol_version").jsonPrimitive.content)
         return fixture
     }
 
     /**
-     * The pinned eight-value `type_tag` vocabulary. Loaded from the canonical
-     * schema when the spec checkout is alongside (so adding a node kind is a
-     * visible failure), with the pinned 1.0.0 set as the resource fallback.
+     * The `type_tag` vocabulary, read from the canonical lazily-spec schema so
+     * adding or removing a node kind is a visible failure. There is deliberately
+     * no pinned in-source fallback: a hardcoded copy silently masks schema drift
+     * exactly the way the bundled fixtures did (#lzspecconf).
      */
     private fun typeTagVocabulary(): Set<String> {
-        if (Files.exists(schemaPath)) {
-            val schema = json.parseToJsonElement(Files.readString(schemaPath)).jsonObject
-            val enum = schema
-                .getValue("\$defs").jsonObject
-                .getValue("TypeTag").jsonObject
-                .getValue("enum").jsonArray
-            return enum.map { it.jsonPrimitive.content }.toSet()
+        check(Files.exists(schemaPath)) {
+            "canonical agent-doc-state schema missing at ${schemaPath.toAbsolutePath()} — " +
+                "clone lazily-spec as a sibling or set LAZILY_SPEC_DIR"
         }
-        return setOf(
-            "agent_doc.document.baseline",
-            "agent_doc.queue",
-            "agent_doc.queue.head",
-            "agent_doc.closeout.cycle",
-            "agent_doc.transport.patch",
-            "agent_doc.supervisor.owner",
-            "agent_doc.route",
-            "agent_doc.proof.marker",
-        )
+        val schema = json.parseToJsonElement(Files.readString(schemaPath)).jsonObject
+        val enum = schema
+            .getValue("\$defs").jsonObject
+            .getValue("TypeTag").jsonObject
+            .getValue("enum").jsonArray
+        return enum.map { it.jsonPrimitive.content }.toSet()
     }
 
     private fun parseWire(fixture: JsonObject): IpcMessage =

@@ -1,4 +1,6 @@
 LAKE ?= lake
+LAZILY_SPEC_DIR ?= ../lazily-spec
+SPEC_CONFORMANCE_DIR ?= $(LAZILY_SPEC_DIR)/conformance
 LEAN_SPEC_DIR ?= ../lazily-spec/formal/lean
 LEAN_FORMAL_DIR ?= ../lazily-formal
 
@@ -12,8 +14,14 @@ LEAN_FORMAL_DIR ?= ../lazily-formal
 
 check: test test-lean-formal test-lazily-formal
 
+# Conformance fixtures are read only from the canonical ../lazily-spec sibling
+# (#lzspecconf) — there is no bundled fallback, because a fallback is exactly
+# what makes spec drift invisible. The coverage guard then asserts the fixtures
+# actually replayed, which an absence guard alone cannot catch.
 test:
+	test -d "$(SPEC_CONFORMANCE_DIR)" || { echo "missing $(SPEC_CONFORMANCE_DIR); clone lazily-spec as a sibling or set LAZILY_SPEC_DIR"; exit 1; }
 	./gradlew test
+	./scripts/check-conformance-coverage.sh
 
 # Reactive-core microbenchmark (parity with lazily-rs benches/context.rs):
 # cached reads, cold first get, fan-out, invalidation, memo suppression, effect

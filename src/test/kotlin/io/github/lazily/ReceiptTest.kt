@@ -111,10 +111,9 @@ class ReceiptTest {
 
     @Test
     fun `shared causal receipt conformance fixture replays`() {
-        val fixturePath = Path.of("../lazily-spec/conformance/receipts/causal_receipts.json")
-        if (!Files.exists(fixturePath)) return
-
-        val fixture = Json.parseToJsonElement(Files.readString(fixturePath)).jsonObject
+        val fixture = Json.parseToJsonElement(
+            ConformanceFixtures.read("receipts/causal_receipts.json"),
+        ).jsonObject
         val message = ReceiptMessage.fromJson(fixture.getValue("wire"))
         val receipts = assertIs<ReceiptMessage.CausalReceiptsMessage>(message).batch.receipts
         val assertions = fixture.getValue("assertions").jsonObject

@@ -23,13 +23,7 @@ class WindowingConformanceTest {
     private val sum: (Long, Long) -> Long = { a, b -> a + b }
 
     private fun loadFixture(name: String): JsonObject {
-        val specPath = Path.of("../lazily-spec/conformance/windowing/$name")
-        val text = if (Files.exists(specPath)) {
-            Files.readString(specPath)
-        } else {
-            javaClass.getResource("/conformance/windowing/$name")?.readText()
-                ?: error("missing conformance fixture: $name")
-        }
+        val text = ConformanceFixtures.read("windowing/$name")
         return json.parseToJsonElement(text).jsonObject
     }
 

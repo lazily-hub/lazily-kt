@@ -25,30 +25,33 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # The conformance replays read fixtures ONLY from the canonical sibling at
+      # ../lazily-spec/conformance (#lzspecconf). lazily-kt used to bundle copies
+      # under src/test/resources/conformance and fall back to them, which meant
+      # whole areas the spec has but kt never bundled (message-passing, receipts)
+      # silently skipped in CI while reporting green.
+      - name: Fetch canonical lazily-spec conformance fixtures (#lzspecconf)
+        run: git clone --depth 1 https://github.com/lazily-hub/lazily-spec.git ../lazily-spec
+
+      # Guard the absence case: without the sibling every conformance replay
+      # fails loudly now, but fail here first with an actionable message.
+      - name: Guard — canonical fixtures present (#lzspecconf)
+        run: |
+          test -d ../lazily-spec/conformance || { echo "::error::../lazily-spec/conformance missing — the conformance replays cannot run"; exit 1; }
+          test -d ../lazily-spec/conformance/message-passing || { echo "::error::../lazily-spec/conformance/message-passing missing — CommandConformanceTest would not replay"; exit 1; }
+          test -f ../lazily-spec/conformance/receipts/causal_receipts.json || { echo "::error::receipts/causal_receipts.json missing — ReceiptTest would not replay"; exit 1; }
+          test -f ../lazily-spec/schemas/agent-doc-state.json || { echo "::error::schemas/agent-doc-state.json missing — the type_tag vocabulary check would not run"; exit 1; }
+
       - name: Build
         run: ./gradlew build --no-daemon
 
       - name: Test
         run: ./gradlew test --no-daemon
 
-  fixture-sync:
-    name: Conformance fixtures in sync with lazily-spec
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Checkout canonical lazily-spec
-        uses: actions/checkout@v4
-        with:
-          repository: lazily-hub/lazily-spec
-          path: lazily-spec
-
-      # The test job replays fixtures bundled under src/test/resources/conformance
-      # because it has no lazily-spec sibling. Without this check a fixture the
-      # spec has changed keeps replaying its stale local copy and stays green.
-      - name: Check bundled fixtures against lazily-spec
-        run: ./scripts/check-fixture-sync.sh lazily-spec
+      # An absence guard cannot catch shadowing — a replay refactored away leaves
+      # the fixture dir present and CI green. Assert the fixtures actually ran.
+      - name: Guard — conformance fixtures actually replayed (#lzspecconf)
+        run: ./scripts/check-conformance-coverage.sh
 
   lean:
     name: Lean formal models (#lzleanformal)

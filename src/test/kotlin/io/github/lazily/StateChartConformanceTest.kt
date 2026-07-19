@@ -29,14 +29,7 @@ class StateChartConformanceTest {
     private val specDir: Path = Path.of("../lazily-spec/conformance/statechart")
 
     private fun loadFixture(name: String): JsonObject {
-        val specPath = specDir.resolve(name)
-        val text = if (Files.exists(specPath)) {
-            Files.readString(specPath)
-        } else {
-            val resource = javaClass.getResource("/conformance/statechart/$name")
-                ?: error("missing statechart conformance fixture: $name")
-            resource.readText()
-        }
+        val text = ConformanceFixtures.read("statechart/$name")
         return json.parseToJsonElement(text).jsonObject
     }
 

@@ -38,10 +38,9 @@ class CrdtTreeAndOutboxStoreTest {
         }
     }
 
-    private fun fixture(path: String) =
-        Json.parseToJsonElement(
-            requireNotNull(javaClass.getResource(path)) { "missing fixture $path" }.readText(),
-        ).jsonObject
+    /** Spec-relative fixture path, e.g. `crdt-tree/algebra.json` (#lzspecconf). */
+    private fun fixture(rel: String) =
+        Json.parseToJsonElement(ConformanceFixtures.read(rel)).jsonObject
 
     @Test
     fun crdtTreeDeltaAndMergeLaws() {
@@ -111,7 +110,7 @@ class CrdtTreeAndOutboxStoreTest {
 
     @Test
     fun crdtTreeCanonicalFixtureReplay() {
-        val scenarios = fixture("/conformance/crdt-tree/algebra.json")["scenarios"]!!.jsonArray
+        val scenarios = fixture("crdt-tree/algebra.json")["scenarios"]!!.jsonArray
         val mergeScenario = scenarios[0].jsonObject
         val seed = mergeScenario["seed"]!!.jsonObject
         val base = TextCrdt(seed["peer"]!!.jsonPrimitive.long, seed["text"]!!.jsonPrimitive.content)
@@ -161,7 +160,7 @@ class CrdtTreeAndOutboxStoreTest {
     @Test
     fun outboxStoreCanonicalFixtureReplay() {
         val scenarios =
-            fixture("/conformance/reliable-sync/outbox_store_protocol.json")["scenarios"]!!.jsonArray
+            fixture("reliable-sync/outbox_store_protocol.json")["scenarios"]!!.jsonArray
         for (scenarioElement in scenarios) {
             val scenario = scenarioElement.jsonObject
             val store = InMemoryStore()

@@ -23,13 +23,7 @@ class CoordinationConformanceTest {
     private val json = Json
 
     private fun loadFixture(name: String): JsonObject {
-        val specPath = Path.of("../lazily-spec/conformance/coordination/$name")
-        val text = if (Files.exists(specPath)) {
-            Files.readString(specPath)
-        } else {
-            javaClass.getResource("/conformance/coordination/$name")?.readText()
-                ?: error("missing conformance fixture: $name")
-        }
+        val text = ConformanceFixtures.read("coordination/$name")
         return json.parseToJsonElement(text).jsonObject
     }
 

@@ -21,12 +21,8 @@ import kotlin.test.assertTrue
  * Rust unit tests so both bindings agree fixture-by-fixture.
  */
 class CommandConformanceTest {
-    private val fixtureDir = Path.of("../lazily-spec/conformance/message-passing")
-
-    private fun fixturesPresent(): Boolean = Files.isDirectory(fixtureDir)
-
     private fun load(name: String): JsonObject =
-        Json.parseToJsonElement(Files.readString(fixtureDir.resolve(name))).jsonObject
+        Json.parseToJsonElement(ConformanceFixtures.read("message-passing/$name")).jsonObject
 
     private fun foldFrame(projection: CommandProjection, frame: JsonElement): CommandApplyStatus {
         val obj = frame.jsonObject
@@ -124,7 +120,6 @@ class CommandConformanceTest {
 
     @Test
     fun `editor_route submit is nonterminal`() {
-        if (!fixturesPresent()) return
         val fx = load("editor_route_submit.json")
         val p = CommandProjection()
         frames(fx).forEach { foldFrame(p, it) }
@@ -134,7 +129,6 @@ class CommandConformanceTest {
 
     @Test
     fun `sync tmux layout submit shared blob`() {
-        if (!fixturesPresent()) return
         val fx = load("sync_tmux_layout_submit.json")
         val p = CommandProjection()
         frames(fx).forEach { foldFrame(p, it) }
@@ -143,7 +137,6 @@ class CommandConformanceTest {
 
     @Test
     fun `accepted then applied receipt is terminal only at receipt`() {
-        if (!fixturesPresent()) return
         val fx = load("accepted_then_applied_receipt.json")
         val expect = fx.getValue("expect").jsonObject
         val terminalAt = expect.getValue("terminal_after_frame_index").jsonPrimitive.content.toInt()
@@ -159,7 +152,6 @@ class CommandConformanceTest {
 
     @Test
     fun `stale generation events and receipts are ignored`() {
-        if (!fixturesPresent()) return
         val fx = load("stale_generation_ignored.json")
         val expect = fx.getValue("expect").jsonObject
         val ignored = expect.getValue("ignored_frame_indices").jsonArray.map { it.jsonPrimitive.content.toInt() }
@@ -173,7 +165,6 @@ class CommandConformanceTest {
 
     @Test
     fun `terminal conflict fails closed fixture`() {
-        if (!fixturesPresent()) return
         val fx = load("terminal_conflict_fail_closed.json")
         val expect = fx.getValue("expect").jsonObject
         val conflictAt = expect.getValue("conflict_after_frame_index").jsonPrimitive.content.toInt()
@@ -190,7 +181,6 @@ class CommandConformanceTest {
 
     @Test
     fun `cancel preempts nonterminal scenarios`() {
-        if (!fixturesPresent()) return
         val fx = load("cancel_preempts_nonterminal.json")
         fx.getValue("scenarios").jsonArray.forEach { scenarioEl ->
             val scenario = scenarioEl.jsonObject
@@ -202,7 +192,6 @@ class CommandConformanceTest {
 
     @Test
     fun `reconnect command projection resyncs`() {
-        if (!fixturesPresent()) return
         val fx = load("reconnect_command_projection.json")
         val p = CommandProjection()
         frames(fx).forEach { foldFrame(p, it) }
@@ -211,7 +200,6 @@ class CommandConformanceTest {
 
     @Test
     fun `rpc call waits for terminal`() {
-        if (!fixturesPresent()) return
         val fx = load("rpc_call_waits_for_terminal.json")
         val expect = fx.getValue("expect").jsonObject
         val rpc = expect.getValue("rpc").jsonObject

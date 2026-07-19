@@ -28,14 +28,7 @@ class TemporalConformanceTest {
     private val json = Json
 
     private fun loadFixture(name: String): JsonObject {
-        val specPath = Path.of("../lazily-spec/conformance/temporal/$name")
-        val text = if (Files.exists(specPath)) {
-            Files.readString(specPath)
-        } else {
-            val resource = javaClass.getResource("/conformance/temporal/$name")
-                ?: error("missing conformance fixture: $name")
-            resource.readText()
-        }
+        val text = ConformanceFixtures.read("temporal/$name")
         return json.parseToJsonElement(text).jsonObject
     }
 

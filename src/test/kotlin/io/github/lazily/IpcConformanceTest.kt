@@ -20,14 +20,7 @@ class IpcConformanceTest {
     private val json = Json
 
     private fun loadFixture(name: String): JsonObject {
-        val specPath = Path.of("../lazily-spec/conformance/$name")
-        val text = if (Files.exists(specPath)) {
-            Files.readString(specPath)
-        } else {
-            val resource = javaClass.getResource("/conformance/$name")
-                ?: error("missing conformance fixture: $name")
-            resource.readText()
-        }
+        val text = ConformanceFixtures.read("$name")
         val fixture = json.parseToJsonElement(text).jsonObject
         assertEquals("1", fixture.getValue("protocol_version").jsonPrimitive.content)
         return fixture

@@ -290,8 +290,8 @@ lazily-kt replays the shared [`lazily-spec`][spec] conformance fixtures:
 - The `ShmBlobArena` host fixture (`conformance/arena_blob.json`) is replayed
   byte-for-byte — descriptor, 40-byte LZSH header, payload region, FNV-1a-64
   checksum, and round-trip read (`ShmBlobArenaTest`).
-- State-chart fixtures mirrored into
-  `src/test/resources/conformance/statechart/` are replayed by
+- State-chart fixtures read from the canonical sibling
+  `../lazily-spec/conformance/statechart/` are replayed by
   `StateChartConformanceTest`, asserting `accepted`, `active`, `matches`, and
   `actions` identically to every other binding.
 - The Async Reactive Context contract (slot state machine, stale discard,

@@ -27,14 +27,7 @@ class ShmBlobArenaTest {
     private val json = Json
 
     private fun loadArenaFixture(): JsonObject {
-        val specPath = Path.of("../lazily-spec/conformance/arena_blob.json")
-        val text = if (Files.exists(specPath)) {
-            Files.readString(specPath)
-        } else {
-            val resource = javaClass.getResource("/conformance/arena_blob.json")
-                ?: error("missing arena_blob fixture")
-            resource.readText()
-        }
+        val text = ConformanceFixtures.read("arena_blob.json")
         return json.parseToJsonElement(text).jsonObject
     }
 

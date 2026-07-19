@@ -27,14 +27,7 @@ class RateShapeConformanceTest {
     private val json = Json
 
     private fun loadFixture(name: String): JsonObject {
-        val specPath = Path.of("../lazily-spec/conformance/rateshape/$name")
-        val text = if (Files.exists(specPath)) {
-            Files.readString(specPath)
-        } else {
-            val resource = javaClass.getResource("/conformance/rateshape/$name")
-                ?: error("missing conformance fixture: $name")
-            resource.readText()
-        }
+        val text = ConformanceFixtures.read("rateshape/$name")
         return json.parseToJsonElement(text).jsonObject
     }
 

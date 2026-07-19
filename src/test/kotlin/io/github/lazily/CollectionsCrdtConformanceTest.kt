@@ -33,14 +33,7 @@ class CollectionsCrdtConformanceTest {
     private val json = Json
 
     private fun loadFixture(name: String): JsonObject {
-        val specPath = Path.of("../lazily-spec/conformance/collections/$name")
-        val text = if (Files.exists(specPath)) {
-            Files.readString(specPath)
-        } else {
-            val resource = javaClass.getResource("/conformance/collections/$name")
-                ?: error("missing conformance fixture: $name")
-            resource.readText()
-        }
+        val text = ConformanceFixtures.read("collections/$name")
         return json.parseToJsonElement(text).jsonObject
     }
 
