@@ -99,10 +99,13 @@ class ReactiveGraphConformanceTest {
             "disarm_disposes_nothing.json",
             "disposal_does_not_run_surviving_effects.json",
             "dispose_detaches_edges_both_directions.json",
+            "dispose_signal_reverts_to_lazy.json",
             "read_after_dispose_is_an_error.json",
             "recycled_id_inherits_nothing.json",
             "scope_teardown_equals_fold_of_disposals.json",
             "scoping_bounds_teardown_not_visibility.json",
+            "signal_materializes_once_per_batch.json",
+            "signal_materializes_without_a_read.json",
             "teardown_runs_members_in_reverse_creation_order.json",
             "transitive_invalidation_reaches_depth.json",
         )
@@ -114,6 +117,7 @@ class ReactiveGraphConformanceTest {
          * green: a fixture that runs and fails is a finding to report.
          */
         val SUPPORTED_OPS = setOf(
+            "batch",
             "begin_scope",
             "cell",
             "churn",
@@ -121,12 +125,14 @@ class ReactiveGraphConformanceTest {
             "disarm",
             "dispose",
             "dispose_fanout",
+            "dispose_signal",
             "dispose_stale_handle",
             "effect",
             "end_scope",
             "fanout",
             "read",
             "set_cell",
+            "signal",
         )
 
         /**
@@ -137,6 +143,7 @@ class ReactiveGraphConformanceTest {
          */
         val KNOWN_EXPECT_KEYS = setOf(
             "cleanup_order",
+            "computes_of",
             "dependencies_of",
             "dependents_of",
             "error",
@@ -187,9 +194,57 @@ class ReactiveGraphConformanceTest {
          */
         val cleanupLog: MutableList<String>
 
+        /**
+         * Cumulative compute invocations per node id — the `computes_of`
+         * observable.
+         *
+         * Counted from the start of the scenario, incremented by the compute
+         * body itself (see [countCompute]) rather than derived from anything the
+         * engine reports, and **never reset per step**. This is the only
+         * caller-observable difference between an eager signal and the lazy memo
+         * it is built on: the two return identical values for every read
+         * sequence in these fixtures, so a runner that faked or approximated
+         * this key would defeat the entire point of them.
+         *
+         * Synchronized because the async model's computes run on the context's
+         * dispatcher, not the test thread.
+         */
+        val computeCounts: MutableMap<String, Int>
+
+        /** Called from inside a wrapped compute body, once per invocation. */
+        fun countCompute(id: String) {
+            synchronized(computeCounts) {
+                computeCounts[id] = (computeCounts[id] ?: 0) + 1
+            }
+        }
+
+        /** Zero for a node that has never computed — never absent, never null. */
+        fun computesOf(id: String): Int =
+            synchronized(computeCounts) { computeCounts[id] ?: 0 }
+
         fun defineCell(id: String, value: Int, scope: String?)
         fun defineComputed(id: String, reads: List<String>, offset: Int, scope: String?)
         fun defineEffect(id: String, reads: List<String>, scope: String?)
+
+        /**
+         * An eager signal: `sum(reads) + offset`, the same compute convention as
+         * [defineComputed]. Materializes once at creation (clause 1).
+         */
+        fun defineSignal(id: String, reads: List<String>, offset: Int, scope: String?)
+
+        /**
+         * Dispose the eager puller and nothing else (clause 4). NOT a node
+         * teardown: the backing value stays readable and reverts to lazy
+         * recompute-on-read, which is why the corpus's own docs call the name a
+         * known inaccuracy.
+         */
+        fun disposeSignal(id: String)
+
+        /**
+         * Perform every write inside ONE batch, so N writes coalesce into one
+         * effect flush at the outermost exit (clause 3).
+         */
+        fun batchWrites(writes: List<Pair<String, Int>>)
 
         /**
          * Throws [DisposedNodeException] when the node — or a node it recomputes
@@ -228,10 +283,20 @@ class ReactiveGraphConformanceTest {
     private class SyncModel : Model {
         override val runLog = mutableListOf<String>()
         override val cleanupLog = mutableListOf<String>()
+        override val computeCounts = HashMap<String, Int>()
 
         private val ctx = Context()
         private val nodes = HashMap<String, GraphNode>()
         private val scopes = HashMap<String, TeardownScope>()
+
+        /**
+         * Signal handles, kept alongside [nodes] rather than in it: [nodes]
+         * holds the BACKING SLOT for a signal id, so reads, `readable`, and the
+         * degree assertions all resolve through the ordinary slot path — and so
+         * `dispose_signal` is visibly not a node teardown. This map exists only
+         * to reach the puller effect.
+         */
+        private val signals = HashMap<String, SignalHandle<Int>>()
 
         @Suppress("UNCHECKED_CAST")
         private fun readNode(id: String): Int = when (val n = nodes[id]) {
@@ -246,11 +311,31 @@ class ReactiveGraphConformanceTest {
 
         override fun defineComputed(id: String, reads: List<String>, offset: Int, scope: String?) {
             val compute: Context.() -> Int = {
+                countCompute(id)
                 var sum = offset
                 for (r in reads) sum += readNode(r)
                 sum
             }
             nodes[id] = scopes[scope]?.computed(compute) ?: ctx.computed(compute)
+        }
+
+        override fun defineSignal(id: String, reads: List<String>, offset: Int, scope: String?) {
+            val handle = ctx.signal {
+                countCompute(id)
+                var sum = offset
+                for (r in reads) sum += readNode(r)
+                sum
+            }
+            signals[id] = handle
+            nodes[id] = handle.slot
+            scopes[scope]?.let { it.adopt(handle.slot); it.adopt(handle.effect) }
+        }
+
+        override fun disposeSignal(id: String) =
+            ctx.disposeSignal(signals[id] ?: error("no signal '$id'"))
+
+        override fun batchWrites(writes: List<Pair<String, Int>>) {
+            ctx.batch { for ((id, v) in writes) setCell(id, v) }
         }
 
         override fun defineEffect(id: String, reads: List<String>, scope: String?) {
@@ -307,10 +392,14 @@ class ReactiveGraphConformanceTest {
     private class ThreadSafeModel : Model {
         override val runLog = mutableListOf<String>()
         override val cleanupLog = mutableListOf<String>()
+        override val computeCounts = HashMap<String, Int>()
 
         private val ctx = ThreadSafeContext()
         private val nodes = HashMap<String, ThreadSafeGraphNode>()
         private val scopes = HashMap<String, ThreadSafeTeardownScope>()
+
+        /** See [SyncModel.signals]. */
+        private val signals = HashMap<String, ThreadSafeSignalHandle<Int>>()
 
         @Suppress("UNCHECKED_CAST")
         private fun readNode(id: String): Int = when (val n = nodes[id]) {
@@ -325,11 +414,31 @@ class ReactiveGraphConformanceTest {
 
         override fun defineComputed(id: String, reads: List<String>, offset: Int, scope: String?) {
             val compute: ThreadSafeContext.() -> Int = {
+                countCompute(id)
                 var sum = offset
                 for (r in reads) sum += readNode(r)
                 sum
             }
             nodes[id] = scopes[scope]?.computed(compute) ?: ctx.computed(compute)
+        }
+
+        override fun defineSignal(id: String, reads: List<String>, offset: Int, scope: String?) {
+            val handle = ctx.signal {
+                countCompute(id)
+                var sum = offset
+                for (r in reads) sum += readNode(r)
+                sum
+            }
+            signals[id] = handle
+            nodes[id] = handle.slot
+            scopes[scope]?.let { it.adopt(handle.slot); it.adopt(handle.effect) }
+        }
+
+        override fun disposeSignal(id: String) =
+            ctx.disposeSignal(signals[id] ?: error("no signal '$id'"))
+
+        override fun batchWrites(writes: List<Pair<String, Int>>) {
+            ctx.batch { for ((id, v) in writes) setCell(id, v) }
         }
 
         override fun defineEffect(id: String, reads: List<String>, scope: String?) {
@@ -390,9 +499,17 @@ class ReactiveGraphConformanceTest {
         override val cleanupLog: MutableList<String> =
             Collections.synchronizedList(mutableListOf())
 
+        // Computes run on the context's dispatcher, so this is mutated off the
+        // test thread. Every access goes through Model.countCompute /
+        // Model.computesOf, which synchronize on it.
+        override val computeCounts = HashMap<String, Int>()
+
         private val ctx = AsyncContext()
         private val nodes = HashMap<String, AsyncGraphNode>()
         private val scopes = HashMap<String, AsyncTeardownScope>()
+
+        /** See [SyncModel.signals]. */
+        private val signals = HashMap<String, AsyncContext.AsyncSignalHandle<Int>>()
 
         @Suppress("UNCHECKED_CAST")
         private suspend fun AsyncComputeContext.readNode(id: String): Int =
@@ -419,11 +536,35 @@ class ReactiveGraphConformanceTest {
 
         override fun defineComputed(id: String, reads: List<String>, offset: Int, scope: String?) {
             val compute: suspend AsyncComputeContext.() -> Int = {
+                countCompute(id)
                 var sum = offset
                 for (r in reads) sum += readNode(r)
                 sum
             }
             nodes[id] = scopes[scope]?.computedAsync(compute) ?: ctx.computedAsync(compute)
+        }
+
+        override fun defineSignal(id: String, reads: List<String>, offset: Int, scope: String?) {
+            val handle = ctx.signalAsync {
+                countCompute(id)
+                var sum = offset
+                for (r in reads) sum += readNode(r)
+                sum
+            }
+            signals[id] = handle
+            nodes[id] = handle.slot
+            scopes[scope]?.let { it.adopt(handle.slot); it.adopt(handle.effect) }
+        }
+
+        // AsyncContext ships `disposeSignalNode` (both halves) but no
+        // puller-only counterpart, so the puller effect is disposed directly.
+        // That IS clause 4's operation — disposing the effect and nothing else.
+        override fun disposeSignal(id: String) = runBlocking {
+            ctx.disposeNode((signals[id] ?: error("no signal '$id'")).effect)
+        }
+
+        override fun batchWrites(writes: List<Pair<String, Int>>) {
+            ctx.batch { for ((id, v) in writes) setCell(id, v) }
         }
 
         override fun defineEffect(id: String, reads: List<String>, scope: String?) {
@@ -601,6 +742,21 @@ class ReactiveGraphConformanceTest {
                     op["offset"]?.jsonPrimitive?.int ?: 0,
                     scope,
                 )
+                "signal" -> model.defineSignal(
+                    op["id"]!!.jsonPrimitive.content,
+                    strs(op["reads"]),
+                    op["offset"]?.jsonPrimitive?.int ?: 0,
+                    scope,
+                )
+                "dispose_signal" -> model.disposeSignal(op["id"]!!.jsonPrimitive.content)
+                // A single op carrying its writes, not a begin/end pair, so the
+                // runner needs no nesting state. All writes land in ONE batch.
+                "batch" -> model.batchWrites(
+                    op["writes"]!!.jsonArray.map {
+                        val w = it.jsonObject
+                        w["id"]!!.jsonPrimitive.content to w["value"]!!.jsonPrimitive.int
+                    },
+                )
                 "effect" -> model.defineEffect(
                     op["id"]!!.jsonPrimitive.content,
                     strs(op["reads"]),
@@ -678,6 +834,16 @@ class ReactiveGraphConformanceTest {
                 val want = expect[key]
                 when (key) {
                     "note" -> {}
+                    // Sorts FIRST of every key these fixtures use, which is
+                    // load-bearing: `readable` and `value` both perform a read,
+                    // and on a de-eagered signal a read triggers the lazy
+                    // recompute that would make a conforming and a
+                    // non-conforming binding agree. `dispose_signal`'s
+                    // discriminating step asserts both keys on one step, and the
+                    // count has to be sampled before the read.
+                    "computes_of" -> for (id in want!!.jsonObject.keys.sorted()) {
+                        check("computes_of.$id", model.computesOf(id), want.jsonObject[id])
+                    }
                     "dependents_of" -> for (id in want!!.jsonObject.keys.sorted()) {
                         check("dependents_of.$id", model.dependentsOf(id), want.jsonObject[id])
                     }
@@ -697,7 +863,15 @@ class ReactiveGraphConformanceTest {
                     }
                     // Paired with an `error` expectation the error key is
                     // authoritative; `value` only applies to a successful read.
-                    "value" -> if (expect["error"] == null) check("value", opValue, want)
+                    // On a `read` op this is the value the op returned. On any
+                    // other op (the signal fixtures assert it on `signal`) it
+                    // means the value of the node the op names, so it is read
+                    // here — after `computes_of`, which sorts first.
+                    "value" -> if (expect["error"] == null) {
+                        val got = opValue
+                            ?: readOrError(model, op["id"]!!.jsonPrimitive.content)
+                        check("value", got, want)
+                    }
                     "read" -> for (id in want!!.jsonObject.keys.sorted()) {
                         check("read.$id", readOrError(model, id), want.jsonObject[id])
                     }
