@@ -1,10 +1,14 @@
 package io.github.lazily
 
 import java.nio.file.Files
+import java.util.Collections
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -15,15 +19,20 @@ import kotlin.test.assertTrue
 import kotlin.test.fail
 
 /**
- * Cross-language conformance for the reactive-graph plane (`#lzspecconf`) — see
- * the JSON fixtures under `lazily-spec/conformance/reactive-graph/`.
+ * Cross-language conformance for the reactive-graph plane (`#lzspecconf`,
+ * `#lzspecedgeindex`) — see the JSON fixtures under
+ * `lazily-spec/conformance/reactive-graph/`.
  *
- * lazily-kt replayed **none** of these fixtures until this runner existed;
- * `lazily-rs` was the only binding executing the corpus family-wide. That gap is
- * not academic: an invalidation-cascade defect shipped undetected in both
- * lazily-dart and lazily-go while a fixture encoding the violated property
- * (`transitive_invalidation_reaches_depth.json`) already sat on disk with
- * nothing running it.
+ * lazily-kt replayed **none** of these fixtures until this runner existed, and
+ * then only 1 of 9: the other eight named teardown-scope, disposal, and
+ * fan-out/churn ops that only `lazily-rs` had ever implemented. Those ops now
+ * exist here ([Context.scope], [Context.disposeNode], [Context.dependentCount]
+ * and their thread-safe and async counterparts), so the whole corpus replays.
+ *
+ * That gap was not academic: an invalidation-cascade defect shipped undetected
+ * in both lazily-dart and lazily-go while a fixture encoding the violated
+ * property (`transitive_invalidation_reaches_depth.json`) already sat on disk
+ * with nothing running it.
  *
  * ## Replayed against EVERY context lazily-kt ships
  *
@@ -31,24 +40,27 @@ import kotlin.test.fail
  * the default [Context]. This is the property that gives it its value: the dart
  * and go defects were both **correct synchronously and broken asynchronously**,
  * so a default-context-only replay would have reported green through the exact
- * defect it exists to catch. [AsyncContext] in particular had been rated
- * *unmeasured* rather than correct by an earlier audit.
+ * defect it exists to catch.
  *
- *  - [Model.SYNC]        — [Context], the single-threaded pull engine
- *  - [Model.THREAD_SAFE] — [ThreadSafeContext], the `ReentrantLock` engine
- *  - [Model.ASYNC]       — [AsyncContext], the coroutine engine (revision
- *                          counters + in-flight state — the mechanism that
- *                          broke the pull chain in dart)
+ *  - `Context` — the single-threaded pull engine
+ *  - `ThreadSafeContext` — the `ReentrantLock` engine
+ *  - `AsyncContext` — the coroutine engine (revision counters + in-flight state,
+ *    the mechanism that broke the pull chain in lazily-dart)
  *
- * ## Op support and skipping
+ * ## What the corpus pins, and since when
  *
- * lazily-kt ships no teardown-scope API (`ctx.scope()`/`disarm()`), no disposal
- * of a derived slot (only [Context.disposeEffect]), and no fanout/churn
- * harness op, so 8 of the 9 fixtures cannot be replayed today. They are skipped
- * **loudly and by name** — [SKIPPED] records the exact unsupported ops per
- * fixture and the test prints them. A silent skip is the failure mode this
- * whole runner exists to eliminate; it is never acceptable to widen a skip to
- * make a red build green.
+ * Mutation against the nine-fixture corpus established that two of the disposal
+ * plane's three stated semantics were invisible to it — scheduling effects
+ * during a disposal cascade, and tearing a scope down in forward instead of
+ * reverse order, each left all nine green. `lazily-spec` 1c80db5 has since added
+ * `disposal_does_not_run_surviving_effects.json` and
+ * `teardown_runs_members_in_reverse_creation_order.json`, which discriminate
+ * both, and this runner replays them.
+ *
+ * `EdgeIndexTest`'s disposal group keeps its own direct tests for the same two
+ * semantics anyway. They are not redundant: they cover the thread-safe and async
+ * engines, where each semantic is a *separate* field on a *separate* class, and
+ * they are independent of whether the canonical corpus keeps those two fixtures.
  *
  * ## Positive assertion (`#lzspecconf`)
  *
@@ -58,13 +70,15 @@ import kotlin.test.fail
  *
  *  1. the fixture set on disk matches [FIXTURES] exactly — a fixture added or
  *     renamed upstream fails loudly instead of going unrun;
- *  2. [SUPPORTED] and [SKIPPED] partition [FIXTURES] with no overlap and no
- *     gap, so a fixture cannot be dropped from both and vanish;
- *  3. every supported fixture was replayed against every model, counted, and
- *     the count is asserted **non-zero** and equal to the expected product;
- *  4. a non-zero number of ops and assertions actually executed.
+ *  2. a fixture is promoted to *executed* only after its ops ran and its
+ *     assertions were evaluated, never by being found on disk;
+ *  3. every fixture executed against every model, and the count is asserted
+ *     non-zero and equal to the expected product;
+ *  4. a non-zero number of ops and assertions actually executed;
+ *  5. every op and every assertion key in a fixture is recognised — an
+ *     unrecognised one is a hard error, never a silent skip.
  *
- * Every replay also records through [ConformanceFixtures.record] so
+ * Every replay also reads through [ConformanceFixtures.read] so
  * `scripts/check-conformance-coverage.sh` sees `reactive-graph/` in the
  * manifest and fails CI if this suite ever stops running.
  */
@@ -83,164 +97,844 @@ class ReactiveGraphConformanceTest {
             "churn_returns_to_baseline.json",
             "cross_scope_teardown_hazard.json",
             "disarm_disposes_nothing.json",
+            "disposal_does_not_run_surviving_effects.json",
             "dispose_detaches_edges_both_directions.json",
             "read_after_dispose_is_an_error.json",
             "recycled_id_inherits_nothing.json",
             "scope_teardown_equals_fold_of_disposals.json",
             "scoping_bounds_teardown_not_visibility.json",
-            "transitive_invalidation_reaches_depth.json",
-        )
-
-        /** Fixtures this runner replays in full, against every model. */
-        val SUPPORTED = listOf(
+            "teardown_runs_members_in_reverse_creation_order.json",
             "transitive_invalidation_reaches_depth.json",
         )
 
         /**
-         * Fixtures skipped, each mapped to the ops lazily-kt does not implement.
-         *
-         * These are **capability gaps in lazily-kt**, not fixture defects. Each
-         * entry is a standing finding: implement the op and move the fixture to
-         * [SUPPORTED]. Never add an entry to silence a failing assertion — a
-         * fixture that runs and fails is a finding to report, not to skip.
+         * Ops this runner implements. A fixture naming anything outside this set
+         * is skipped **loudly and by name** — but the set now covers the whole
+         * corpus, so nothing is skipped. Never widen a skip to make a red build
+         * green: a fixture that runs and fails is a finding to report.
          */
-        val SKIPPED = mapOf(
-            // No teardown-scope API: no ctx.scope()/TeardownScope, and no
-            // disposal of a derived slot (only disposeEffect).
-            "cross_scope_teardown_hazard.json" to listOf("begin_scope", "end_scope", "dispose"),
-            "disarm_disposes_nothing.json" to listOf("begin_scope", "end_scope", "disarm", "dispose"),
-            "scope_teardown_equals_fold_of_disposals.json" to
-                listOf("begin_scope", "end_scope", "dispose"),
-            "scoping_bounds_teardown_not_visibility.json" to listOf("begin_scope", "end_scope"),
-            // No slot disposal.
-            "dispose_detaches_edges_both_directions.json" to listOf("dispose"),
-            "read_after_dispose_is_an_error.json" to listOf("dispose"),
-            // No fanout/churn harness ops, and no id-recycling introspection.
-            "churn_returns_to_baseline.json" to listOf("fanout", "churn", "dispose_fanout"),
-            "recycled_id_inherits_nothing.json" to
-                listOf("fanout", "dispose_fanout", "dispose_stale_handle", "dispose"),
+        val SUPPORTED_OPS = setOf(
+            "begin_scope",
+            "cell",
+            "churn",
+            "computed",
+            "disarm",
+            "dispose",
+            "dispose_fanout",
+            "dispose_stale_handle",
+            "effect",
+            "end_scope",
+            "fanout",
+            "read",
+            "set_cell",
         )
+
+        /**
+         * Assertion keys this runner evaluates. An `expect` block naming
+         * anything else is a hard error: reporting green against an assertion
+         * the runner silently ignored is the "green while testing nothing"
+         * failure mode this whole suite exists to close.
+         */
+        val KNOWN_EXPECT_KEYS = setOf(
+            "cleanup_order",
+            "dependencies_of",
+            "dependents_of",
+            "error",
+            "note",
+            "observed_by",
+            "observed_count",
+            "read",
+            "readable",
+            "scope_owned_count",
+            "value",
+        )
+
+        /**
+         * Divergences between lazily-kt and the canonical corpus, as
+         * `model/fixture#step:key`.
+         *
+         * Asserted **in both directions**: the observed set must equal this one,
+         * so a new divergence fails the build *and* a fixed one forces its entry
+         * to be deleted. Every entry would be a standing finding against
+         * lazily-kt, never a relaxation of a fixture. Empty, and it must stay
+         * empty unless a real divergence is found.
+         */
+        val KNOWN_DIVERGENCES = emptySet<String>()
+
+        /** Sentinel for a read that raised `read_after_dispose`. */
+        const val READ_AFTER_DISPOSE = "read_after_dispose"
     }
 
-    /** The execution models lazily-kt ships. Every supported fixture runs on all of them. */
-    private enum class Model { SYNC, THREAD_SAFE, ASYNC }
+    /** The kind of a node, as the corpus distinguishes them. */
+    private enum class Kind { CELL, SLOT, EFFECT }
+
+    // -- Models ------------------------------------------------------------
 
     /**
-     * A replay engine over one execution model. Deliberately minimal: `cell`,
-     * `computed`, `read`, `set_cell` — exactly the ops the transitive-depth
-     * fixture needs, implemented natively per model so the async path exercises
-     * real suspension rather than a synchronous shim.
+     * One execution model. The runner drives every model through this single
+     * blocking surface so the three contexts cannot drift apart; the async model
+     * bridges with `runBlocking` internally rather than making the whole runner
+     * suspend, which keeps op dispatch identical for all three.
      */
-    private interface Engine {
-        fun cell(id: String, value: Int)
-        fun computed(id: String, reads: List<String>, offset: Int)
+    private interface Model {
+        /** Effect ids, in the order their bodies ran. */
+        val runLog: MutableList<String>
+
+        /**
+         * Effect ids, in the order their cleanups ran. Cumulative for the whole
+         * replay — the individual-disposal scenario spreads three disposals over
+         * three steps and pins the whole order on the last one.
+         */
+        val cleanupLog: MutableList<String>
+
+        fun defineCell(id: String, value: Int, scope: String?)
+        fun defineComputed(id: String, reads: List<String>, offset: Int, scope: String?)
+        fun defineEffect(id: String, reads: List<String>, scope: String?)
+
+        /**
+         * Throws [DisposedNodeException] when the node — or a node it recomputes
+         * through — has been disposed. That throw is the corpus's
+         * `read_after_dispose`.
+         */
         fun read(id: String): Int
+
         fun setCell(id: String, value: Int)
-        fun close() {}
+        fun disposeId(id: String)
+        fun kindOf(id: String): Kind
+        fun isEffectActive(id: String): Boolean
+        fun dependentsOf(id: String): Int
+        fun dependenciesOf(id: String): Int
+        fun beginScope(name: String)
+        fun endScope(name: String)
+        fun disarmScope(name: String)
+        fun scopeOwned(name: String): Int
+
+        /**
+         * Drive the model to quiescence before assertions are evaluated.
+         *
+         * The synchronous models are already quiescent when an op returns. Async
+         * effect reruns are executor-scheduled by contract, so the async model
+         * must let them settle before `observed_by`, `observed_count`, or any
+         * degree assertion can mean anything. This changes *when* assertions are
+         * evaluated, never *what* they assert: an effect that never runs still
+         * fails.
+         */
+        fun settle()
+
+        fun close()
     }
 
-    private class SyncEngine : Engine {
+    /** The synchronous [Context] — lazy slots, cells, effects, [TeardownScope]s. */
+    private class SyncModel : Model {
+        override val runLog = mutableListOf<String>()
+        override val cleanupLog = mutableListOf<String>()
+
         private val ctx = Context()
-        private val cells = HashMap<String, CellHandle<Int>>()
-        private val slots = HashMap<String, SlotHandle<Int>>()
+        private val nodes = HashMap<String, GraphNode>()
+        private val scopes = HashMap<String, TeardownScope>()
 
-        override fun cell(id: String, value: Int) { cells[id] = ctx.cell(value) }
+        @Suppress("UNCHECKED_CAST")
+        private fun readNode(id: String): Int = when (val n = nodes[id]) {
+            is CellHandle<*> -> ctx.getCell(n as CellHandle<Int>)
+            is SlotHandle<*> -> ctx.get(n as SlotHandle<Int>)
+            else -> error("unknown or unreadable node '$id'")
+        }
 
-        override fun computed(id: String, reads: List<String>, offset: Int) {
-            slots[id] = ctx.computed {
+        override fun defineCell(id: String, value: Int, scope: String?) {
+            nodes[id] = scopes[scope]?.cell(value) ?: ctx.cell(value)
+        }
+
+        override fun defineComputed(id: String, reads: List<String>, offset: Int, scope: String?) {
+            val compute: Context.() -> Int = {
                 var sum = offset
-                for (r in reads) sum += readAny(r)
+                for (r in reads) sum += readNode(r)
                 sum
             }
+            nodes[id] = scopes[scope]?.computed(compute) ?: ctx.computed(compute)
         }
 
-        private fun Context.readAny(id: String): Int =
-            cells[id]?.let { getCell(it) } ?: slots[id]?.let { get(it) }
-                ?: error("unknown node '$id'")
+        override fun defineEffect(id: String, reads: List<String>, scope: String?) {
+            val run: Context.() -> (() -> Unit)? = {
+                runLog.add(id)
+                // Swallowed, not propagated: an effect that reads through a
+                // disposed node must not turn the publish that scheduled it into
+                // a throw. The corpus asserts read-after-dispose at top-level
+                // reads.
+                try {
+                    for (r in reads) readNode(r)
+                } catch (_: DisposedNodeException) {
+                    // Observed by the top-level read that names the same node.
+                }
+                { cleanupLog.add(id) }
+            }
+            nodes[id] = scopes[scope]?.effect(run) ?: ctx.effect(run)
+        }
 
-        override fun read(id: String): Int =
-            cells[id]?.let { ctx.getCell(it) } ?: slots[id]?.let { ctx.get(it) }
-                ?: error("unknown node '$id'")
+        override fun read(id: String): Int = readNode(id)
 
+        @Suppress("UNCHECKED_CAST")
         override fun setCell(id: String, value: Int) {
-            ctx.setCell(cells[id] ?: error("unknown cell '$id'"), value)
+            val cell = nodes[id] as? CellHandle<*> ?: error("set_cell on non-cell '$id'")
+            ctx.setCell(cell as CellHandle<Int>, value)
         }
+
+        // The entry stays in the map: a disposed node remains
+        // readable-as-an-error, and disposing it again must be a no-op.
+        override fun disposeId(id: String) = ctx.disposeNode(nodes[id] ?: error("unknown '$id'"))
+
+        override fun kindOf(id: String): Kind = when (nodes[id]) {
+            is CellHandle<*> -> Kind.CELL
+            is EffectHandle -> Kind.EFFECT
+            else -> Kind.SLOT
+        }
+
+        override fun isEffectActive(id: String): Boolean =
+            ctx.isEffectActive(nodes[id] as EffectHandle)
+
+        override fun dependentsOf(id: String): Int = ctx.dependentCount(nodes[id]!!)
+        override fun dependenciesOf(id: String): Int = ctx.dependencyCount(nodes[id]!!)
+
+        override fun beginScope(name: String) { scopes[name] = ctx.scope() }
+        override fun endScope(name: String) = scopes[name]!!.end()
+        override fun disarmScope(name: String) = scopes[name]!!.disarm()
+        override fun scopeOwned(name: String): Int = scopes[name]!!.size
+
+        override fun settle() {}
+        override fun close() {}
     }
 
-    private class ThreadSafeEngine : Engine {
+    /** The lock-backed [ThreadSafeContext]. Same graph semantics, serialized. */
+    private class ThreadSafeModel : Model {
+        override val runLog = mutableListOf<String>()
+        override val cleanupLog = mutableListOf<String>()
+
         private val ctx = ThreadSafeContext()
-        private val cells = HashMap<String, ThreadSafeCellHandle<Int>>()
-        private val slots = HashMap<String, ThreadSafeSlotHandle<Int>>()
+        private val nodes = HashMap<String, ThreadSafeGraphNode>()
+        private val scopes = HashMap<String, ThreadSafeTeardownScope>()
 
-        override fun cell(id: String, value: Int) { cells[id] = ctx.cell(value) }
+        @Suppress("UNCHECKED_CAST")
+        private fun readNode(id: String): Int = when (val n = nodes[id]) {
+            is ThreadSafeCellHandle<*> -> ctx.getCell(n as ThreadSafeCellHandle<Int>)
+            is ThreadSafeSlotHandle<*> -> ctx.get(n as ThreadSafeSlotHandle<Int>)
+            else -> error("unknown or unreadable node '$id'")
+        }
 
-        override fun computed(id: String, reads: List<String>, offset: Int) {
-            slots[id] = ctx.computed {
+        override fun defineCell(id: String, value: Int, scope: String?) {
+            nodes[id] = scopes[scope]?.cell(value) ?: ctx.cell(value)
+        }
+
+        override fun defineComputed(id: String, reads: List<String>, offset: Int, scope: String?) {
+            val compute: ThreadSafeContext.() -> Int = {
                 var sum = offset
-                for (r in reads) sum += readAny(r)
+                for (r in reads) sum += readNode(r)
                 sum
             }
+            nodes[id] = scopes[scope]?.computed(compute) ?: ctx.computed(compute)
         }
 
-        private fun ThreadSafeContext.readAny(id: String): Int =
-            cells[id]?.let { getCell(it) } ?: slots[id]?.let { get(it) }
-                ?: error("unknown node '$id'")
+        override fun defineEffect(id: String, reads: List<String>, scope: String?) {
+            val run: ThreadSafeContext.() -> (() -> Unit)? = {
+                runLog.add(id)
+                try {
+                    for (r in reads) readNode(r)
+                } catch (_: DisposedNodeException) {
+                    // See SyncModel.defineEffect.
+                }
+                { cleanupLog.add(id) }
+            }
+            nodes[id] = scopes[scope]?.effect(run) ?: ctx.effect(run)
+        }
 
-        override fun read(id: String): Int =
-            cells[id]?.let { ctx.getCell(it) } ?: slots[id]?.let { ctx.get(it) }
-                ?: error("unknown node '$id'")
+        override fun read(id: String): Int = readNode(id)
 
+        @Suppress("UNCHECKED_CAST")
         override fun setCell(id: String, value: Int) {
-            ctx.setCell(cells[id] ?: error("unknown cell '$id'"), value)
+            val cell = nodes[id] as? ThreadSafeCellHandle<*>
+                ?: error("set_cell on non-cell '$id'")
+            ctx.setCell(cell as ThreadSafeCellHandle<Int>, value)
         }
+
+        override fun disposeId(id: String) = ctx.disposeNode(nodes[id] ?: error("unknown '$id'"))
+
+        override fun kindOf(id: String): Kind = when (nodes[id]) {
+            is ThreadSafeCellHandle<*> -> Kind.CELL
+            is ThreadSafeEffectHandle -> Kind.EFFECT
+            else -> Kind.SLOT
+        }
+
+        override fun isEffectActive(id: String): Boolean =
+            ctx.isEffectActive(nodes[id] as ThreadSafeEffectHandle)
+
+        override fun dependentsOf(id: String): Int = ctx.dependentCount(nodes[id]!!)
+        override fun dependenciesOf(id: String): Int = ctx.dependencyCount(nodes[id]!!)
+
+        override fun beginScope(name: String) { scopes[name] = ctx.scope() }
+        override fun endScope(name: String) = scopes[name]!!.end()
+        override fun disarmScope(name: String) = scopes[name]!!.disarm()
+        override fun scopeOwned(name: String): Int = scopes[name]!!.size
+
+        override fun settle() {}
+        override fun close() {}
     }
 
     /**
-     * The model that matters most here. Reads go through [AsyncContext.getAsync]
-     * so the replay drives real suspension and the revision/in-flight machinery
-     * that broke the pull chain in lazily-dart.
+     * The [AsyncContext] — the model that matters most here. Reads go through
+     * [AsyncContext.getAsync] so the replay drives real suspension and the
+     * revision/in-flight machinery that broke the pull chain in lazily-dart, and
+     * effect bodies and cleanups run on the context's dispatcher rather than
+     * inline. The logs are synchronized for exactly that reason.
      */
-    private class AsyncEngine : Engine {
+    private class AsyncModel : Model {
+        override val runLog: MutableList<String> =
+            Collections.synchronizedList(mutableListOf())
+        override val cleanupLog: MutableList<String> =
+            Collections.synchronizedList(mutableListOf())
+
         private val ctx = AsyncContext()
-        private val cells = HashMap<String, AsyncContext.AsyncCellHandle<Int>>()
-        private val slots = HashMap<String, AsyncContext.AsyncSlotHandle<Int>>()
+        private val nodes = HashMap<String, AsyncGraphNode>()
+        private val scopes = HashMap<String, AsyncTeardownScope>()
 
-        override fun cell(id: String, value: Int) { cells[id] = ctx.cell(value) }
+        @Suppress("UNCHECKED_CAST")
+        private suspend fun AsyncComputeContext.readNode(id: String): Int =
+            when (val n = nodes[id]) {
+                is AsyncContext.AsyncCellHandle<*> ->
+                    getCell(n as AsyncContext.AsyncCellHandle<Int>)
+                is AsyncContext.AsyncSlotHandle<*> ->
+                    getAsync(n as AsyncContext.AsyncSlotHandle<Int>)
+                else -> error("unknown or unreadable node '$id'")
+            }
 
-        override fun computed(id: String, reads: List<String>, offset: Int) {
-            slots[id] = ctx.computedAsync {
+        @Suppress("UNCHECKED_CAST")
+        private suspend fun readTop(id: String): Int = when (val n = nodes[id]) {
+            is AsyncContext.AsyncCellHandle<*> ->
+                ctx.getCell(n as AsyncContext.AsyncCellHandle<Int>)
+            is AsyncContext.AsyncSlotHandle<*> ->
+                ctx.getAsync(n as AsyncContext.AsyncSlotHandle<Int>)
+            else -> error("unknown or unreadable node '$id'")
+        }
+
+        override fun defineCell(id: String, value: Int, scope: String?) {
+            nodes[id] = scopes[scope]?.cell(value) ?: ctx.cell(value)
+        }
+
+        override fun defineComputed(id: String, reads: List<String>, offset: Int, scope: String?) {
+            val compute: suspend AsyncComputeContext.() -> Int = {
                 var sum = offset
-                for (r in reads) {
-                    sum += cells[r]?.let { getCell(it) }
-                        ?: slots[r]?.let { getAsync(it) }
-                        ?: error("unknown node '$r'")
-                }
+                for (r in reads) sum += readNode(r)
                 sum
             }
+            nodes[id] = scopes[scope]?.computedAsync(compute) ?: ctx.computedAsync(compute)
         }
 
-        override fun read(id: String): Int = runBlocking {
-            cells[id]?.let { ctx.getCell(it) } ?: slots[id]?.let { ctx.getAsync(it) }
-                ?: error("unknown node '$id'")
+        override fun defineEffect(id: String, reads: List<String>, scope: String?) {
+            val run: suspend AsyncComputeContext.() -> (suspend () -> Unit)? = {
+                runLog.add(id)
+                try {
+                    for (r in reads) readNode(r)
+                } catch (_: DisposedNodeException) {
+                    // See SyncModel.defineEffect.
+                }
+                suspend { cleanupLog.add(id); Unit }
+            }
+            nodes[id] = scopes[scope]?.effectAsync(run) ?: ctx.effectAsync(run)
         }
 
+        override fun read(id: String): Int = runBlocking { readTop(id) }
+
+        @Suppress("UNCHECKED_CAST")
         override fun setCell(id: String, value: Int) {
-            ctx.setCell(cells[id] ?: error("unknown cell '$id'"), value)
+            val cell = nodes[id] as? AsyncContext.AsyncCellHandle<*>
+                ?: error("set_cell on non-cell '$id'")
+            ctx.setCell(cell as AsyncContext.AsyncCellHandle<Int>, value)
         }
 
+        override fun disposeId(id: String) = runBlocking {
+            ctx.disposeNode(nodes[id] ?: error("unknown '$id'"))
+        }
+
+        override fun kindOf(id: String): Kind = when (nodes[id]) {
+            is AsyncContext.AsyncCellHandle<*> -> Kind.CELL
+            is AsyncContext.AsyncEffectHandle -> Kind.EFFECT
+            else -> Kind.SLOT
+        }
+
+        override fun isEffectActive(id: String): Boolean =
+            !ctx.isDisposed(nodes[id] as AsyncContext.AsyncEffectHandle)
+
+        override fun dependentsOf(id: String): Int = ctx.dependentCount(nodes[id]!!)
+        override fun dependenciesOf(id: String): Int = ctx.dependencyCount(nodes[id]!!)
+
+        override fun beginScope(name: String) { scopes[name] = ctx.scope() }
+        override fun endScope(name: String) = runBlocking { scopes[name]!!.end() }
+        override fun disarmScope(name: String) = scopes[name]!!.disarm()
+        override fun scopeOwned(name: String): Int = scopes[name]!!.size
+
+        override fun settle() = runBlocking { ctx.settle() }
         override fun close() = runBlocking { ctx.dispose() }
     }
 
-    private fun engineFor(model: Model): Engine = when (model) {
-        Model.SYNC -> SyncEngine()
-        Model.THREAD_SAFE -> ThreadSafeEngine()
-        Model.ASYNC -> AsyncEngine()
+    // -- Observation / report ---------------------------------------------
+
+    /** Everything a scenario leaves behind that `observationally_equal` compares. */
+    private class Observation {
+        var cleanupOrder: List<String> = emptyList()
+        val readable = sortedMapOf<String, Boolean>()
+        val reads = sortedMapOf<String, Any>()
+        var afterPublishObserved: List<String> = emptyList()
+        val afterPublishReads = sortedMapOf<String, Any>()
+        val degrees = sortedMapOf<String, Int>()
+
+        fun describe(): String =
+            "cleanup_order=$cleanupOrder readable=$readable reads=$reads " +
+                "after_publish_observed=$afterPublishObserved " +
+                "after_publish_reads=$afterPublishReads degrees=$degrees"
     }
 
-    /** Ops + assertions executed, for the positive assertion. */
-    private class Tally {
+    /**
+     * What a single fixture replay actually did. [ops]/[checks] are what promote
+     * a fixture from "found on disk" to "executed".
+     */
+    private class Report {
         var ops = 0
-        var assertions = 0
+        var checks = 0
+        val failures = mutableListOf<String>()
+        val observation = Observation()
+    }
+
+    // -- Fixture shape helpers --------------------------------------------
+
+    private fun stepsOf(node: JsonObject): List<JsonObject> =
+        node["steps"]!!.jsonArray.map { it.jsonObject }
+
+    private fun scenariosOf(fx: JsonObject): List<JsonObject> =
+        fx["scenarios"]!!.jsonArray.map { it.jsonObject }
+
+    private fun opsOf(fx: JsonObject): Set<String> {
+        val out = sortedSetOf<String>()
+        fun collect(o: JsonObject) {
+            for (s in stepsOf(o)) out.add(s["op"]!!.jsonObject["type"]!!.jsonPrimitive.content)
+        }
+        when (val shape = fx["shape"]?.jsonPrimitive?.content) {
+            "steps" -> collect(fx)
+            "scenarios" -> for (sc in scenariosOf(fx)) collect(sc)
+            else -> error("unknown fixture shape '$shape'")
+        }
+        return out
+    }
+
+    private fun strs(v: JsonElement?): List<String> =
+        v?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
+
+    /** A top-level read: the value, or [READ_AFTER_DISPOSE] on a disposed node. */
+    private fun readOrError(model: Model, id: String): Any = try {
+        model.read(id)
+    } catch (_: DisposedNodeException) {
+        READ_AFTER_DISPOSE
+    }
+
+    /**
+     * `readable` is "can this node still be observed", which for an effect is
+     * registration rather than a value.
+     */
+    private fun alive(model: Model, id: String): Boolean =
+        if (model.kindOf(id) == Kind.EFFECT) {
+            model.isEffectActive(id)
+        } else {
+            readOrError(model, id) != READ_AFTER_DISPOSE
+        }
+
+    /** Compare an observed value against a JSON scalar. */
+    private fun jsonEq(got: Any?, want: JsonElement?): Boolean {
+        val p = want as? JsonPrimitive ?: return false
+        return when (got) {
+            is Int -> runCatching { p.int }.getOrNull() == got
+            is Boolean -> runCatching { p.boolean }.getOrNull() == got
+            else -> p.content == got.toString()
+        }
+    }
+
+    // -- Replay ------------------------------------------------------------
+
+    /**
+     * Replay one op stream. [tail] is the `scenarios` shape's `expected` block,
+     * evaluated against the final world state when present.
+     */
+    private fun replay(
+        model: Model,
+        fixture: String,
+        steps: List<JsonObject>,
+        tail: JsonObject?,
+    ): Report {
+        val report = Report()
+        var stepIdx = 0
+
+        fun check(key: String, got: Any?, want: JsonElement?) {
+            report.checks++
+            if (!jsonEq(got, want)) report.failures.add("#$stepIdx:$key — got $got, want $want")
+        }
+
+        fun checkList(key: String, got: List<String>, want: List<String>) {
+            report.checks++
+            if (got != want) report.failures.add("#$stepIdx:$key — got $got, want $want")
+        }
+
+        for (i in steps.indices) {
+            stepIdx = i
+            val step = steps[i]
+            val op = step["op"]!!.jsonObject
+            val type = op["type"]!!.jsonPrimitive.content
+            val scope = op["scope"]?.jsonPrimitive?.content
+            val runsBefore = model.runLog.size
+            var opValue: Any? = null
+            var opError = false
+            report.ops++
+
+            when (type) {
+                "cell" -> model.defineCell(
+                    op["id"]!!.jsonPrimitive.content,
+                    op["value"]!!.jsonPrimitive.int,
+                    scope,
+                )
+                "computed" -> model.defineComputed(
+                    op["id"]!!.jsonPrimitive.content,
+                    strs(op["reads"]),
+                    op["offset"]?.jsonPrimitive?.int ?: 0,
+                    scope,
+                )
+                "effect" -> model.defineEffect(
+                    op["id"]!!.jsonPrimitive.content,
+                    strs(op["reads"]),
+                    scope,
+                )
+                "read" -> {
+                    opValue = readOrError(model, op["id"]!!.jsonPrimitive.content)
+                    opError = opValue == READ_AFTER_DISPOSE
+                }
+                "set_cell" -> model.setCell(
+                    op["id"]!!.jsonPrimitive.content,
+                    op["value"]!!.jsonPrimitive.int,
+                )
+                "dispose" -> model.disposeId(op["id"]!!.jsonPrimitive.content)
+                "fanout" -> {
+                    // Subscribers are effects, not derived slots: the corpus
+                    // asserts `observed_count` on a publish, and in a lazy
+                    // binding only an eager reader observes a publish without
+                    // being pulled.
+                    val prefix = op["id_prefix"]!!.jsonPrimitive.content
+                    val reads = strs(op["reads"])
+                    for (n in 0 until op["count"]!!.jsonPrimitive.int) {
+                        model.defineEffect("${prefix}_$n", reads, null)
+                    }
+                }
+                "dispose_fanout" -> {
+                    val prefix = op["id_prefix"]!!.jsonPrimitive.content
+                    for (n in 0 until op["count"]!!.jsonPrimitive.int) {
+                        model.disposeId("${prefix}_$n")
+                    }
+                }
+                "churn" -> churn(model, op)
+                "begin_scope" -> model.beginScope(op["scope"]!!.jsonPrimitive.content)
+                "end_scope" -> model.endScope(op["scope"]!!.jsonPrimitive.content)
+                // A disarmed scope owns nothing; it stays open under the same
+                // name so a later `end_scope` is the no-op the fixture asserts.
+                "disarm" -> model.disarmScope(op["scope"]!!.jsonPrimitive.content)
+                "dispose_stale_handle" -> {
+                    // The point of the op: the handle's id has been recycled
+                    // onto a node of another kind, so tearing down through it
+                    // must be a no-op. lazily-kt's arena recycles ids for real,
+                    // so `disposeNode` reads the kind out of the arena and
+                    // declines — the guard `Context.resolve` documents.
+                    val of = op["handle_of"]!!.jsonPrimitive.content
+                    val wantKind = op["handle_kind"]!!.jsonPrimitive.content
+                    assertEquals(
+                        wantKind,
+                        model.kindOf(of).name.lowercase(),
+                        "$fixture#$i: handle_kind does not match the recorded handle",
+                    )
+                    model.disposeId(of)
+                }
+                else -> error(
+                    "$fixture#$i: unsupported op '$type' reached the engine — the " +
+                        "runnability filter should have skipped this fixture",
+                )
+            }
+
+            model.settle()
+            val observed = model.runLog.toList().subList(runsBefore, model.runLog.size)
+
+            val expect = step["expect"]?.jsonObject ?: continue
+            val unknown = (expect.keys - KNOWN_EXPECT_KEYS).sorted()
+            check(unknown.isEmpty()) {
+                "$fixture#$i: unrecognised assertion key(s) $unknown — refusing to report " +
+                    "green against an assertion this runner does not evaluate"
+            }
+
+            // Sorted so evaluation order is deterministic and matches the
+            // reference runner's. Load-bearing, not cosmetic: `dependents_of`
+            // sorts before `read`, and a lazy binding re-registers edges when it
+            // recomputes, so reading first would change the degree the same step
+            // then asserts.
+            for (key in expect.keys.sorted()) {
+                val want = expect[key]
+                when (key) {
+                    "note" -> {}
+                    "dependents_of" -> for (id in want!!.jsonObject.keys.sorted()) {
+                        check("dependents_of.$id", model.dependentsOf(id), want.jsonObject[id])
+                    }
+                    "dependencies_of" -> for (id in want!!.jsonObject.keys.sorted()) {
+                        check("dependencies_of.$id", model.dependenciesOf(id), want.jsonObject[id])
+                    }
+                    "error" -> {
+                        val wantError = when {
+                            want == null || want is JsonNull -> false
+                            (want as JsonPrimitive).content == READ_AFTER_DISPOSE -> true
+                            else -> error("$fixture#$i: unknown expected error $want")
+                        }
+                        report.checks++
+                        if (opError != wantError) {
+                            report.failures.add("#$stepIdx:error — got $opError, want $wantError")
+                        }
+                    }
+                    // Paired with an `error` expectation the error key is
+                    // authoritative; `value` only applies to a successful read.
+                    "value" -> if (expect["error"] == null) check("value", opValue, want)
+                    "read" -> for (id in want!!.jsonObject.keys.sorted()) {
+                        check("read.$id", readOrError(model, id), want.jsonObject[id])
+                    }
+                    "readable" -> for (id in want!!.jsonObject.keys.sorted()) {
+                        check("readable.$id", alive(model, id), want.jsonObject[id])
+                    }
+                    "observed_by" -> checkList("observed_by", observed, strs(want))
+                    "observed_count" -> check("observed_count", observed.size, want)
+                    // Only effects run a cleanup callback, so the expected order
+                    // is projected onto its effect entries.
+                    "cleanup_order" -> checkList(
+                        "cleanup_order",
+                        model.cleanupLog.toList(),
+                        strs(want).filter { model.kindOf(it) == Kind.EFFECT },
+                    )
+                    "scope_owned_count" -> for (n in want!!.jsonObject.keys.sorted()) {
+                        check("scope_owned_count.$n", model.scopeOwned(n), want.jsonObject[n])
+                    }
+                    else -> error("$fixture#$i: unhandled assertion key '$key'")
+                }
+            }
+        }
+
+        // -- `scenarios`-shaped tail --------------------------------------
+        report.observation.cleanupOrder = model.cleanupLog.toList()
+        if (tail == null) return report
+
+        stepIdx = -1 // the `expected` tail is not a numbered step
+        tail["final_state"]?.jsonObject?.let { finalState ->
+            finalState["dependents_of"]?.jsonObject?.let { m ->
+                for (id in m.keys.sorted()) {
+                    val got = model.dependentsOf(id)
+                    check("final.dependents_of.$id", got, m[id])
+                    report.observation.degrees[id] = got
+                }
+            }
+            finalState["readable"]?.jsonObject?.let { m ->
+                for (id in m.keys.sorted()) {
+                    val ok = alive(model, id)
+                    check("final.readable.$id", ok, m[id])
+                    report.observation.readable[id] = ok
+                }
+            }
+            finalState["read"]?.jsonObject?.let { m ->
+                for (id in m.keys.sorted()) {
+                    val got = readOrError(model, id)
+                    check("final.read.$id", got, m[id])
+                    report.observation.reads[id] = got
+                }
+            }
+        }
+
+        val publish = tail["after_publish"]?.jsonObject
+        val publishOp = publish?.get("op")?.jsonObject
+        if (publish != null && publishOp != null) {
+            val before = model.runLog.size
+            model.setCell(
+                publishOp["id"]!!.jsonPrimitive.content,
+                publishOp["value"]!!.jsonPrimitive.int,
+            )
+            model.settle()
+            report.observation.afterPublishObserved =
+                model.runLog.toList().subList(before, model.runLog.size)
+            checkList(
+                "after_publish.observed_by",
+                report.observation.afterPublishObserved,
+                strs(publish["observed_by"]),
+            )
+            // Order matches the reference runner: reads (which re-register edges
+            // in a lazy binding) precede the degree assertions that count them.
+            publish["read"]?.jsonObject?.let { m ->
+                for (id in m.keys.sorted()) {
+                    val got = readOrError(model, id)
+                    check("after_publish.read.$id", got, m[id])
+                    report.observation.afterPublishReads[id] = got
+                }
+            }
+            publish["dependents_of"]?.jsonObject?.let { m ->
+                for (id in m.keys.sorted()) {
+                    check("after_publish.dependents_of.$id", model.dependentsOf(id), m[id])
+                }
+            }
+        }
+
+        return report
+    }
+
+    private fun churn(model: Model, op: JsonObject) {
+        val source = op["source"]!!.jsonPrimitive.content
+        val prefix = op["id_prefix"]!!.jsonPrimitive.content
+        val width = op["live_width"]!!.jsonPrimitive.int
+        val cycles = op["cycles"]!!.jsonPrimitive.int
+        when (val mode = op["mode"]!!.jsonPrimitive.content) {
+            // Hold `live_width` subscribers; each cycle disposes one and creates
+            // its replacement, so the live count is invariant.
+            "dispose_then_create" -> for (c in 0 until cycles) {
+                val id = "${prefix}_${c % width}"
+                model.disposeId(id)
+                model.defineEffect(id, listOf(source), null)
+            }
+            // One teardown scope per cycle; its subscriber is gone by the end of
+            // its own cycle, so it contributes nothing to the steady state.
+            "scope_per_cycle" -> {
+                val scopeName = "${prefix}_scoped"
+                for (c in 0 until cycles) {
+                    model.beginScope(scopeName)
+                    model.defineEffect("${prefix}_scoped_member", listOf(source), scopeName)
+                    model.endScope(scopeName)
+                }
+            }
+            else -> error("unknown churn mode '$mode'")
+        }
+    }
+
+    // -- Corpus driver -----------------------------------------------------
+
+    /** Replay the whole corpus against one execution model. Returns (fixtures, ops, checks). */
+    private fun runCorpus(create: () -> Model, modelName: String): Triple<Int, Int, Int> {
+        val executed = sortedSetOf<String>()
+        val skipped = sortedMapOf<String, List<String>>()
+        val divergences = sortedSetOf<String>()
+        var totalOps = 0
+        var totalChecks = 0
+
+        for (name in FIXTURES.sorted()) {
+            val fx = json.parseToJsonElement(ConformanceFixtures.read("$area/$name")).jsonObject
+            val unsupported = (opsOf(fx) - SUPPORTED_OPS).sorted()
+            if (unsupported.isNotEmpty()) {
+                skipped[name] = unsupported
+                println("reactive-graph[$modelName] SKIP $name — unsupported op(s): $unsupported")
+                continue
+            }
+
+            // Dispatch on the fixture's declared `shape`, not on its filename: a
+            // filename special case goes stale the moment a second
+            // scenarios-shaped fixture is added. An unrecognised shape is a hard
+            // error.
+            val models = mutableListOf<Model>()
+            val reports = mutableListOf<Report>()
+            try {
+                when (val shape = fx["shape"]?.jsonPrimitive?.content) {
+                    "steps" -> {
+                        val m = create().also { models.add(it) }
+                        reports.add(replay(m, name, stepsOf(fx), null))
+                    }
+                    "scenarios" -> {
+                        val tail = fx["expected"]?.jsonObject
+                        for (sc in scenariosOf(fx)) {
+                            // Each scenario gets its OWN context:
+                            // `observationally_equal` is a claim about two
+                            // independent worlds, not about one world twice.
+                            val m = create().also { models.add(it) }
+                            reports.add(replay(m, name, stepsOf(sc), tail))
+                        }
+                    }
+                    else -> error("$name: unknown fixture shape '$shape'")
+                }
+
+                // `observationally_equal`: the named scenarios must agree on
+                // every observable, not merely each satisfy `expected`
+                // independently. This is the whole reason the `scenarios` shape
+                // exists — a relation between two op streams is not expressible
+                // in a single `steps` array.
+                val pair = strs(fx["expected"]?.jsonObject?.get("observationally_equal"))
+                if (pair.isNotEmpty()) {
+                    val names = scenariosOf(fx).map { it["name"]!!.jsonPrimitive.content }
+                    val idx = pair.map { p ->
+                        names.indexOf(p).also {
+                            check(it >= 0) { "$name: unknown scenario '$p'" }
+                        }
+                    }
+                    for (w in 1 until idx.size) {
+                        val a = reports[idx[w - 1]].observation.describe()
+                        val b = reports[idx[w]].observation.describe()
+                        if (a != b) {
+                            reports[idx[w]].failures.add(
+                                "#observationally_equal — ${pair[w - 1]} [$a] != ${pair[w]} [$b]",
+                            )
+                        }
+                    }
+                    reports[0].checks++
+                }
+            } finally {
+                for (m in models) m.close()
+            }
+
+            val ops = reports.sumOf { it.ops }
+            val checks = reports.sumOf { it.checks }
+            assertTrue(ops > 0, "$modelName/$name: replayed zero ops")
+            assertTrue(checks > 0, "$modelName/$name: replayed zero assertions")
+
+            for ((si, r) in reports.withIndex()) {
+                for (f in r.failures) {
+                    val tag = if (reports.size > 1) "[$si]" else ""
+                    val entry = "$modelName/$name$tag$f"
+                    println("  DIVERGENCE $entry")
+                    divergences.add(entry)
+                }
+            }
+
+            // Promotion to `executed` happens HERE and only here: after ops ran
+            // and assertions were evaluated. Finding the file is not enough.
+            executed.add(name)
+            totalOps += ops
+            totalChecks += checks
+            println("reactive-graph[$modelName] $name: $ops ops, $checks assertions")
+        }
+
+        println(
+            "reactive-graph[$modelName]: ${executed.size}/${FIXTURES.size} fixtures replayed, " +
+                "$totalOps ops, $totalChecks assertions, ${skipped.size} skipped, " +
+                "${divergences.size} divergences",
+        )
+
+        // Divergence ledger, asserted in BOTH directions: a new divergence fails
+        // the build and a fixed one forces its entry to be deleted. A divergence
+        // is a FINDING against lazily-kt. Never relax a fixture to make this
+        // pass.
+        val documented = KNOWN_DIVERGENCES.filter { it.startsWith("$modelName/") }.toSortedSet()
+        assertEquals(
+            documented,
+            divergences,
+            "$modelName: divergence ledger is stale — update KNOWN_DIVERGENCES " +
+                "(expected = documented, actual = observed)",
+        )
+        assertEquals(
+            FIXTURES.sorted().toSortedSet(),
+            executed,
+            "found ${FIXTURES.size} fixture(s) but did not replay them all. A non-empty " +
+                "fixture directory is not evidence of coverage — skipped: $skipped",
+        )
+        assertTrue(
+            "transitive_invalidation_reaches_depth.json" in executed,
+            "the transitive-depth fixture pins the async invalidation cascade and must run " +
+                "against every context",
+        )
+        return Triple(executed.size, totalOps, totalChecks)
     }
 
     @Test
@@ -258,70 +952,52 @@ class ReactiveGraphConformanceTest {
             FIXTURES.sorted(),
             onDisk,
             "reactive-graph fixture set drifted from the canonical spec. A fixture was added, " +
-                "renamed, or removed upstream — update FIXTURES/SUPPORTED/SKIPPED so it cannot " +
-                "go unrun (#lzspecconf).",
+                "renamed, or removed upstream — update FIXTURES/SUPPORTED_OPS so it cannot go " +
+                "unrun (#lzspecconf).",
         )
 
-        // (2) SUPPORTED and SKIPPED must partition FIXTURES: no overlap, no gap.
-        val overlap = SUPPORTED.filter { it in SKIPPED.keys }
-        assertTrue(overlap.isEmpty(), "fixtures both supported and skipped: $overlap")
-        assertEquals(
-            FIXTURES.sorted(),
-            (SUPPORTED + SKIPPED.keys).sorted(),
-            "every fixture must be either replayed or explicitly skipped with its unsupported " +
-                "ops named — a fixture in neither list would silently vanish.",
+        val models: List<Pair<String, () -> Model>> = listOf(
+            "Context" to { SyncModel() },
+            "ThreadSafeContext" to { ThreadSafeModel() },
+            "AsyncContext" to { AsyncModel() },
         )
 
-        // (3) Replay every supported fixture against every model.
-        val models = Model.entries
-        val replayed = LinkedHashSet<String>()
-        val tally = Tally()
+        var replayed = 0
+        var ops = 0
+        var checks = 0
         val failures = mutableListOf<String>()
-
-        for (name in SUPPORTED) {
-            val text = ConformanceFixtures.read("$area/$name")
-            val fx = json.parseToJsonElement(text).jsonObject
-            for (model in models) {
-                try {
-                    replaySteps(model, fx, tally)
-                    replayed.add("$model/$name")
-                } catch (t: Throwable) {
-                    // A fixture failure is a FINDING. Collect every model's
-                    // result rather than aborting on the first, so the report
-                    // says which contexts diverge — do not edit the fixture and
-                    // do not loosen the assertion.
-                    failures.add("$model/$name: ${t.message}")
-                }
+        for ((modelName, create) in models) {
+            try {
+                val (r, o, c) = runCorpus(create, modelName)
+                replayed += r
+                ops += o
+                checks += c
+            } catch (t: Throwable) {
+                // A fixture failure is a FINDING. Collect every model's result
+                // rather than aborting on the first, so the report says which
+                // contexts diverge — do not edit the fixture and do not loosen
+                // the assertion.
+                failures.add("$modelName: ${t.message}")
             }
         }
 
-        // (4) Positive assertion — fail loudly at zero, and at any shortfall.
-        val expected = SUPPORTED.size * models.size
+        val expected = FIXTURES.size * models.size
         assertTrue(
-            replayed.isNotEmpty(),
+            replayed > 0,
             "ZERO reactive-graph fixtures replayed. The runner executed nothing — this is the " +
                 "exact silent-skip failure it exists to prevent (#lzspecconf).",
         )
         assertTrue(
-            tally.ops > 0 && tally.assertions > 0,
-            "reactive-graph replay executed ${tally.ops} ops and ${tally.assertions} assertions; " +
-                "both must be non-zero or the fixtures did not really run.",
+            ops > 0 && checks > 0,
+            "reactive-graph replay executed $ops ops and $checks assertions; both must be " +
+                "non-zero or the fixtures did not really run.",
         )
 
         println(
-            "reactive-graph conformance: replayed ${replayed.size}/$expected " +
-                "(${SUPPORTED.size} fixture(s) x ${models.size} contexts: " +
-                models.joinToString(", ") + "), ${tally.ops} ops, ${tally.assertions} assertions",
+            "reactive-graph conformance: replayed $replayed/$expected " +
+                "(${FIXTURES.size} fixtures x ${models.size} contexts: " +
+                models.joinToString(", ") { it.first } + "), $ops ops, $checks assertions",
         )
-        // Skipped fixtures are printed but deliberately NOT recorded into the
-        // coverage manifest. The manifest means "this fixture actually
-        // replayed"; recording a skip there would inflate the count and let
-        // `check-conformance-coverage.sh` report coverage this binding does not
-        // have — the precise "green while testing nothing" failure this runner
-        // exists to close.
-        for ((fixture, ops) in SKIPPED.toSortedMap()) {
-            println("reactive-graph SKIP $fixture — unsupported ops: ${ops.joinToString(", ")}")
-        }
 
         if (failures.isNotEmpty()) {
             fail(
@@ -329,90 +1005,6 @@ class ReactiveGraphConformanceTest {
                     "fixtures):\n" + failures.joinToString("\n"),
             )
         }
-        assertEquals(
-            expected,
-            replayed.size,
-            "not every supported fixture replayed against every context.",
-        )
-    }
-
-    /** Replay a `shape: steps` fixture against one model. */
-    private fun replaySteps(model: Model, fx: JsonObject, tally: Tally) {
-        val shape = fx["shape"]?.jsonPrimitive?.content
-        check(shape == "steps") { "unsupported fixture shape '$shape'" }
-        val engine = engineFor(model)
-        try {
-            for ((i, element) in fx["steps"]!!.jsonArray.withIndex()) {
-                val step = element.jsonObject
-                val op = step["op"]!!.jsonObject
-                val opResult = applyOp(engine, op)
-                tally.ops++
-                val expect = step["expect"]?.jsonObject ?: continue
-                applyExpect(engine, expect, opResult, model, i, tally)
-            }
-        } finally {
-            engine.close()
-        }
-    }
-
-    /** Apply one op; returns the observed value for a `read`, else null. */
-    private fun applyOp(engine: Engine, op: JsonObject): Int? {
-        val type = op["type"]!!.jsonPrimitive.content
-        val id = op["id"]?.jsonPrimitive?.content
-        when (type) {
-            "cell" -> engine.cell(id!!, op["value"]!!.jsonPrimitive.int)
-            "computed" -> engine.computed(
-                id!!,
-                op["reads"]!!.jsonArray.map { it.jsonPrimitive.content },
-                op["offset"]?.jsonPrimitive?.int ?: 0,
-            )
-            "read" -> return engine.read(id!!)
-            "set_cell" -> engine.setCell(id!!, op["value"]!!.jsonPrimitive.int)
-            // Never skip an unrecognised op silently — that is the defect class
-            // this runner exists to close.
-            else -> error("unsupported op '$type' — implement it or add the fixture to SKIPPED")
-        }
-        return null
-    }
-
-    private fun applyExpect(
-        engine: Engine,
-        expect: JsonObject,
-        opResult: Int?,
-        model: Model,
-        step: Int,
-        tally: Tally,
-    ) {
-        for ((key, value) in expect) {
-            when (key) {
-                "note" -> {} // documentation only
-                "value" -> {
-                    // Asserts on the value the preceding `read` op observed.
-                    // Requires a value-producing op — a null here means the
-                    // fixture paired `value` with a non-read op and the
-                    // assertion would otherwise silently pass.
-                    val actual = opResult
-                        ?: error("step $step: `value` expect on an op that produced no value")
-                    assertEquals(
-                        (value as JsonPrimitive).int,
-                        actual,
-                        "$model step $step: value",
-                    )
-                    tally.assertions++
-                }
-                "read" -> {
-                    for ((nodeId, expected) in value.jsonObject) {
-                        val actual = engine.read(nodeId)
-                        assertEquals(
-                            (expected as JsonPrimitive).int,
-                            actual,
-                            "$model step $step: read('$nodeId')",
-                        )
-                        tally.assertions++
-                    }
-                }
-                else -> error("unrecognised assertion key '$key' at step $step")
-            }
-        }
+        assertEquals(expected, replayed, "not every fixture replayed against every context.")
     }
 }

@@ -12,21 +12,30 @@ import kotlin.concurrent.withLock
  * `ThreadSafeSlotHandle<T>: Copy`.
  */
 @JvmInline
-value class ThreadSafeSlotHandle<T : Any> @PublishedApi internal constructor(val id: Int)
+value class ThreadSafeSlotHandle<T : Any> @PublishedApi internal constructor(val id: Int) :
+    ThreadSafeGraphNode {
+    override val nodeId: Int get() = id
+}
 
 /**
  * Lightweight typed reference to a mutable source cell in a [ThreadSafeContext].
  * Clonable by value, mirroring lazily-rs `ThreadSafeCellHandle<T>: Copy`.
  */
 @JvmInline
-value class ThreadSafeCellHandle<T : Any> @PublishedApi internal constructor(val id: Int)
+value class ThreadSafeCellHandle<T : Any> @PublishedApi internal constructor(val id: Int) :
+    ThreadSafeGraphNode {
+    override val nodeId: Int get() = id
+}
 
 /**
  * Reference to a registered side-effecting observer in a [ThreadSafeContext].
  * Clonable by value. Dispose to stop reruns.
  */
 @JvmInline
-value class ThreadSafeEffectHandle @PublishedApi internal constructor(val id: Int)
+value class ThreadSafeEffectHandle @PublishedApi internal constructor(val id: Int) :
+    ThreadSafeGraphNode {
+    override val nodeId: Int get() = id
+}
 
 /**
  * Reference to an **eager** derived value in a [ThreadSafeContext]. Composed of
@@ -119,6 +128,13 @@ class ThreadSafeContext {
     @PublishedApi
     internal var batchDepth: Int = 0
     private val batchedCells: MutableSet<Int> = HashSet()
+
+    /**
+     * Depth of the disposal-driven invalidation cascade (`#lzspecedgeindex`).
+     * See `Context.disposalDepth` — identical contract, identical reason. Only
+     * ever read or written under [lock].
+     */
+    private var disposalDepth: Int = 0
 
     /**
      * Per-thread tracking frame stack: the id of the slot/effect currently
@@ -216,17 +232,20 @@ class ThreadSafeContext {
 
     @PublishedApi
     internal fun getSlotAny(id: Int): Any = locked {
+        // Disposed check before the edge registration; see Context.getSlotAny
+        // for why a recycling arena makes that ordering load-bearing.
+        if (nodes[id] !is Node.Slot) throw DisposedNodeException(id, "slot")
         currentFrame()?.let { registerDependency(id, it) }
         refreshSlot(id)
-        val node = nodes[id] as? Node.Slot ?: error("get on non-slot id $id")
+        val node = nodes[id] as? Node.Slot ?: throw DisposedNodeException(id, "slot")
         check(node.hasValue) { "slot $id has no value" }
         node.value as Any
     }
 
     @PublishedApi
     internal fun getCellAny(id: Int): Any = locked {
+        val node = nodes[id] as? Node.Cell ?: throw DisposedNodeException(id, "cell")
         currentFrame()?.let { registerDependency(id, it) }
-        val node = nodes[id] as? Node.Cell ?: error("get_cell on non-cell id $id")
         node.value as Any
     }
 
@@ -237,7 +256,7 @@ class ThreadSafeContext {
 
     @PublishedApi
     internal fun setCellAny(id: Int, value: Any) = locked {
-        val node = nodes[id] as? Node.Cell ?: error("set_cell on non-cell id $id")
+        val node = nodes[id] as? Node.Cell ?: throw DisposedNodeException(id, "cell")
         if (node.value != value) {
             node.value = value
             if (isBatching()) {
@@ -295,17 +314,118 @@ class ThreadSafeContext {
     // -- Dispose -----------------------------------------------------------
 
     /** Dispose an effect: deschedule, drop edges, run its cleanup, recycle the id. */
-    fun disposeEffect(handle: ThreadSafeEffectHandle) = locked {
-        val id = handle.id
-        // O(1) scheduled check before the queue scan; see Context.disposeEffect
-        // for why the unguarded form was quadratic in fan-out (`#lzspecedgeindex`).
-        if (scheduledEffects.remove(id)) pendingEffects.remove(id)
-        val node = nodes[id] as? Node.Effect ?: return@locked
+    fun disposeEffect(handle: ThreadSafeEffectHandle) = disposeNode(handle)
+
+    // -- Disposal + degree introspection (`#lzspecedgeindex`) --------------
+    //
+    // The thread-safe mirror of the `Context` plane; every doc comment there
+    // applies verbatim. The only difference is that each entry point takes the
+    // graph lock, so a teardown is atomic against concurrent readers: a thread
+    // reading a node being disposed either completes its read or sees the
+    // DisposedNodeException, never a half-detached edge set.
+
+    /** Resolve a handle to its live node, or `null` if stale. See `Context.resolve`. */
+    private fun resolve(node: ThreadSafeGraphNode): Node? {
+        val id = node.nodeId
+        if (id < 0 || id >= nodes.size) return null
+        val n = nodes[id] ?: return null
+        return when (node) {
+            is ThreadSafeCellHandle<*> -> n as? Node.Cell
+            is ThreadSafeSlotHandle<*> -> n as? Node.Slot
+            is ThreadSafeEffectHandle -> n as? Node.Effect
+        }
+    }
+
+    /** Size of [node]'s reverse edge set. See `Context.dependentCount`. */
+    fun dependentCount(node: ThreadSafeGraphNode): Int = locked {
+        when (val n = resolve(node)) {
+            is Node.Cell -> n.dependents.size
+            is Node.Slot -> n.dependents.size
+            else -> 0
+        }
+    }
+
+    /** Size of [node]'s forward edge set. See `Context.dependencyCount`. */
+    fun dependencyCount(node: ThreadSafeGraphNode): Int = locked {
+        when (val n = resolve(node)) {
+            is Node.Slot -> n.dependencies.size
+            is Node.Effect -> n.dependencies.size
+            else -> 0
+        }
+    }
+
+    /** Whether [node] has been torn down. See `Context.isDisposed`. */
+    fun isDisposed(node: ThreadSafeGraphNode): Boolean = locked { resolve(node) == null }
+
+    /** Tear [node] out of the graph. See `Context.disposeNode`. */
+    fun disposeNode(node: ThreadSafeGraphNode) = locked {
+        val resolved = resolve(node) ?: return@locked
+        disposeResolved(node.nodeId, resolved)
+    }
+
+    /** Tear down a derived slot. See [disposeNode]. */
+    fun disposeSlot(handle: ThreadSafeSlotHandle<*>) = disposeNode(handle)
+
+    /** Tear down a source cell. See [disposeNode]. */
+    fun disposeCell(handle: ThreadSafeCellHandle<*>) = disposeNode(handle)
+
+    /** Tear down both halves of a signal, puller first. See `Context.disposeSignalNode`. */
+    fun disposeSignalNode(handle: ThreadSafeSignalHandle<*>) {
+        disposeNode(handle.effect)
+        disposeNode(handle.slot)
+    }
+
+    /** The shared teardown path. Caller holds [lock]. See `Context.disposeResolved`. */
+    private fun disposeResolved(id: Int, node: Node) {
         nodes[id] = null
         freeIds.addLast(id)
-        for (dep in node.dependencies) removeDependentEdge(dep, id)
-        node.cleanup?.invoke()
+        when (node) {
+            is Node.Cell -> detachDependents(id, node.dependents)
+            is Node.Slot -> {
+                for (dep in node.dependencies) removeDependentEdge(dep, id)
+                node.dependencies.clear()
+                detachDependents(id, node.dependents)
+            }
+            is Node.Effect -> {
+                // O(1) scheduled check before the queue scan; see
+                // Context.disposeResolved for why the unguarded form was
+                // quadratic in fan-out (`#lzspecedgeindex`).
+                if (scheduledEffects.remove(id)) pendingEffects.remove(id)
+                for (dep in node.dependencies) removeDependentEdge(dep, id)
+                node.dependencies.clear()
+                node.cleanup?.invoke()
+            }
+        }
     }
+
+    /** Detach dependents, then dirty the surviving cone mark-only. Caller holds [lock]. */
+    private fun detachDependents(id: Int, dependents: SmallEdgeList) {
+        if (dependents.isEmpty()) return
+        val snapshot = dependents.toList()
+        dependents.clear()
+        for (parent in snapshot) removeDependencyEdge(parent, id)
+        disposalDepth++
+        try {
+            val stack = ArrayDeque<Int>()
+            val forceStack = ArrayDeque<Boolean>()
+            for (parent in snapshot) { stack.addLast(parent); forceStack.addLast(true) }
+            runFrontier(stack, forceStack)
+        } finally {
+            disposalDepth--
+        }
+    }
+
+    /** Remove [depId] from [parentId]'s forward edge set. Caller holds [lock]. */
+    private fun removeDependencyEdge(parentId: Int, depId: Int) {
+        when (val parent = nodes[parentId]) {
+            is Node.Slot -> removeEdge(parent.dependencies, depId)
+            is Node.Effect -> removeEdge(parent.dependencies, depId)
+            else -> {}
+        }
+    }
+
+    /** Open a teardown scope. See `Context.scope`. */
+    fun scope(): ThreadSafeTeardownScope = ThreadSafeTeardownScope(this)
 
     fun isEffectActive(handle: ThreadSafeEffectHandle): Boolean = locked {
         nodes[handle.id] is Node.Effect
@@ -492,6 +612,8 @@ class ThreadSafeContext {
     // -- Internals: effect scheduling / flush ------------------------------
 
     private fun scheduleEffect(id: Int, force: Boolean) {
+        // Disposal is not a publish — see [disposalDepth].
+        if (disposalDepth > 0) return
         val node = nodes[id] as? Node.Effect ?: return
         if (force) node.forceRun = true
         if (scheduledEffects.add(id)) pendingEffects.addLast(id)
@@ -538,4 +660,83 @@ class ThreadSafeContext {
         if (node.forceRun) return true
         return node.dependencies.any { nodes[it] is Node.Slot && refreshSlot(it) }
     }
+}
+
+/**
+ * A teardown scope over a [ThreadSafeContext]. The thread-safe mirror of
+ * [TeardownScope] — see that class for why the end is an explicit statement
+ * rather than a destructor, and why `use` is the lexical spelling.
+ *
+ * The scope's *own* bookkeeping (the owned list) is not synchronized: a scope is
+ * a caller-side ownership record, and sharing one across threads would make its
+ * creation order — the thing teardown order is defined against — meaningless.
+ * Build a scope on the thread that owns the lifetime. Each individual
+ * [ThreadSafeContext.disposeNode] it performs is still atomic under the graph
+ * lock.
+ */
+class ThreadSafeTeardownScope internal constructor(
+    /** The context this scope belongs to. */
+    val ctx: ThreadSafeContext,
+) : AutoCloseable {
+    private val owned = ArrayList<ThreadSafeGraphNode>()
+    private var ended = false
+
+    /** How many nodes this scope currently owns. */
+    val size: Int get() = owned.size
+
+    /** Whether this scope owns nothing. */
+    fun isEmpty(): Boolean = owned.isEmpty()
+
+    /** Whether this scope owns at least one node. */
+    fun isNotEmpty(): Boolean = owned.isNotEmpty()
+
+    /** Whether [end] has already run. */
+    val isEnded: Boolean get() = ended
+
+    /** Take ownership of an existing node. See `TeardownScope.adopt`. */
+    fun <T : ThreadSafeGraphNode> adopt(node: T): T {
+        if (!ended) owned.add(node)
+        return node
+    }
+
+    /** A source cell owned by this scope. */
+    inline fun <reified T : Any> cell(value: T): ThreadSafeCellHandle<T> = adopt(ctx.cell(value))
+
+    /** A lazy derived slot owned by this scope. */
+    inline fun <reified T : Any> computed(
+        noinline compute: ThreadSafeContext.() -> T,
+    ): ThreadSafeSlotHandle<T> = adopt(ctx.computed(compute))
+
+    /** Alias of [computed]. */
+    inline fun <reified T : Any> slot(
+        noinline compute: ThreadSafeContext.() -> T,
+    ): ThreadSafeSlotHandle<T> = computed(compute)
+
+    /** A memoized derived slot owned by this scope. */
+    inline fun <reified T : Any> memo(
+        noinline compute: ThreadSafeContext.() -> T,
+    ): ThreadSafeSlotHandle<T> = adopt(ctx.memo(compute))
+
+    /** An effect owned by this scope. */
+    fun effect(run: ThreadSafeContext.() -> (() -> Unit)?): ThreadSafeEffectHandle =
+        adopt(ctx.effect(run))
+
+    /** Cancel this scope's teardown. See `TeardownScope.disarm`. */
+    fun disarm() {
+        owned.clear()
+    }
+
+    /** Dispose every owned node in reverse creation order. See `TeardownScope.end`. */
+    fun end() {
+        if (ended) return
+        ended = true
+        for (i in owned.indices.reversed()) ctx.disposeNode(owned[i])
+        owned.clear()
+    }
+
+    /** [end], so `ctx.scope().use { ... }` is the lexical form. */
+    override fun close() = end()
+
+    override fun toString(): String =
+        if (ended) "ThreadSafeTeardownScope(ended)" else "ThreadSafeTeardownScope(${owned.size} owned)"
 }

@@ -38,6 +38,36 @@ and coroutine-backed async (`AsyncContext`).
   - Tracking stack auto-discovers dependencies; cycles are detected (throws).
   - Handles (`SlotHandle`/`CellHandle`/`SignalHandle`/`EffectHandle`) are
     lightweight ids over a shared node table, like lazily-rs.
+  - **Disposal + teardown scopes** (`#lzspecedgeindex`, `Disposal.kt`). Handles
+    are copyable ids, not owners, so nothing is reclaimed by dropping one: the
+    arena and the reverse edge set hold strong references, and a long-lived
+    source's dependent list grows without bound under subscribe/unsubscribe
+    churn. Teardown is therefore explicit, and identical across all three
+    contexts:
+    - `disposeNode`/`disposeSlot`/`disposeCell`/`disposeEffect` — idempotent,
+      detach both edge directions, mark the surviving dependent cone dirty
+      *without scheduling its effects* (disposal is not a publish), and recycle
+      the id. A disposed node reads as `DisposedNodeException`. A handle whose
+      recycled id now holds another kind is a no-op: the kind is read from the
+      arena, never remembered by the caller.
+    - `ctx.scope()` → `TeardownScope` / `ThreadSafeTeardownScope` /
+      `AsyncTeardownScope`, with `adopt`, per-kind factories, `disarm`, and
+      `end`. Members tear down in **reverse creation order** — graph state is
+      order-independent but effect cleanups are side effects. Scoping bounds
+      lifetime, never visibility.
+    - Ending is a statement, not a destructor: Kotlin has no `Drop` and
+      GC-timed finalization would reintroduce the leak non-deterministically.
+      The sync scopes are `AutoCloseable`, so `ctx.scope().use { }` is the
+      lexical form; `AsyncTeardownScope.end()` suspends (it awaits cancellation
+      of in-flight work), so `use` cannot apply and `AsyncContext.withScope { }`
+      is the bracket instead.
+    - `dependentCount`/`dependencyCount`/`isDisposed` over the sealed
+      `GraphNode`/`ThreadSafeGraphNode`/`AsyncGraphNode` markers: **counts,
+      never collections**, so graph shape is assertable with no path to the
+      internals and no storage strategy pinned by the contract.
+    - `AsyncContext.settle()` awaits effect quiescence — async effect reruns are
+      executor-scheduled by contract, so any assertion about whether an effect
+      ran is otherwise a race.
 - `StateMachine.kt` — `StateMachine<S, E>`: a reactive FSM backed by a `Cell`
   (the native counterpart of lazily-rs/py/zig). `send`/`state`/`onTransition`/
   `stateIs`. Pure transition `(S, E) -> S?`; `null` rejects (guard); equal

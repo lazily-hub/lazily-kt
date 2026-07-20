@@ -1,7 +1,9 @@
 package io.github.lazily
 
+import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -303,5 +305,350 @@ class EdgeIndexTest {
         assertEquals(width - 1 + 100, ctx.get(total))
         for (i in 0 until width) ctx.setCell(inputs[i], 2)
         assertEquals(width * 2, ctx.get(total))
+    }
+
+    // -- Disposal / teardown-scope plane (`#lzspecedgeindex`) --------------
+    //
+    // The shared reactive-graph corpus (replayed in
+    // ReactiveGraphConformanceTest) pins most of this plane, but two of its
+    // three stated semantics are NOT discriminated by any fixture in it, which
+    // was established by mutation rather than assumed:
+    //
+    //   * "effects reached by the disposal walk MUST NOT be scheduled" — every
+    //     corpus fixture that has an effect in a disposed cone disposes that
+    //     effect first, so scheduling it instead changes nothing observable
+    //     there;
+    //   * "teardown order is reverse creation order" — the only scope in the
+    //     corpus carrying a `cleanup_order` assertion owns exactly one effect,
+    //     and the assertion projects onto effect entries, so a forward-order
+    //     teardown produces the identical single-entry log.
+    //
+    // Both mutations left all nine fixtures green against all three contexts.
+    // These are the tests that go red, so the semantics are pinned by something
+    // rather than by nobody.
+
+    @Test
+    fun `disposal dirties the surviving dependent cone`() {
+        // Semantic 1, and the single most likely thing to get wrong
+        // (`lazily-rs` 5db90d2, `lazily-js` 4d20670): detaching edges without
+        // marking dependents leaves a live reader frozen on the value it cached
+        // *through* the disposed node. This one the corpus does pin; it is here
+        // because the three semantics belong together.
+        val ctx = Context()
+        val src = ctx.cell(1)
+        val mid = ctx.computed { ctx.getCell(src) + 1 }
+        val reader = ctx.computed { ctx.get(mid) * 10 }
+
+        assertEquals(20, ctx.get(reader))
+        ctx.disposeSlot(mid)
+
+        assertFailsWith<DisposedNodeException>(
+            "a live reader that still names a disposed dependency must error on its next " +
+                "recompute, not serve its cached value",
+        ) { ctx.get(reader) }
+    }
+
+    @Test
+    fun `disposal does not schedule effects reached by the walk`() {
+        // Semantic 2. Disposal is not a publish. Running an effect during
+        // teardown re-enters a compute that reads the node being disposed, which
+        // turns `dispose` itself into a throw and breaks teardown idempotence.
+        // Mark dirty only — the contract is "errors on the next recompute".
+        val ctx = Context()
+        val src = ctx.cell(1)
+        val mid = ctx.computed { ctx.getCell(src) + 1 }
+
+        var runs = 0
+        var sawDisposed = false
+        ctx.effect {
+            runs++
+            // Reads `src` directly as well as through `mid`, so the effect still
+            // holds a live edge after `mid` is disposed and a later write to
+            // `src` genuinely reaches it. An effect whose *only* dependency was
+            // the disposed node has nothing left to schedule it and is deaf by
+            // construction, which would make this test vacuous.
+            ctx.getCell(src)
+            try {
+                ctx.get(mid)
+            } catch (_: DisposedNodeException) {
+                sawDisposed = true
+            }
+            null
+        }
+        assertEquals(1, runs)
+
+        ctx.disposeSlot(mid)
+        assertEquals(1, runs, "the effect reached by the disposal walk must not rerun")
+        assertFalse(sawDisposed)
+
+        // Nor may it be left *queued*. A teardown that enqueues the effect defers
+        // the damage rather than avoiding it: the effect then fires on the next
+        // unrelated flush — a write to a cell it does not even read — as a
+        // spurious rerun no publish asked for.
+        val unrelated = ctx.cell(0)
+        ctx.effect { ctx.getCell(unrelated); null }
+        ctx.setCell(unrelated, 1)
+        assertEquals(1, runs, "a publish the effect does not observe must not flush it")
+        assertFalse(sawDisposed)
+
+        // A real write still reaches it, and *that* recompute is where the error
+        // surfaces.
+        ctx.setCell(src, 2)
+        assertEquals(2, runs)
+        assertTrue(sawDisposed, "the next real recompute must see the disposed dependency")
+    }
+
+    @Test
+    fun `thread-safe disposal does not schedule effects reached by the walk`() {
+        // Semantic 2 on the lock-backed engine. Same shape; the gate is a
+        // separate field on a separate class and would be just as easy to omit.
+        val ctx = ThreadSafeContext()
+        val src = ctx.cell(1)
+        val mid = ctx.computed { ctx.getCell(src) + 1 }
+
+        var runs = 0
+        ctx.effect {
+            runs++
+            ctx.getCell(src)
+            try {
+                ctx.get(mid)
+            } catch (_: DisposedNodeException) {
+                // expected once mid is gone
+            }
+            null
+        }
+        assertEquals(1, runs)
+
+        ctx.disposeSlot(mid)
+        assertEquals(1, runs, "the effect reached by the disposal walk must not rerun")
+
+        val unrelated = ctx.cell(0)
+        ctx.effect { ctx.getCell(unrelated); null }
+        ctx.setCell(unrelated, 1)
+        assertEquals(1, runs, "a publish the effect does not observe must not flush it")
+
+        ctx.setCell(src, 2)
+        assertEquals(2, runs, "a real write still reaches it")
+    }
+
+    @Test
+    fun `teardown scope tears down in reverse creation order`() {
+        // Semantic 3. Graph state is order-independent, but effect *cleanups*
+        // are side effects and their order is observable. Reverse creation order
+        // means dependents go before what they read, so a scope never
+        // transiently dangles inside itself.
+        //
+        // Two effects, not one: with a single effect a forward-order teardown
+        // produces the identical log, which is precisely why the corpus fixture
+        // does not discriminate this.
+        val ctx = Context()
+        val topic = ctx.cell(1)
+        val cleanups = mutableListOf<String>()
+        val scope = ctx.scope()
+        val a = scope.computed { ctx.getCell(topic) + 1 }
+        val b = scope.computed { ctx.get(a) + 2 }
+        scope.effect { ctx.get(b); { cleanups.add("watch_b") } }
+        scope.effect { ctx.get(b); { cleanups.add("watch_b2") } }
+
+        assertEquals(4, ctx.get(b))
+        assertEquals(4, scope.size)
+        scope.end()
+        assertEquals(
+            listOf("watch_b2", "watch_b"),
+            cleanups,
+            "later-created members must tear down first",
+        )
+        assertEquals(0, scope.size)
+    }
+
+    @Test
+    fun `ending a scope is observationally equal to disposing each member`() {
+        // `disposeScope_eq_disposeAll`. A scope names a set and a moment and
+        // introduces no disposal semantics of its own.
+        fun run(useScope: Boolean): List<Any> {
+            val ctx = Context()
+            val topic = ctx.cell(1)
+            val cleanups = mutableListOf<String>()
+            val scope = ctx.scope()
+            val a = if (useScope) {
+                scope.computed { ctx.getCell(topic) + 1 }
+            } else {
+                ctx.computed { ctx.getCell(topic) + 1 }
+            }
+            val b = if (useScope) scope.computed { ctx.get(a) + 2 } else ctx.computed { ctx.get(a) + 2 }
+            val run: Context.() -> (() -> Unit)? = { ctx.get(b); { cleanups.add("watch") } }
+            val w = if (useScope) scope.effect(run) else ctx.effect(run)
+            assertEquals(4, ctx.get(b))
+
+            if (useScope) {
+                scope.end()
+            } else {
+                ctx.disposeEffect(w)
+                ctx.disposeSlot(b)
+                ctx.disposeSlot(a)
+            }
+            return listOf(
+                cleanups.joinToString(","),
+                ctx.dependentCount(topic),
+                ctx.isEffectActive(w),
+                ctx.isDisposed(a),
+                ctx.isDisposed(b),
+            )
+        }
+        assertEquals(run(useScope = false), run(useScope = true))
+    }
+
+    @Test
+    fun `use ends a teardown scope even on a throw`() {
+        // `use` is the lexical spelling of a scope's end in Kotlin — the
+        // analogue of the Rust block scope. It has to hold on the exceptional
+        // path too, or the leak comes back exactly where it is least visible.
+        val ctx = Context()
+        val topic = ctx.cell(1)
+        val cleanups = mutableListOf<String>()
+        var member: SlotHandle<Int>? = null
+
+        assertFailsWith<IllegalStateException> {
+            ctx.scope().use { scope ->
+                member = scope.computed { ctx.getCell(topic) + 1 }
+                scope.effect { ctx.get(member!!); { cleanups.add("watch") } }
+                assertEquals(2, ctx.get(member!!))
+                assertEquals(1, ctx.dependentCount(topic))
+                error("boom")
+            }
+        }
+
+        assertEquals(listOf("watch"), cleanups, "the scope must end on the exceptional path")
+        assertTrue(ctx.isDisposed(member!!))
+        assertEquals(0, ctx.dependentCount(topic), "the source must return to zero dependents")
+    }
+
+    @Test
+    fun `disarm cancels teardown without detaching anything`() {
+        val ctx = Context()
+        val topic = ctx.cell(1)
+        val cleanups = mutableListOf<String>()
+        val scope = ctx.scope()
+        val escaped = scope.computed { ctx.getCell(topic) + 1 }
+        scope.effect { ctx.get(escaped); { cleanups.add("watch") } }
+
+        assertEquals(2, ctx.get(escaped))
+        assertEquals(2, scope.size)
+        scope.disarm()
+        assertEquals(0, scope.size, "a disarmed scope owns nothing")
+        scope.end()
+
+        assertEquals(emptyList(), cleanups, "ending a disarmed scope disposes nothing")
+        assertFalse(ctx.isDisposed(escaped))
+        assertEquals(1, ctx.dependentCount(topic), "edges are untouched by disarm")
+        ctx.setCell(topic, 4)
+        assertEquals(5, ctx.get(escaped), "disarmed nodes keep propagating")
+    }
+
+    @Test
+    fun `disposal is idempotent and stale handles are a no-op`() {
+        val ctx = Context()
+        val cell = ctx.cell(1)
+        val slot = ctx.computed { ctx.getCell(cell) }
+        assertEquals(1, ctx.get(slot))
+
+        ctx.disposeSlot(slot)
+        ctx.disposeSlot(slot) // second teardown must be a no-op, not a throw
+        ctx.disposeCell(cell)
+        ctx.disposeCell(cell)
+
+        // The arena recycles ids, so the *stale* cell handle now names whatever
+        // took its id. Disposing through it must read the kind from the arena
+        // and decline, or an unrelated live node would be torn down.
+        val successor = ctx.computed { 7 }
+        assertEquals(7, ctx.get(successor))
+        ctx.disposeCell(cell)
+        assertEquals(7, ctx.get(successor), "a stale cell handle must not tear down a slot")
+    }
+
+    @Test
+    fun `subscribe unsubscribe churn returns to baseline`() {
+        val ctx = Context()
+        val topic = ctx.cell(0)
+        val subs = (0 until 8).map { ctx.effect { ctx.getCell(topic); null } }.toMutableList()
+        assertEquals(8, ctx.dependentCount(topic))
+
+        for (c in 0 until 200) {
+            val at = c % 8
+            ctx.disposeEffect(subs[at])
+            subs[at] = ctx.effect { ctx.getCell(topic); null }
+        }
+        assertEquals(
+            8,
+            ctx.dependentCount(topic),
+            "the dependent set must track live subscribers, not total ever created",
+        )
+    }
+
+    @Test
+    fun `async disposal detaches upstream and does not schedule the cone`() {
+        // The async graph is where a disposal leak is hardest to notice, and
+        // where semantic 2 matters most: an effect scheduled during teardown is
+        // dispatched to a coroutine that resumes after `dispose` returned, so
+        // the spurious rerun surfaces detached in time from its cause.
+        runBlocking {
+            AsyncContext().use { ctx ->
+                val src = ctx.cell(1)
+                val mid = ctx.computedAsync { getCell(src) + 1 }
+
+                var runs = 0
+                ctx.effectAsync {
+                    runs++
+                    getCell(src)
+                    try {
+                        getAsync(mid)
+                    } catch (_: DisposedNodeException) {
+                        // expected once mid is gone
+                    }
+                    null
+                }
+                ctx.settle()
+                assertEquals(1, runs)
+                assertEquals(2, ctx.dependentCount(src), "mid and the effect both read src")
+
+                ctx.disposeSlot(mid)
+                ctx.settle()
+                assertEquals(1, runs, "the effect reached by the disposal walk must not rerun")
+                assertEquals(1, ctx.dependentCount(src), "mid's upstream edge must be detached")
+
+                ctx.setCell(src, 2)
+                ctx.settle()
+                assertEquals(2, runs, "a real write still reaches it")
+            }
+        }
+    }
+
+    @Test
+    fun `async effect disposal detaches its upstream edges`() {
+        // The leak the corpus surfaced: an effect removed from the context that
+        // stays in `dependents` for every dependency it read grows each source's
+        // dependent set without bound under async subscribe/unsubscribe churn.
+        runBlocking {
+            AsyncContext().use { ctx ->
+                val topic = ctx.cell(0)
+                val subs = (0 until 8)
+                    .map { ctx.effectAsync { getCell(topic); null } }
+                    .toMutableList()
+                ctx.settle()
+                assertEquals(8, ctx.dependentCount(topic))
+
+                for (c in 0 until 64) {
+                    val at = c % 8
+                    ctx.disposeEffect(subs[at])
+                    subs[at] = ctx.effectAsync { getCell(topic); null }
+                }
+                ctx.settle()
+                assertEquals(
+                    8,
+                    ctx.dependentCount(topic),
+                    "the dependent set must track live subscribers, not total ever created",
+                )
+            }
+        }
     }
 }

@@ -12,6 +12,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
 import kotlin.concurrent.withLock
 
 /**
@@ -46,6 +47,9 @@ import kotlin.concurrent.withLock
  */
 private const val INITIAL_NODE_CAPACITY = 16
 
+/** Bound on [AsyncContext.settle]'s re-check loop. */
+private const val SETTLE_ROUNDS = 256
+
 class AsyncContext(
     dispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : AutoCloseable {
@@ -65,16 +69,33 @@ class AsyncContext(
     private val scheduledEffects = LinkedHashSet<Int>()
     private var nodes: Array<AsyncNode?> = arrayOfNulls(INITIAL_NODE_CAPACITY)
 
+    /**
+     * Depth of the disposal-driven invalidation cascade (`#lzspecedgeindex`).
+     * See `Context.disposalDepth`. Only read or written under [lock].
+     *
+     * The async graph makes semantic 2 *more* load-bearing than the synchronous
+     * one, not less: an effect scheduled here is dispatched to a coroutine that
+     * resumes after `dispose` has returned, so the spurious rerun would surface
+     * detached in time from the teardown that caused it.
+     */
+    private var disposalDepth = 0
+
     // -- Handles ----------------------------------------------------------
 
     /** A mutable input cell — the synchronous input layer. */
-    inner class AsyncCellHandle<T> internal constructor(internal val id: Int)
+    inner class AsyncCellHandle<T> internal constructor(internal val id: Int) : AsyncGraphNode {
+        override val nodeId: Int get() = id
+    }
 
     /** A computed/memoized async slot. */
-    inner class AsyncSlotHandle<T> internal constructor(internal val id: Int)
+    inner class AsyncSlotHandle<T> internal constructor(internal val id: Int) : AsyncGraphNode {
+        override val nodeId: Int get() = id
+    }
 
     /** An async effect handle. */
-    inner class AsyncEffectHandle internal constructor(internal val id: Int)
+    inner class AsyncEffectHandle internal constructor(internal val id: Int) : AsyncGraphNode {
+        override val nodeId: Int get() = id
+    }
 
     /** An eager async derived value (memo slot + puller effect). */
     inner class AsyncSignalHandle<T> internal constructor(
@@ -129,6 +150,34 @@ class AsyncContext(
     /** Synchronous disposal (blocks on [dispose]). */
     override fun close() = runBlocking { dispose() }
 
+    /**
+     * Await quiescence: every scheduled effect flushed and every in-flight
+     * effect run settled.
+     *
+     * The synchronous contexts are quiescent the moment an op returns; this one
+     * is not, because effect reruns are executor-scheduled by contract rather
+     * than inline. Without a way to await that, any assertion about *whether an
+     * effect ran* is a race, and a conformance replay against this context
+     * would be measuring its own scheduling luck.
+     *
+     * Loops because a settling effect can schedule another. Bounded so a
+     * genuinely non-terminating effect cycle surfaces as a stuck graph rather
+     * than as a hang inside `settle`.
+     */
+    suspend fun settle() {
+        repeat(SETTLE_ROUNDS) {
+            val jobs = locked {
+                nodes.filterIsInstance<AsyncNode.Effect>().mapNotNull { it.runJob }
+            }
+            val queued = locked { pendingEffects.isNotEmpty() }
+            if (!queued && jobs.none { it.isActive }) return
+            for (job in jobs) {
+                try { job.join() } catch (_: Throwable) {}
+            }
+            yield()
+        }
+    }
+
     // -- Internals: lock + id arena ---------------------------------------
 
     private inline fun <T> locked(action: () -> T): T = lock.withLock(action)
@@ -163,7 +212,7 @@ class AsyncContext(
     fun <T : Any> getCell(handle: AsyncCellHandle<T>): T {
         locked {
             val node = nodes[handle.id] as? AsyncNode.Cell
-                ?: error("AsyncCellHandle does not point to a Cell node")
+                ?: throw DisposedNodeException(handle.id, "cell")
             return node.value as T
         }
     }
@@ -171,7 +220,7 @@ class AsyncContext(
     fun <T : Any> setCell(handle: AsyncCellHandle<T>, value: T) {
         val dependents: List<Int> = locked {
             val node = nodes[handle.id] as? AsyncNode.Cell
-                ?: error("AsyncCellHandle does not point to a Cell node")
+                ?: throw DisposedNodeException(handle.id, "cell")
             @Suppress("UNCHECKED_CAST")
             if (node.value == value) return
             node.value = value
@@ -246,13 +295,21 @@ class AsyncContext(
 
     private suspend fun doGetAsync(slotId: Int): Any? {
         while (true) {
+            // A disposed slot is an error, never a null. Checked before the
+            // fast path so `read_after_dispose` cannot be mistaken for
+            // "resolved to nothing yet" (`#lzspecedgeindex`).
+            locked {
+                if (nodes[slotId] !is AsyncNode.Slot) {
+                    throw DisposedNodeException(slotId, "slot")
+                }
+            }
             // Fast path: value already published.
             doGet(slotId)?.let { return it }
 
             var recv: CompletableDeferred<Outcome>? = null
             locked {
                 val slot = nodes[slotId] as? AsyncNode.Slot
-                    ?: error("AsyncSlotHandle does not point to a Slot node")
+                    ?: throw DisposedNodeException(slotId, "slot")
                 when (val state = slot.state) {
                     is SlotState.Computing -> recv = slot.inFlight
                     SlotState.Empty, SlotState.Error -> recv = spawnComputeLocked(slotId)
@@ -364,24 +421,168 @@ class AsyncContext(
     }
 
     /** Dispose an async effect: drop pending reruns, cancel in-flight run, run cleanup. */
-    suspend fun disposeEffect(handle: AsyncEffectHandle) {
-        val (cleanup, runJob) = locked {
-            pendingEffects.remove(handle.id)
-            scheduledEffects.remove(handle.id)
-            val node = nodes[handle.id]
-            nodes[handle.id] = null
-            if (handle.id < nodes.size) freeIds.addLast(handle.id)
-            val eff = node as? AsyncNode.Effect
-            if (eff != null) {
-                for (dep in eff.dependencies) {
-                    (nodes[dep] as? AsyncNode.Slot)?.dependents?.remove(handle.id)
-                    (nodes[dep] as? AsyncNode.Cell)?.dependents?.remove(handle.id)
-                }
-            }
-            eff?.cleanup to eff?.runJob
+    suspend fun disposeEffect(handle: AsyncEffectHandle) = disposeNode(handle)
+
+    // -- Disposal + degree introspection (`#lzspecedgeindex`) --------------
+    //
+    // The async mirror of the `Context` plane. Two things differ, both forced by
+    // the execution model rather than chosen:
+    //
+    //  * teardown **suspends**. Disposing a node cancels its in-flight compute
+    //    or effect run and awaits that cancellation before running the cleanup,
+    //    so a cleanup never races the body it is undoing. That is why
+    //    [AsyncTeardownScope.end] is `suspend` and the scope is not
+    //    `AutoCloseable`: `use` cannot await, and a `close` that blocked on
+    //    `runBlocking` inside a coroutine would deadlock a confined dispatcher.
+    //  * the disposal cascade is marked under the lock but the cancel/cleanup
+    //    tail runs outside it, so a user cleanup cannot deadlock the graph.
+
+    /** Resolve a handle to its live node, or `null` if stale. Caller holds [lock]. */
+    private fun resolveLocked(node: AsyncGraphNode): AsyncNode? {
+        val id = node.nodeId
+        if (id < 0 || id >= nodes.size) return null
+        val n = nodes[id] ?: return null
+        return when (node) {
+            is AsyncCellHandle<*> -> n as? AsyncNode.Cell
+            is AsyncSlotHandle<*> -> n as? AsyncNode.Slot
+            is AsyncEffectHandle -> n as? AsyncNode.Effect
         }
-        runJob?.cancelAndJoin()
-        cleanup?.let { c -> try { c() } catch (_: Throwable) {} }
+    }
+
+    /** Size of [node]'s reverse edge set. See `Context.dependentCount`. */
+    fun dependentCount(node: AsyncGraphNode): Int = locked {
+        when (val n = resolveLocked(node)) {
+            is AsyncNode.Cell -> n.dependents.size
+            is AsyncNode.Slot -> n.dependents.size
+            else -> 0
+        }
+    }
+
+    /** Size of [node]'s forward edge set. See `Context.dependencyCount`. */
+    fun dependencyCount(node: AsyncGraphNode): Int = locked {
+        when (val n = resolveLocked(node)) {
+            is AsyncNode.Slot -> n.dependencies.size
+            is AsyncNode.Effect -> n.dependencies.size
+            else -> 0
+        }
+    }
+
+    /** Whether [node] has been torn down. See `Context.isDisposed`. */
+    fun isDisposed(node: AsyncGraphNode): Boolean = locked { resolveLocked(node) == null }
+
+    /** What a locked teardown leaves for the suspending tail to finish. */
+    private class DisposePlan(
+        @JvmField val cleanup: (suspend () -> Unit)?,
+        @JvmField val runJob: Job?,
+    )
+
+    /**
+     * Tear [node] out of the graph. See `Context.disposeNode` for the shared
+     * contract; the graph mutation happens under [lock] and the cancellation and
+     * cleanup happen after it is released.
+     */
+    suspend fun disposeNode(node: AsyncGraphNode) {
+        val plan = locked {
+            val resolved = resolveLocked(node) ?: return@locked null
+            disposeLocked(node.nodeId, resolved)
+        } ?: return
+        plan.runJob?.cancelAndJoin()
+        plan.cleanup?.let { c -> try { c() } catch (_: Throwable) {} }
+    }
+
+    /** Tear down an async slot. See [disposeNode]. */
+    suspend fun disposeSlot(handle: AsyncSlotHandle<*>) = disposeNode(handle)
+
+    /** Tear down a source cell. See [disposeNode]. */
+    suspend fun disposeCell(handle: AsyncCellHandle<*>) = disposeNode(handle)
+
+    /** Tear down both halves of a signal, puller first. */
+    suspend fun disposeSignalNode(handle: AsyncSignalHandle<*>) {
+        disposeNode(handle.effect)
+        disposeNode(handle.slot)
+    }
+
+    /**
+     * The shared teardown path; caller holds [lock]. Order matches
+     * `Context.disposeResolved`: vacate the arena slot, detach upstream, detach
+     * downstream, then dirty the surviving cone mark-only.
+     */
+    private fun disposeLocked(id: Int, node: AsyncNode): DisposePlan {
+        nodes[id] = null
+        freeIds.addLast(id)
+        var cleanup: (suspend () -> Unit)? = null
+        var runJob: Job? = null
+        val dependents: List<Int> = when (node) {
+            is AsyncNode.Cell -> node.dependents.toList()
+            is AsyncNode.Slot -> {
+                for (dep in node.dependencies) detachDependentLocked(dep, id)
+                // Supersede anyone awaiting this slot: they re-resolve, find the
+                // arena slot empty, and get the DisposedNodeException.
+                node.job?.cancel()
+                node.inFlight?.complete(Outcome.Retry)
+                node.dependents.toList()
+            }
+            is AsyncNode.Effect -> {
+                pendingEffects.remove(id)
+                scheduledEffects.remove(id)
+                // The upstream detach the pre-disposal `disposeEffect` skipped
+                // for cells and slots alike. Leaving it out was a real leak: an
+                // effect removed from the context still sat in `dependents` for
+                // every dependency it had read, so async subscribe/unsubscribe
+                // churn grew each source's dependent set without bound.
+                for (dep in node.dependencies) detachDependentLocked(dep, id)
+                cleanup = node.cleanup
+                runJob = node.runJob
+                emptyList()
+            }
+        }
+        if (dependents.isNotEmpty()) {
+            for (d in dependents) detachDependencyLocked(d, id)
+            disposalDepth++
+            try {
+                for (d in dependents) {
+                    // Effects reached by the walk are deliberately left alone —
+                    // disposal is not a publish. Slots are invalidated so a
+                    // dependent cannot serve a value it computed through the
+                    // node being torn down.
+                    if (nodes[d] is AsyncNode.Slot) invalidateSlot(d)
+                }
+            } finally {
+                disposalDepth--
+            }
+        }
+        return DisposePlan(cleanup, runJob)
+    }
+
+    /** Remove [dependentId] from [depId]'s reverse edge set. Caller holds [lock]. */
+    private fun detachDependentLocked(depId: Int, dependentId: Int) {
+        (nodes[depId] as? AsyncNode.Slot)?.dependents?.remove(dependentId)
+        (nodes[depId] as? AsyncNode.Cell)?.dependents?.remove(dependentId)
+    }
+
+    /** Remove [depId] from [parentId]'s forward edge set. Caller holds [lock]. */
+    private fun detachDependencyLocked(parentId: Int, depId: Int) {
+        (nodes[parentId] as? AsyncNode.Slot)?.dependencies?.remove(depId)
+        (nodes[parentId] as? AsyncNode.Effect)?.dependencies?.remove(depId)
+    }
+
+    /** Open a teardown scope. See [AsyncTeardownScope]. */
+    fun scope(): AsyncTeardownScope = AsyncTeardownScope(this)
+
+    /**
+     * Run [body] with a teardown scope ended when it returns, even on a throw —
+     * the suspending analogue of `ctx.scope().use { ... }`.
+     *
+     * `use` is not available here because [AsyncTeardownScope.end] suspends, and
+     * `AutoCloseable.close` cannot. This is the bracket in its place.
+     */
+    suspend fun <R> withScope(body: suspend (AsyncTeardownScope) -> R): R {
+        val scope = scope()
+        try {
+            return body(scope)
+        } finally {
+            scope.end()
+        }
     }
 
     // -- Signal (eager) ---------------------------------------------------
@@ -466,7 +667,11 @@ class AsyncContext(
         }
         for (effectId in effectDeps) locked { scheduleEffectLocked(effectId) }
         for (child in slotDeps) invalidateSlot(child)
-        if (effectDeps.isNotEmpty()) flushEffects()
+        // A disposal cascade is mark-only. Flushing here would not just run the
+        // effects this walk reached (`scheduleEffectLocked` already dropped
+        // those) — it would drain any *pre-existing* queue entry, firing an
+        // unrelated effect as a side effect of a teardown.
+        if (effectDeps.isNotEmpty() && locked { disposalDepth == 0 }) flushEffects()
     }
 
     private fun updateDependenciesLocked(nodeId: Int, newDeps: Set<Int>) {
@@ -504,6 +709,8 @@ class AsyncContext(
     }
 
     private fun scheduleEffectLocked(id: Int) {
+        // Disposal is not a publish — see [disposalDepth].
+        if (disposalDepth > 0) return
         val node = nodes[id] as? AsyncNode.Effect ?: return
         node.forceRun = true
         if (scheduledEffects.add(id)) pendingEffects.add(id)
@@ -650,4 +857,94 @@ private sealed class Outcome {
     data class Resolved(val value: Any?) : Outcome()
     data class Failed(val error: Throwable) : Outcome()
     data object Retry : Outcome()
+}
+
+/**
+ * A teardown scope over an [AsyncContext]: nodes created through it are disposed
+ * when it ends (`#lzspecedgeindex`).
+ *
+ * See [TeardownScope] for why a scope's end is an explicit statement in Kotlin
+ * rather than a destructor. The difference here is that [end] **suspends**,
+ * because async teardown cancels in-flight computes and awaits their
+ * cancellation before running cleanups. That rules out [AutoCloseable]/`use`:
+ * `close` cannot suspend, and a `close` that bridged with `runBlocking` would
+ * deadlock on a confined dispatcher — exactly where a caller would reach for it.
+ * [AsyncContext.withScope] is the bracket in `use`'s place.
+ *
+ * Structured concurrency is the obvious third option and is deliberately not the
+ * primary shape. `Job.invokeOnCompletion` would end the scope when a *coroutine*
+ * finishes, but the lifetime a scope usually tracks is a connection or a
+ * subscription, which outlives the coroutine that opened it and is closed by a
+ * peer rather than by returning. It also cannot await: `invokeOnCompletion` runs
+ * a non-suspending callback, so the cleanup ordering [end] guarantees would be
+ * lost. Callers who genuinely want job-scoped teardown can still write
+ * `job.invokeOnCompletion { launch { scope.end() } }` — that is a policy for the
+ * caller to choose, not a semantic for the library to impose.
+ */
+class AsyncTeardownScope internal constructor(
+    /** The context this scope belongs to. */
+    val ctx: AsyncContext,
+) {
+    private val owned = ArrayList<AsyncGraphNode>()
+    private var ended = false
+
+    /** How many nodes this scope currently owns. */
+    val size: Int get() = owned.size
+
+    /** Whether this scope owns nothing. */
+    fun isEmpty(): Boolean = owned.isEmpty()
+
+    /** Whether this scope owns at least one node. */
+    fun isNotEmpty(): Boolean = owned.isNotEmpty()
+
+    /** Whether [end] has already run. */
+    val isEnded: Boolean get() = ended
+
+    /** Take ownership of an existing node. See `TeardownScope.adopt`. */
+    fun <T : AsyncGraphNode> adopt(node: T): T {
+        if (!ended) owned.add(node)
+        return node
+    }
+
+    /** A source cell owned by this scope. */
+    fun <T : Any> cell(value: T): AsyncContext.AsyncCellHandle<T> = adopt(ctx.cell(value))
+
+    /** An async computed slot owned by this scope. */
+    fun <T : Any> computedAsync(
+        compute: suspend AsyncComputeContext.() -> T,
+    ): AsyncContext.AsyncSlotHandle<T> = adopt(ctx.computedAsync(compute))
+
+    /** An async memoized slot owned by this scope. */
+    fun <T : Any> memoAsync(
+        equals: (Any?, Any?) -> Boolean = { a, b -> a == b },
+        compute: suspend AsyncComputeContext.() -> T,
+    ): AsyncContext.AsyncSlotHandle<T> = adopt(ctx.memoAsync(equals, compute))
+
+    /** An async effect owned by this scope. */
+    fun effectAsync(
+        effect: suspend AsyncComputeContext.() -> (suspend () -> Unit)?,
+    ): AsyncContext.AsyncEffectHandle = adopt(ctx.effectAsync(effect))
+
+    /** Cancel this scope's teardown. See `TeardownScope.disarm`. */
+    fun disarm() {
+        owned.clear()
+    }
+
+    /**
+     * Dispose every owned node in reverse creation order, awaiting each node's
+     * cancellation and cleanup before moving to the next.
+     *
+     * Sequential rather than concurrent on purpose: reverse creation order is
+     * only observable if the cleanups actually run in that order, and
+     * `disposeScope_eq_disposeAll` compares against a sequential fold.
+     */
+    suspend fun end() {
+        if (ended) return
+        ended = true
+        for (i in owned.indices.reversed()) ctx.disposeNode(owned[i])
+        owned.clear()
+    }
+
+    override fun toString(): String =
+        if (ended) "AsyncTeardownScope(ended)" else "AsyncTeardownScope(${owned.size} owned)"
 }

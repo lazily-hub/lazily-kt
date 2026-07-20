@@ -24,7 +24,7 @@ manifest="${1:-build/conformance-fixtures-loaded.txt}"
 # replay today (transitive_invalidation_reaches_depth). The other 8 are skipped
 # for named unsupported ops and are deliberately NOT counted — the manifest
 # means "actually replayed", so raise this as those ops land.
-MIN_FIXTURES="${MIN_FIXTURES:-97}"
+MIN_FIXTURES="${MIN_FIXTURES:-107}"
 
 # Areas lazily-kt replays. message-passing and receipts are listed explicitly
 # because they were the areas that silently skipped for the entire life of the

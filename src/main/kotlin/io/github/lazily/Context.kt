@@ -4,14 +4,20 @@ package io.github.lazily
 
 /** Lightweight typed reference to a lazy memoized slot, mirroring lazily-rs `SlotHandle<T>`. */
 @JvmInline
-value class SlotHandle<T : Any> @PublishedApi internal constructor(val id: Int)
+value class SlotHandle<T : Any> @PublishedApi internal constructor(val id: Int) : GraphNode {
+    override val nodeId: Int get() = id
+}
 
 /** Lightweight typed reference to a mutable source cell, mirroring lazily-rs `CellHandle<T>`. */
 @JvmInline
-value class CellHandle<T : Any> @PublishedApi internal constructor(val id: Int)
+value class CellHandle<T : Any> @PublishedApi internal constructor(val id: Int) : GraphNode {
+    override val nodeId: Int get() = id
+}
 
 /** Reference to a registered side-effecting observer. Dispose to stop reruns. */
-class EffectHandle @PublishedApi internal constructor(val id: Int)
+class EffectHandle @PublishedApi internal constructor(val id: Int) : GraphNode {
+    override val nodeId: Int get() = id
+}
 
 /**
  * Reference to an **eager** derived value. Composed of a memoized backing slot
@@ -86,6 +92,27 @@ class Context {
     internal var batchDepth: Int = 0
     private val batchedCells: MutableSet<Int> = HashSet()
     private val batchedSlots: MutableSet<Int> = HashSet()
+
+    /**
+     * Depth of the disposal-driven invalidation cascade (`#lzspecedgeindex`).
+     *
+     * Non-zero while [detachDependents] is walking the cone left behind by a
+     * teardown. That walk exists because detaching edges is not enough: a
+     * dependent still holding a value it computed *through* the disposed node
+     * would serve it forever instead of erroring (`lazily-rs` 5db90d2;
+     * `lazily-js` had the identical defect in 4d20670).
+     *
+     * While it is set the cascade is **mark-only** — [scheduleEffect] drops the
+     * effect entirely. Disposal is not a publish: running an effect here
+     * re-enters a compute that reads the node being torn down, which turns
+     * `dispose` itself into a throw and breaks teardown idempotence. The
+     * contract is "the dependent errors on its next *recompute*", and that
+     * recompute is driven by a real write.
+     *
+     * A depth counter rather than a flag because teardown nests: an effect
+     * cleanup run by one disposal may dispose a scope of its own.
+     */
+    private var disposalDepth: Int = 0
 
     // -- Creation ----------------------------------------------------------
 
@@ -172,17 +199,24 @@ class Context {
 
     @PublishedApi
     internal fun getSlotAny(id: Int): Any {
+        // The disposed check comes *before* [registerDependency] deliberately: a
+        // reader that hits a torn-down node must not leave an edge pointing at
+        // it, or the arena's LIFO id recycling would silently re-point that edge
+        // at whatever node next occupies the id. Throwing first leaves the
+        // reader's upstream set clean (`#lzspecedgeindex`).
+        if (nodes[id] !is Node.Slot) throw DisposedNodeException(id, "slot")
         currentFrame()?.let { registerDependency(id, it) }
         refreshSlot(id)
-        val node = nodes[id] as? Node.Slot ?: error("get on non-slot id $id")
+        val node = nodes[id] as? Node.Slot ?: throw DisposedNodeException(id, "slot")
         check(node.hasValue) { "slot $id has no value" }
         return node.value as Any
     }
 
     @PublishedApi
     internal fun getCellAny(id: Int): Any {
+        // `disposeCell` and `disposeSlot` share one read-after-dispose contract.
+        val node = nodes[id] as? Node.Cell ?: throw DisposedNodeException(id, "cell")
         currentFrame()?.let { registerDependency(id, it) }
-        val node = nodes[id] as? Node.Cell ?: error("get_cell on non-cell id $id")
         return node.value as Any
     }
 
@@ -193,7 +227,9 @@ class Context {
 
     @PublishedApi
     internal fun setCellAny(id: Int, value: Any) {
-        val node = nodes[id] as? Node.Cell ?: error("set_cell on non-cell id $id")
+        // A write that silently vanishes is the same failure mode as a read that
+        // silently returns stale.
+        val node = nodes[id] as? Node.Cell ?: throw DisposedNodeException(id, "cell")
         if (node.value != value) {
             node.value = value
             if (isBatching()) {
@@ -269,27 +305,216 @@ class Context {
     // -- Dispose -----------------------------------------------------------
 
     /** Dispose an effect: deschedule, drop edges, run its cleanup, recycle the id. */
-    fun disposeEffect(handle: EffectHandle) {
-        val id = handle.id
-        // Only search the pending queue when the effect is actually in it
-        // (`#lzspecedgeindex`). `scheduledEffects` already answers that in O(1),
-        // and the unguarded scan was quadratic in fan-out for a reason that is
-        // not obvious: `kotlin.collections.ArrayDeque.indexOf` computes
-        // `tail = (head + size) % capacity` and takes its wraparound branch on
-        // `head >= tail`, which an *empty* deque satisfies (`tail == head`). It
-        // then scans `head until capacity` plus `0 until tail` — the whole
-        // backing array. The deque never shrinks, so after one wide flush every
-        // later dispose scanned width slots looking for an id that could not be
-        // there, and tearing down a width-W fan-out cost O(W^2).
-        if (scheduledEffects.remove(id)) pendingEffects.remove(id)
-        val node = nodes[id] as? Node.Effect ?: return
-        nodes[id] = null
-        freeIds.addLast(id)
-        for (dep in node.dependencies) removeDependentEdge(dep, id)
-        node.cleanup?.invoke()
-    }
+    fun disposeEffect(handle: EffectHandle) = disposeNode(handle)
 
     fun isEffectActive(handle: EffectHandle): Boolean = nodes[handle.id] is Node.Effect
+
+    // -- Disposal + degree introspection (`#lzspecedgeindex`) --------------
+
+    /**
+     * Resolve a handle to its live node, or `null` if the handle is stale.
+     *
+     * A handle is stale when the arena slot is empty **or** holds a node of a
+     * different kind. The second case is not hypothetical here: ids are recycled
+     * LIFO, so a disposed cell's id is handed to the next node created, and a
+     * caller still holding the old [CellHandle] would otherwise tear down an
+     * unrelated slot. Reading the node's kind out of the arena before acting is
+     * exactly what `recycled_id_inherits_nothing.json` requires.
+     *
+     * Same-kind recycling (a slot id handed to another slot) is *not*
+     * distinguishable this way and is explicitly out of contract — that would
+     * need generational ids or refcounted handles, and the spec requires
+     * neither.
+     */
+    private fun resolve(node: GraphNode): Node? {
+        val id = node.nodeId
+        if (id < 0 || id >= nodes.size) return null
+        val n = nodes[id] ?: return null
+        return when (node) {
+            is CellHandle<*> -> n as? Node.Cell
+            is SlotHandle<*> -> n as? Node.Slot
+            is EffectHandle -> n as? Node.Effect
+        }
+    }
+
+    /**
+     * How many nodes currently depend on [node] — the size of its reverse edge
+     * set.
+     *
+     * This is the observable the disposal contract is written against: a
+     * subscribe/unsubscribe cycle that disposes what it creates must leave this
+     * at its starting value no matter how many cycles run. A binding that leaks
+     * reports total-ever-created here instead of live-subscriber count, and pays
+     * for it twice — in memory, and in propagation, since every publish walks
+     * the whole list.
+     *
+     * `0` for a disposed node, and for effects, which are pure sinks.
+     */
+    fun dependentCount(node: GraphNode): Int = when (val n = resolve(node)) {
+        is Node.Cell -> n.dependents.size
+        is Node.Slot -> n.dependents.size
+        else -> 0
+    }
+
+    /**
+     * How many nodes [node] currently depends on — the size of its forward edge
+     * set. Counterpart to [dependentCount]: disposal must detach both
+     * directions, and a binding that detaches only one leaves a dangling
+     * half-edge visible here.
+     *
+     * `0` for a disposed node, and for cells, which are pure sources.
+     */
+    fun dependencyCount(node: GraphNode): Int = when (val n = resolve(node)) {
+        is Node.Slot -> n.dependencies.size
+        is Node.Effect -> n.dependencies.size
+        else -> 0
+    }
+
+    /** Whether [node] has been torn down. A disposed node reads as a [DisposedNodeException]. */
+    fun isDisposed(node: GraphNode): Boolean = resolve(node) == null
+
+    /**
+     * Tear [node] out of the graph, dispatching on the kind found in the arena.
+     *
+     * Detaches both edge directions, marks the surviving dependent cone dirty
+     * (see [detachDependents]), recycles the id, and makes the node read as a
+     * [DisposedNodeException]. Idempotent, and a no-op on a stale handle, so
+     * teardown paths compose.
+     *
+     * Without this a node is permanent. Handles are copyable ids, not owners, so
+     * dropping every handle reclaims nothing — and the JVM's tracing GC does not
+     * help either, because the arena and the reverse edge set hold *strong*
+     * references to every node that ever read a source. A long-lived source's
+     * dependent list therefore keeps lengthening under subscribe/unsubscribe
+     * churn even though the live subscriber count is constant.
+     *
+     * Callers must ensure nothing still reads [node] in a live computation: a
+     * dependent that does errors on its next recompute.
+     */
+    fun disposeNode(node: GraphNode) {
+        val resolved = resolve(node) ?: return
+        disposeResolved(node.nodeId, resolved)
+    }
+
+    /** Tear down a derived slot. See [disposeNode]. */
+    fun disposeSlot(handle: SlotHandle<*>) = disposeNode(handle)
+
+    /** Tear down a source cell. See [disposeNode]. */
+    fun disposeCell(handle: CellHandle<*>) = disposeNode(handle)
+
+    /**
+     * Tear down both halves of a signal — the puller effect first, then the
+     * backing slot, so the slot is never transiently read by its own puller.
+     * Contrast [disposeSignal], which only stops the eager pull.
+     */
+    fun disposeSignalNode(handle: SignalHandle<*>) {
+        disposeNode(handle.effect)
+        disposeNode(handle.slot)
+    }
+
+    /**
+     * The single teardown path all three kinds share.
+     *
+     * The order is load-bearing:
+     *
+     *  1. Vacate the arena slot first, so a re-entrant disposal (an effect
+     *     cleanup that ends its own scope) resolves to `null` and is a no-op
+     *     rather than a second teardown, and so the mark-only cascade in step 4
+     *     cannot walk back into this node.
+     *  2. Detach **upstream** — remove this node from each dependency's
+     *     dependent list. Skipping this is the leak the whole disposal contract
+     *     exists for.
+     *  3. Detach **downstream** — remove this node from each dependent's
+     *     dependency list, so no surviving node holds a dangling half-edge. In a
+     *     recycling arena this is a correctness requirement, not just hygiene: a
+     *     stale forward edge would re-point at whichever node next takes the id.
+     *  4. Mark the surviving dependent cone dirty. The step that is easy to omit
+     *     and that leaves a live reader frozen on a value it computed *through*
+     *     this node.
+     *
+     * The id is recycled at step 1 and effect cleanups run last, after the node
+     * is fully detached, so a cleanup observes a consistent graph.
+     */
+    private fun disposeResolved(id: Int, node: Node) {
+        nodes[id] = null
+        freeIds.addLast(id)
+        when (node) {
+            is Node.Cell -> detachDependents(id, node.dependents)
+            is Node.Slot -> {
+                for (dep in node.dependencies) removeDependentEdge(dep, id)
+                node.dependencies.clear()
+                detachDependents(id, node.dependents)
+            }
+            is Node.Effect -> {
+                // Only search the pending queue when the effect is actually in
+                // it (`#lzspecedgeindex`). `scheduledEffects` already answers
+                // that in O(1), and the unguarded scan was quadratic in fan-out
+                // for a reason that is not obvious:
+                // `kotlin.collections.ArrayDeque.indexOf` computes
+                // `tail = (head + size) % capacity` and takes its wraparound
+                // branch on `head >= tail`, which an *empty* deque satisfies
+                // (`tail == head`). It then scans `head until capacity` plus
+                // `0 until tail` — the whole backing array. The deque never
+                // shrinks, so after one wide flush every later dispose scanned
+                // width slots looking for an id that could not be there, and
+                // tearing down a width-W fan-out cost O(W^2).
+                if (scheduledEffects.remove(id)) pendingEffects.remove(id)
+                for (dep in node.dependencies) removeDependentEdge(dep, id)
+                node.dependencies.clear()
+                // Effects are pure sinks: nothing depends on one, so there is no
+                // cone to dirty. The cleanup is the observable side effect, and
+                // it runs last.
+                node.cleanup?.invoke()
+            }
+        }
+    }
+
+    /**
+     * Detach every dependent of the node just removed at [id], then dirty the
+     * surviving cone **without scheduling anything**.
+     *
+     * Reuses [runFrontier] — the same iterative DFS every publish walks — rather
+     * than a second traversal, so "transitively reached" has exactly one
+     * definition in this library and the two cannot drift.
+     */
+    private fun detachDependents(id: Int, dependents: SmallEdgeList) {
+        if (dependents.isEmpty()) return
+        val snapshot = dependents.toList()
+        dependents.clear()
+        for (parent in snapshot) removeDependencyEdge(parent, id)
+        disposalDepth++
+        try {
+            val stack = ArrayDeque<Int>()
+            val forceStack = ArrayDeque<Boolean>()
+            for (parent in snapshot) { stack.addLast(parent); forceStack.addLast(true) }
+            runFrontier(stack, forceStack)
+        } finally {
+            disposalDepth--
+        }
+    }
+
+    /** Remove [depId] from [parentId]'s forward (dependency) edge set. */
+    private fun removeDependencyEdge(parentId: Int, depId: Int) {
+        when (val parent = nodes[parentId]) {
+            is Node.Slot -> removeEdge(parent.dependencies, depId)
+            is Node.Effect -> removeEdge(parent.dependencies, depId)
+            else -> {}
+        }
+    }
+
+    /**
+     * Open a teardown scope: nodes created through it are disposed when it ends.
+     *
+     * Grouping bounds *teardown*, not visibility — a scoped node reads
+     * parent-owned and sibling-scope-owned nodes freely, and scoping never
+     * restricts what an edge may point at.
+     *
+     * Same caveat as [disposeNode]: ending a scope tears down its nodes even if
+     * something outside still names them, and that reader errors on its next
+     * recompute. [TeardownScope] is [AutoCloseable], so prefer
+     * `ctx.scope().use { ... }` whenever the lifetime is lexical.
+     */
+    fun scope(): TeardownScope = TeardownScope(this)
 
     /** Dispose a signal's eager puller; the backing value stays readable (reverts to lazy). */
     fun disposeSignal(handle: SignalHandle<*>) = disposeEffect(handle.effect)
@@ -475,6 +700,11 @@ class Context {
     // -- Internals: effect scheduling / flush ------------------------------
 
     private fun scheduleEffect(id: Int, force: Boolean) {
+        // Disposal is not a publish — see [disposalDepth]. Dropped entirely, not
+        // deferred: leaving the effect *queued* only postpones the damage, since
+        // it would then fire on the next unrelated flush as a spurious rerun no
+        // publish asked for.
+        if (disposalDepth > 0) return
         val node = nodes[id] as? Node.Effect ?: return
         if (force) node.forceRun = true
         if (scheduledEffects.add(id)) pendingEffects.addLast(id)
@@ -520,4 +750,150 @@ class Context {
         if (node.forceRun) return true
         return node.dependencies.any { nodes[it] is Node.Slot && refreshSlot(it) }
     }
+}
+
+/**
+ * A teardown scope over a [Context]: nodes created through it are disposed when
+ * it ends (`#lzspecedgeindex`).
+ *
+ * ## Why this is not "scope-ends-on-drop"
+ *
+ * `lazily-rs` ends a scope in `Drop`, so the scope's lifetime *is* the block's
+ * and there is nothing to forget. Kotlin has no destructor and no deterministic
+ * finalization — `Cleaner`/`finalize` are best-effort and GC-timed — so that
+ * shape does not transfer, and a scope whose teardown depended on the collector
+ * would be strictly worse than no scope at all: the leak it exists to prevent
+ * would come back non-deterministically, and only under load.
+ *
+ * The end therefore has to be a statement, and Kotlin already has the right two
+ * spellings for it:
+ *
+ *  - **`use`.** This class is [AutoCloseable] and [close] is [end], so
+ *    `ctx.scope().use { scope -> ... }` is the direct analogue of the Rust block
+ *    scope, ends in a `finally`, and needs no bespoke `withScope` helper — it is
+ *    the idiom Kotlin already uses everywhere a lifetime is lexical, and it
+ *    composes with every other resource in a `use` chain.
+ *  - **[end].** For the case `use` cannot express: a scope whose lifetime is a
+ *    *connection*, a *subscription*, or a *route* — opened in one callback and
+ *    ended in another, across an asynchronous gap. That is the primary use of
+ *    scopes, so it cannot be bracket-only.
+ *
+ * Structured concurrency was the third candidate and is deliberately **not** the
+ * primary shape: tying teardown to a `CoroutineScope`'s completion binds the
+ * graph's lifetime to a *coroutine's*, which is the wrong lifetime for exactly
+ * the connection/subscription case above, and it would drag `kotlinx.coroutines`
+ * into the synchronous [Context]. [AsyncTeardownScope] is where suspension
+ * genuinely enters the picture, and it is a separate type for that reason.
+ *
+ * Both endings are idempotent, so they compose: a scope ended early inside a
+ * `use` block is not ended twice.
+ *
+ * ## What it stores
+ *
+ * Just the handles, in creation order. Teardown walks them in **reverse**
+ * creation order — dependents before what they read — so the scope never
+ * transiently dangles inside itself while tearing down. Graph state is
+ * order-independent (`disposeAll_order_independent` in lazily-formal), but
+ * effect *cleanups* are side effects and their order is observable; ending a
+ * scope is proved observationally equal to disposing each member
+ * (`disposeScope_eq_disposeAll`).
+ */
+class TeardownScope internal constructor(
+    /** The context this scope belongs to. */
+    val ctx: Context,
+) : AutoCloseable {
+    private val owned = ArrayList<GraphNode>()
+    private var ended = false
+
+    /** How many nodes this scope currently owns. */
+    val size: Int get() = owned.size
+
+    /** Whether this scope owns nothing — never populated, [disarm]ed, or [end]ed. */
+    fun isEmpty(): Boolean = owned.isEmpty()
+
+    /** Whether this scope owns at least one node. */
+    fun isNotEmpty(): Boolean = owned.isNotEmpty()
+
+    /** Whether [end] has already run. */
+    val isEnded: Boolean get() = ended
+
+    /**
+     * Take ownership of an existing [node] so this scope disposes it at
+     * end-of-life.
+     *
+     * The factories below are the ordinary path; this exists for nodes built by
+     * a helper that does not know about scopes. A node adopted twice by the same
+     * scope is disposed once (disposal is idempotent), and adopting into an
+     * already-ended scope is a no-op rather than an immediate disposal — the
+     * scope's moment has passed.
+     */
+    fun <T : GraphNode> adopt(node: T): T {
+        if (!ended) owned.add(node)
+        return node
+    }
+
+    /** A source cell owned by this scope. */
+    inline fun <reified T : Any> cell(value: T): CellHandle<T> = adopt(ctx.cell(value))
+
+    /** A lazy derived slot owned by this scope. */
+    inline fun <reified T : Any> computed(noinline compute: Context.() -> T): SlotHandle<T> =
+        adopt(ctx.computed(compute))
+
+    /** Alias of [computed]. */
+    inline fun <reified T : Any> slot(noinline compute: Context.() -> T): SlotHandle<T> =
+        computed(compute)
+
+    /** A memoized derived slot owned by this scope. */
+    inline fun <reified T : Any> memo(noinline compute: Context.() -> T): SlotHandle<T> =
+        adopt(ctx.memo(compute))
+
+    /** An effect owned by this scope. */
+    fun effect(run: Context.() -> (() -> Unit)?): EffectHandle = adopt(ctx.effect(run))
+
+    /**
+     * An eager signal owned by this scope. Both halves are adopted, backing slot
+     * first, so reverse-order teardown stops the puller before the slot it pulls.
+     */
+    inline fun <reified T : Any> signal(noinline compute: Context.() -> T): SignalHandle<T> {
+        val handle = ctx.signal(compute)
+        adopt(handle.slot)
+        adopt(handle.effect)
+        return handle
+    }
+
+    /**
+     * Cancel this scope's teardown: ending it afterwards disposes nothing, and
+     * its nodes revert to plain context ownership — the state every unscoped
+     * node is already in.
+     *
+     * The nodes themselves are untouched. They keep their values, keep their
+     * edges in both directions, keep propagating, and remain individually
+     * disposable. The only thing that changes is whether this scope fires at
+     * end-of-life, which is what the name says — the same sense as defusing a
+     * guard.
+     */
+    fun disarm() {
+        owned.clear()
+    }
+
+    /**
+     * Dispose every node this scope owns, in reverse creation order.
+     *
+     * Idempotent, and safe over members whose own dependencies were already
+     * disposed: teardown flows from the scope's owned set, not from
+     * reachability.
+     */
+    fun end() {
+        if (ended) return
+        ended = true
+        // Reverse creation order: dependents before what they read.
+        for (i in owned.indices.reversed()) ctx.disposeNode(owned[i])
+        owned.clear()
+    }
+
+    /** [end], so `ctx.scope().use { ... }` is the lexical form. */
+    override fun close() = end()
+
+    override fun toString(): String =
+        if (ended) "TeardownScope(ended)" else "TeardownScope(${owned.size} owned)"
 }
