@@ -100,6 +100,17 @@ class ReactiveGraphConformanceTest {
             "disposal_does_not_run_surviving_effects.json",
             "dispose_detaches_edges_both_directions.json",
             "dispose_signal_reverts_to_lazy.json",
+            // #lzmergefeed (lazily-spec, Step 3): the accumulate/fold write
+            // surface. Five exercise the `merge_cell` op this runner does not
+            // model (skipped as unsupported ops); the sixth uses only supported
+            // ops but asserts the novel `drain_exhausted` key (parked). All six
+            // are accounted-for skips in EXPECTED_SKIPS, not silent gaps.
+            "exact_fold_paths_stay_exact.json",
+            "feedback_drain_bound_reports_exhaustion.json",
+            "merge_cell_acquires_no_dependency_edge.json",
+            "merge_feed_through_a_formula_coalesces.json",
+            "merge_folds_synchronously_in_batch.json",
+            "merge_per_settled_cone_not_per_write.json",
             "read_after_dispose_is_an_error.json",
             "recycled_id_inherits_nothing.json",
             "scope_teardown_equals_fold_of_disposals.json",
@@ -112,9 +123,13 @@ class ReactiveGraphConformanceTest {
 
         /**
          * Ops this runner implements. A fixture naming anything outside this set
-         * is skipped **loudly and by name** — but the set now covers the whole
-         * corpus, so nothing is skipped. Never widen a skip to make a red build
-         * green: a fixture that runs and fails is a finding to report.
+         * is skipped **loudly and by name**, its skip recorded in
+         * [EXPECTED_SKIPS]. `merge_cell` (the #lzmergefeed accumulate/fold write
+         * surface) is deliberately absent — the five merge-feed fixtures skip
+         * through this filter. Never widen a skip to make a red build green: a
+         * fixture that runs and fails is a finding to report, and adding
+         * `merge_cell`/`merges_of` here without implementing the op would fake a
+         * pass.
          */
         val SUPPORTED_OPS = setOf(
             "batch",
@@ -173,6 +188,49 @@ class ReactiveGraphConformanceTest {
          * empty unless a real divergence is found.
          */
         val KNOWN_DIVERGENCES = emptySet<String>()
+
+        /**
+         * Fixtures parked from replay despite using only [SUPPORTED_OPS]: they
+         * assert novel expectation keys this runner does not model yet, so
+         * replaying them would trip the unrecognised-assertion-key hard error.
+         *
+         * `feedback_drain_bound_reports_exhaustion` (#lzmergefeed) pins
+         * `drain_exhausted`/`writes_own_cone`, the bounded-feedback drain
+         * semantics tracked as a carry-forward item. Recorded as an
+         * accounted-for skip rather than silently mis-replayed against
+         * expectation keys the runner cannot check — mirrors the lazily-cpp
+         * runner (d36130b). The five `merge_cell` fixtures are NOT parked here:
+         * they skip through the unsupported-op filter instead.
+         */
+        val PARKED = mapOf(
+            "feedback_drain_bound_reports_exhaustion.json" to
+                "drain_exhausted/writes_own_cone (#lzmergefeed)",
+        )
+
+        /**
+         * The full skip ledger: fixture -> reason, asserted to equal the
+         * observed skip set EXACTLY (both directions) per model. A skipped
+         * fixture that becomes replayable fails here until its entry is removed;
+         * a newly-unsupported op fails here immediately. Neither direction is
+         * silent — this is a ledger of findings against lazily-kt, not a
+         * relaxation of the corpus.
+         *
+         * The five `merge_cell` entries are skipped because the op is absent
+         * from [SUPPORTED_OPS] (the runner has no merge/fold node kind); the
+         * `feedback_drain_bound_reports_exhaustion` entry is [PARKED] for its
+         * novel assertion key. Do NOT implement merge ops to clear these — the
+         * fix is upstream (#lzmergefeed), and clearing an entry means the op is
+         * genuinely modelled.
+         */
+        val EXPECTED_SKIPS = mapOf(
+            "exact_fold_paths_stay_exact.json" to "merge_cell",
+            "feedback_drain_bound_reports_exhaustion.json" to
+                "drain_exhausted/writes_own_cone (#lzmergefeed)",
+            "merge_cell_acquires_no_dependency_edge.json" to "merge_cell",
+            "merge_feed_through_a_formula_coalesces.json" to "merge_cell",
+            "merge_folds_synchronously_in_batch.json" to "merge_cell",
+            "merge_per_settled_cone_not_per_write.json" to "merge_cell",
+        )
 
         /** Sentinel for a read that raised `read_after_dispose`. */
         const val READ_AFTER_DISPOSE = "read_after_dispose"
@@ -1005,17 +1063,24 @@ class ReactiveGraphConformanceTest {
     /** Replay the whole corpus against one execution model. Returns (fixtures, ops, checks). */
     private fun runCorpus(create: () -> Model, modelName: String): Triple<Int, Int, Int> {
         val executed = sortedSetOf<String>()
-        val skipped = sortedMapOf<String, List<String>>()
+        val skipped = sortedMapOf<String, String>()
         val divergences = sortedSetOf<String>()
         var totalOps = 0
         var totalChecks = 0
 
         for (name in FIXTURES.sorted()) {
+            // Every fixture is opened — including skipped ones, whose ops are
+            // read from the file rather than assumed. That is what keeps the
+            // coverage manifest (and the positive assertions) honest.
             val fx = json.parseToJsonElement(ConformanceFixtures.read("$area/$name")).jsonObject
             val unsupported = (opsOf(fx) - SUPPORTED_OPS).sorted()
-            if (unsupported.isNotEmpty()) {
-                skipped[name] = unsupported
-                println("reactive-graph[$modelName] SKIP $name — unsupported op(s): $unsupported")
+            val reasons = mutableListOf<String>()
+            if (unsupported.isNotEmpty()) reasons.add(unsupported.joinToString(", "))
+            PARKED[name]?.let { reasons.add(it) }
+            if (reasons.isNotEmpty()) {
+                val reason = reasons.joinToString("; ")
+                skipped[name] = reason
+                println("reactive-graph[$modelName] SKIP $name — $reason")
                 continue
             }
 
@@ -1111,10 +1176,23 @@ class ReactiveGraphConformanceTest {
             "$modelName: divergence ledger is stale — update KNOWN_DIVERGENCES " +
                 "(expected = documented, actual = observed)",
         )
+        // The skip ledger must match EXACTLY, in both directions. A #lzmergefeed
+        // fixture that becomes replayable fails here until its entry is removed;
+        // a newly-unsupported op or a new parked fixture fails here immediately.
+        // Never widen a skip to make a red build green.
         assertEquals(
-            FIXTURES.sorted().toSortedSet(),
+            EXPECTED_SKIPS.toSortedMap(),
+            skipped,
+            "$modelName: skip ledger drifted — a #lzmergefeed fixture became replayable, " +
+                "an entry became stale, or a newly-unsupported op arrived. Update EXPECTED_SKIPS " +
+                "only after confirming the op is genuinely (un)modelled.",
+        )
+        val expectedExecuted = (FIXTURES.toSet() - EXPECTED_SKIPS.keys).toSortedSet()
+        assertEquals(
+            expectedExecuted,
             executed,
-            "found ${FIXTURES.size} fixture(s) but did not replay them all. A non-empty " +
+            "found ${FIXTURES.size} fixture(s), expected ${expectedExecuted.size} replayed and " +
+                "${EXPECTED_SKIPS.size} skipped, but did not replay them all. A non-empty " +
                 "fixture directory is not evidence of coverage — skipped: $skipped",
         )
         assertTrue(
@@ -1169,7 +1247,10 @@ class ReactiveGraphConformanceTest {
             }
         }
 
-        val expected = FIXTURES.size * models.size
+        // Skipped fixtures (#lzmergefeed) never replay against any model, so the
+        // expected product is over the replayable set, not the whole corpus.
+        val replayable = FIXTURES.size - EXPECTED_SKIPS.size
+        val expected = replayable * models.size
         assertTrue(
             replayed > 0,
             "ZERO reactive-graph fixtures replayed. The runner executed nothing — this is the " +
@@ -1183,8 +1264,9 @@ class ReactiveGraphConformanceTest {
 
         println(
             "reactive-graph conformance: replayed $replayed/$expected " +
-                "(${FIXTURES.size} fixtures x ${models.size} contexts: " +
-                models.joinToString(", ") { it.first } + "), $ops ops, $checks assertions",
+                "($replayable of ${FIXTURES.size} fixtures x ${models.size} contexts: " +
+                models.joinToString(", ") { it.first } + "; ${EXPECTED_SKIPS.size} #lzmergefeed " +
+                "fixtures skipped), $ops ops, $checks assertions",
         )
 
         if (failures.isNotEmpty()) {
