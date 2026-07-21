@@ -28,7 +28,7 @@ private fun Context.slotValue(id: Int): Any = getSlotAny(id)
 
 /** Allocate a memo slot over [compute] without a reified type parameter. */
 private fun Context.allocSemSlot(compute: Context.() -> Any?): SlotHandle<Any> =
-    SlotHandle(slotAny(memo = true) { compute() })
+    SlotHandle(slotAny { compute() })
 
 /**
  * A memoized semantic derivation over a [CellTree]: one `memo` slot per node,

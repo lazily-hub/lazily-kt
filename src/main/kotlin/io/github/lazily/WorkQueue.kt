@@ -60,10 +60,10 @@ class WorkQueueCell<T : Any>(
         require(maxDeliveries >= 1) { "maxDeliveries must be at least one" }
         readers =
             WorkQueueReaderHandles(
-                pendingLen = SlotHandle(ctx.slotAny(memo = true) { pending.size }),
-                isEmpty = SlotHandle(ctx.slotAny(memo = true) { pending.isEmpty() }),
-                inFlightLen = SlotHandle(ctx.slotAny(memo = true) { inFlight.size }),
-                deadLetterLen = SlotHandle(ctx.slotAny(memo = true) { deadLetters.size }),
+                pendingLen = SlotHandle(ctx.slotAny { pending.size }),
+                isEmpty = SlotHandle(ctx.slotAny { pending.isEmpty() }),
+                inFlightLen = SlotHandle(ctx.slotAny { inFlight.size }),
+                deadLetterLen = SlotHandle(ctx.slotAny { deadLetters.size }),
             )
     }
 

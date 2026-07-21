@@ -34,8 +34,8 @@ class DisposedNodeException internal constructor(
 /**
  * A node in a [Context]'s reactive graph (`#lzspecedgeindex`).
  *
- * Sealed: the genus [Cell] (its kinds [SourceCell] / [FormulaCell]) and
- * [EffectHandle] are the only implementations and the type cannot be implemented
+ * Sealed: the genus [Cell] (its kinds [Source] / [Computed]) and
+ * [Effect] are the only implementations and the type cannot be implemented
  * downstream. It exists so
  * [Context.dependentCount], [Context.dependencyCount], [Context.disposeNode],
  * and [TeardownScope] can accept any node kind *without* exposing the node's

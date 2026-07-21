@@ -1,142 +1,141 @@
 package io.github.lazily
 
 /**
- * The Cell kernel (`#lzcellkernel`) — `SourceCell` / `FormulaCell` over a single
- * genus [Cell]`<T, K>`.
+ * The Cell kernel (`#lzcellkernel`) — the two concrete handle types [Source] and
+ * [Computed].
  *
- * See `tasks/software/lazily-cell-kernel-design.md`. One reactive-node genus with
- * a **kind** type parameter `K` replaces the former `SlotHandle` / `CellHandle` /
- * `SignalHandle` handle zoo and the vestigial `Reactive<T>` / `Source<T>`
- * read/write interfaces:
+ * See `tasks/software/lazily-cell-kernel-design.md`. **`Cell` is the value-node
+ * concept**: a *cell* is a value-bearing reactive node, and the two kinds of
+ * cell are the two concrete handle structs a caller holds:
  *
  * ```text
- * Cell<T, K>                    genus — a node with a readable value
- * ├─ SourceCell<T>  (K = Source<M>)   written from outside; folds under policy M
- * └─ FormulaCell<T> (K = Formula)     computed from upstream
+ * Source<T>       handle to a source cell — written from outside; keep-latest by default
+ * Computed<T>     handle to a computed cell — computed from upstream, guarded (`==`)
  * ```
  *
- * Both aliases answer the **same** question — *where does a node's value come
- * from* — so the pair is exhaustive: `SourceCell` from outside, `FormulaCell`
- * from upstream. [EffectHandle] stays outside the hierarchy (a sink, no value),
- * so nothing can depend on it.
+ * Both answer the same question — *where does a node's value come from* — so the
+ * pair is exhaustive: [Source] from outside, [Computed] from upstream. [Effect]
+ * stays outside the hierarchy (a sink, no value), so nothing can depend on it.
  *
- * ## Write protection without a trait (§3/§4)
+ * ## `Cell<T>` is a read abstraction, not the v1 `Cell<T, K>` genus
  *
- * Reads live on the genus ([Context.get] accepts any `Cell<T, *>`). Writes
- * ([set]/[merge]) are **extension functions declared on `Cell<T, Source<M>>`** —
- * the source instantiation — so they exist only where a value comes from
- * outside, and `formulaCell.set(…)` is an *unresolved reference* compile error
- * with no interface in sight. This is the §4 mechanism for Kotlin: the kind is a
- * phantom type parameter and the compiler restricts the write surface by it,
- * exactly as `lazily-rs` restricts an inherent impl to `Cell<T, Source<M>>`.
+ * The former kind-parametric genus `Cell<T, K>` (whose `K` carried the write
+ * surface) is **gone**. What remains is a *single-parameter* read interface
+ * [Cell]`<T>` — the value-node concept itself — implemented by the two concrete
+ * handles so that one thing (`Context.get`) can read either kind without a
+ * value-class overload clash on the JVM, and so heterogeneous readers (the
+ * conformance runner) have one type to hold. It is **not** the write vehicle:
+ * writes live on [Source] concretely (below).
  *
- * A `SourceCell` reads and writes; a `FormulaCell` only reads:
+ * ## Write protection without a trait (§3)
+ *
+ * Reads ([Context.get], [dispose]) exist on the [Cell] genus / both handles.
+ * Writes ([set] / [merge]) are inherent-style **extension functions on [Source]
+ * only**, so `computed.set(…)` is an *unresolved reference* compile error with no
+ * trait in sight — the §3 mechanism for Kotlin. There is no `Cell<T, Source<M>>`
+ * receiver anymore; the receiver is the concrete `Source<T>`.
+ *
+ * A [Source] reads and writes; a [Computed] only reads:
  *
  * ```
  * val ctx = Context()
- * val n = ctx.source(1)                       // SourceCell<Int>
- * n.set(ctx, 2)                               // ok — `set` lives on the source kind
- * val doubled = ctx.formula { ctx.get(n) * 2 }.drive(ctx)
+ * val n = ctx.source(1)                       // Source<Int>
+ * n.set(ctx, 2)                               // ok — `set` lives on the source handle
+ * val doubled = ctx.computed { ctx.get(n) * 2 }.eager(ctx)
  * check(ctx.get(doubled) == 4)
  * // doubled.set(ctx, 9)                      // COMPILE ERROR: unresolved reference `set`
  * ```
  *
- * Because Kotlin has no zero-cost type-level merge policy, `Source<M>`'s `M` is a
- * phantom marker (default [KeepLatest]); a policy-carrying source keeps a runtime
- * [MergePolicy] via [MergeCell] (see Merge.kt), consistent with §5.0 (wire types
- * and the storage vocabulary are unchanged).
- */
-
-// ---------------------------------------------------------------------------
-// Kind markers (phantom — never instantiated)
-// ---------------------------------------------------------------------------
-
-/**
- * Kind marker for a **source** cell — a node written from outside, folding
- * accumulated writes under merge policy `M`. It carries the policy so writes
- * exist exactly where the policy does ([set]/[merge] on `Cell<T, Source<M>>`).
+ * ## The merge policy is runtime, not a type parameter
  *
- * Reuses the name of the former `Source<T>` *interface* (now deleted): a
- * `Source` is graph-theoretically a node with no incoming edges, and API-wise
- * the writable kind.
+ * lazily-rs spells the source handle `Source<T, M = KeepLatest>`, carrying the
+ * merge policy in a zero-cost phantom type parameter with a default. Kotlin has
+ * **neither** a zero-cost type-level policy **nor** default type arguments, so a
+ * two-parameter `Source<T, M>` would force every plain call site to spell
+ * `Source<T, KeepLatest>`. Instead the policy stays a runtime [MergePolicy]
+ * carried by [MergeCell] (see Merge.kt) — exactly as v1 did — and the bare
+ * handle is the single-parameter [Source]`<T>`. `Cell ≡ Source<T>` under
+ * keep-latest holds by construction.
  */
-sealed interface Source<M>
-
-/** The default keep-latest (last-writer-wins) merge policy marker. */
-sealed interface KeepLatest
-
-/**
- * Kind marker for a **formula** cell — a node computed from upstream. A *driven*
- * formula (`formula().drive()`) is still this kind; drivenness is graph state
- * (a bit on the node + a side table), not a distinct type.
- */
-sealed interface Formula
 
 // ---------------------------------------------------------------------------
-// The genus
+// The value-node concept: a single-parameter read abstraction
 // ---------------------------------------------------------------------------
 
 /**
- * A typed handle to a reactive node within a [Context] — the genus of the
- * kernel. Lightweight: a dense-arena id and nothing else; the value lives inside
- * the `Context`.
+ * A **cell**: a value-bearing reactive node within a [Context], read as `T`. The
+ * two kinds of cell are [Source] (written from outside) and [Computed] (computed
+ * from upstream); [Effect] is a sink and deliberately **not** a `Cell`.
  *
- * The two kinds are distinct value classes ([SourceCell], [FormulaCell]) so the
- * arena can still discriminate a stale recycled handle by its kind, while the
- * shared genus gives generic readers one type to accept and the extension-based
- * write surface stays restricted to the source kind.
+ * This is a read abstraction only — one type for [Context.get] and heterogeneous
+ * readers to hold. It carries no kind parameter and no write surface; writes are
+ * inherent to [Source] (see [set] / [merge]).
  */
-sealed interface Cell<T : Any, K> : GraphNode
+sealed interface Cell<T : Any> : GraphNode
+
+// ---------------------------------------------------------------------------
+// Source — the source-cell handle
+// ---------------------------------------------------------------------------
 
 /**
- * A cell written from outside (default [KeepLatest] policy, last-writer-wins).
- * The kernel's source kind — reads via [Context.get], writes via [set] / [merge].
+ * A typed handle to a **source cell** — a node written from outside, keep-latest
+ * by default (a policy-carrying source keeps its [MergePolicy] via [MergeCell]).
+ * Lightweight: a dense-arena id and nothing else; the value lives inside the
+ * `Context`. The kernel's source kind — reads via [Context.get], writes via
+ * [set] / [merge].
  */
 @JvmInline
-value class SourceCell<T : Any> @PublishedApi internal constructor(val id: Int) :
-    Cell<T, Source<KeepLatest>> {
+value class Source<T : Any> @PublishedApi internal constructor(val id: Int) : Cell<T> {
     override val nodeId: Int get() = id
 }
 
 /**
- * A cell computed from upstream. Guarded (`==`) by default; lazy until read.
- * `formula().drive()` makes it eager (a driven formula). The kernel's formula
- * kind — reads via [Context.get], never writes.
+ * A typed handle to a **computed cell** — a node computed from upstream. Guarded
+ * (`==`) by default; lazy until read. `computed().eager()` makes it eager (an
+ * eager computed cell). The kernel's computed kind — reads via [Context.get],
+ * never writes.
  */
 @JvmInline
-value class FormulaCell<T : Any> @PublishedApi internal constructor(val id: Int) :
-    Cell<T, Formula> {
+value class Computed<T : Any> @PublishedApi internal constructor(val id: Int) : Cell<T> {
     override val nodeId: Int get() = id
 }
 
 // -- Back-compat aliases -----------------------------------------------------
 
-/** @suppress Former name of [SourceCell]. */
-@Deprecated("Renamed to SourceCell (the Cell kernel — #lzcellkernel).", ReplaceWith("SourceCell<T>"))
-typealias CellHandle<T> = SourceCell<T>
+/** @suppress Renamed to [Source] (v2 Cell kernel — #lzcellkernel). */
+@Deprecated("Renamed to Source (v2 Cell kernel — #lzcellkernel).", ReplaceWith("Source<T>"))
+typealias SourceCell<T> = Source<T>
 
-/** @suppress Former name of [FormulaCell]. */
-@Deprecated("Renamed to FormulaCell (the Cell kernel — #lzcellkernel).", ReplaceWith("FormulaCell<T>"))
-typealias SlotHandle<T> = FormulaCell<T>
+/** @suppress Renamed to [Computed] (v2 Cell kernel — #lzcellkernel). */
+@Deprecated("Renamed to Computed (v2 Cell kernel — #lzcellkernel).", ReplaceWith("Computed<T>"))
+typealias FormulaCell<T> = Computed<T>
 
-// -- Source-only writes (§3/§4) ---------------------------------------------
+/** @suppress Former name of [Source]. */
+@Deprecated("Renamed to Source (the Cell kernel — #lzcellkernel).", ReplaceWith("Source<T>"))
+typealias CellHandle<T> = Source<T>
+
+/** @suppress Former name of [Computed]. */
+@Deprecated("Renamed to Computed (the Cell kernel — #lzcellkernel).", ReplaceWith("Computed<T>"))
+typealias SlotHandle<T> = Computed<T>
+
+// -- Source-only writes (§3) -------------------------------------------------
 
 /**
  * Replace this source cell's value outright (the keep-latest write). Declared on
- * `Cell<T, Source<M>>`, so only a [SourceCell] resolves it — `formulaCell.set(…)`
- * does not compile.
+ * [Source] only, so `computed.set(…)` does not compile — write protection
+ * without a trait.
  *
- * A no-op (no invalidation) when the new value `==` the old.
+ * A no-op (no invalidation) when the new value `==` the old (the store-guard).
  */
-fun <T : Any, M> Cell<T, Source<M>>.set(ctx: Context, value: T): Unit =
+fun <T : Any> Source<T>.set(ctx: Context, value: T): Unit =
     ctx.setCellAny(nodeId, value)
 
 /**
  * Fold [op] into this source cell under [policy] (default [keepLatest], for which
- * a merge is a replace — `Cell ≡ SourceCell<KeepLatest>`). Like [set], declared
- * on the source kind only.
+ * a merge is a replace — `Cell ≡ Source<T>` under keep-latest). Like [set],
+ * declared on [Source] only.
  */
-fun <T : Any, M> Cell<T, Source<M>>.merge(
+fun <T : Any> Source<T>.merge(
     ctx: Context,
     op: T,
     policy: MergePolicy<T> = keepLatest(),
@@ -146,34 +145,50 @@ fun <T : Any, M> Cell<T, Source<M>>.merge(
     ctx.setCellAny(nodeId, policy.merge(current, op))
 }
 
-// -- Formula-only lifecycle (driven bit + `drivenBy` side table) ------------
+// -- Computed-only lifecycle (eager bit + `eagerBy` side table) --------------
 
 /**
- * **Drive** this formula: make it eager. Attaches a puller [EffectHandle] that
- * re-materializes the formula after every invalidation, so its value is fresh by
- * the time the invalidating `set`/`batch` returns — observers never see an
- * intermediate unset state.
+ * Transition this computed cell to **eager**. Attaches a puller [Effect] that
+ * re-materializes it after every invalidation, so its value is fresh by the time
+ * the invalidating `set`/`batch` returns — observers never see an intermediate
+ * unset state.
  *
- * Idempotent — a second `drive` is a no-op — and returns the **same** handle
- * (mutated graph state), so the caller keeps reading the formula it already
+ * Idempotent — a second `eager` is a no-op — and returns the **same** handle
+ * (mutated graph state), so the caller keeps reading the computed cell it already
  * holds. This is the eager construction that retires the former `Signal`; the
  * coalescing comes from the scheduler (effects are scheduled, not inline), so a
  * per-write puller cannot be built (`#lzsignaleager` becomes unwritable).
  */
-fun <T : Any> FormulaCell<T>.drive(ctx: Context): FormulaCell<T> {
-    ctx.driveFormula(id)
+fun <T : Any> Computed<T>.eager(ctx: Context): Computed<T> {
+    ctx.makeEager(id)
     return this
 }
 
 /**
- * Reverse of [drive]: stop eager recomputation and dispose the puller. The value
+ * Reverse of [eager]: stop eager recomputation and dispose the puller. The value
  * stays readable and reverts to lazy (recomputed on next read). No-op if the
- * formula is not driven.
+ * computed cell is not eager.
  */
-fun FormulaCell<*>.undrive(ctx: Context): Unit = ctx.undriveFormula(nodeId)
+fun Computed<*>.lazy(ctx: Context): Unit = ctx.makeLazy(nodeId)
 
-/** Whether this formula is currently driven (has an active puller). */
-fun FormulaCell<*>.isDriven(ctx: Context): Boolean = ctx.isDrivenId(nodeId)
+/** Whether this computed cell is currently eager (has an active puller). */
+fun Computed<*>.isEager(ctx: Context): Boolean = ctx.isEagerId(nodeId)
 
-/** Tear this cell out of the graph. Kind-agnostic; a driven formula also drops its puller. */
-fun Cell<*, *>.dispose(ctx: Context): Unit = ctx.disposeNode(this)
+// -- Deprecated eager-transition aliases (v1 `drive`/`undrive`) --------------
+
+/** @suppress Renamed to [eager] (v2 Cell kernel — #lzcellkernel). */
+@Deprecated("Renamed to eager (v2 Cell kernel — #lzcellkernel).", ReplaceWith("eager(ctx)"))
+fun <T : Any> Computed<T>.drive(ctx: Context): Computed<T> = eager(ctx)
+
+/** @suppress Renamed to [lazy] (v2 Cell kernel — #lzcellkernel). */
+@Deprecated("Renamed to lazy (v2 Cell kernel — #lzcellkernel).", ReplaceWith("lazy(ctx)"))
+fun Computed<*>.undrive(ctx: Context): Unit = lazy(ctx)
+
+/** @suppress Renamed to [isEager] (v2 Cell kernel — #lzcellkernel). */
+@Deprecated("Renamed to isEager (v2 Cell kernel — #lzcellkernel).", ReplaceWith("isEager(ctx)"))
+fun Computed<*>.isDriven(ctx: Context): Boolean = isEager(ctx)
+
+// -- Disposal (genus-level) --------------------------------------------------
+
+/** Tear this cell out of the graph. Kind-agnostic; an eager computed also drops its puller. */
+fun Cell<*>.dispose(ctx: Context): Unit = ctx.disposeNode(this)

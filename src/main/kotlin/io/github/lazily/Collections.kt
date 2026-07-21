@@ -39,8 +39,8 @@ private fun Context.cellValue(id: Int): Any = getCellAny(id)
 private fun Context.allocCell(): CellHandle<Any> = CellHandle(cellAny(UNSET))
 
 /** Allocate a memo/non-memo slot over [compute] without a reified type parameter. */
-private fun Context.allocSlot(memo: Boolean, compute: Context.() -> Any?): SlotHandle<Any> =
-    SlotHandle(slotAny(memo, compute))
+private fun Context.allocSlot(compute: Context.() -> Any?): SlotHandle<Any> =
+    SlotHandle(slotAny(compute))
 
 private object UnsetSentinel
 private val UNSET: Any = UnsetSentinel
@@ -106,12 +106,12 @@ class CellMap<K : Any, V : Any>(
     /** Slot over the membership-set size — a membership reader (`len`). */
     @Suppress("UNCHECKED_CAST")
     fun len(): SlotHandle<Int> =
-        ctx.allocSlot(memo = true) { (cellValue(membershipCell.id) as Set<*>).size } as SlotHandle<Int>
+        ctx.allocSlot { (cellValue(membershipCell.id) as Set<*>).size } as SlotHandle<Int>
 
     /** Slot over membership of [key] — a membership reader (`contains`). */
     @Suppress("UNCHECKED_CAST")
     fun contains(key: K): SlotHandle<Boolean> =
-        ctx.allocSlot(memo = true) { key in (cellValue(membershipCell.id) as Set<*>) } as SlotHandle<Boolean>
+        ctx.allocSlot { key in (cellValue(membershipCell.id) as Set<*>) } as SlotHandle<Boolean>
 
     /** Whether [key] is currently a member (non-reactive snapshot). */
     fun containsNow(key: K): Boolean = key in (ctx.cellValue(membershipCell.id) as Set<*>)
@@ -136,7 +136,7 @@ class CellMap<K : Any, V : Any>(
     /** Slot over the ordered key list — an order reader (`keys`). */
     @Suppress("UNCHECKED_CAST")
     fun keys(): SlotHandle<List<K>> =
-        ctx.allocSlot(memo = true) { cellValue(orderCell.id) as List<*> } as SlotHandle<List<K>>
+        ctx.allocSlot { cellValue(orderCell.id) as List<*> } as SlotHandle<List<K>>
 
     /** Current ordered key list (non-reactive snapshot). */
     @Suppress("UNCHECKED_CAST")

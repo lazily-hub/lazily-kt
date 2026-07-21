@@ -267,10 +267,10 @@ class QueueCell<T : Any, S : QueueStorage<T>>(
         val s = storage
         cap = s.capacity()
         val bound = cap
-        headSlot = ctx.memo { s.peek() ?: NO_HEAD }
-        lenSlot = ctx.memo { s.len() }
-        isEmptySlot = ctx.memo { s.len() == 0 }
-        isFullSlot = ctx.memo { bound?.let { s.len() >= it } ?: false }
+        headSlot = ctx.computed { s.peek() ?: NO_HEAD }
+        lenSlot = ctx.computed { s.len() }
+        isEmptySlot = ctx.computed { s.len() == 0 }
+        isFullSlot = ctx.computed { bound?.let { s.len() >= it } ?: false }
         closedCell = ctx.cell(s.isClosed())
     }
 
@@ -502,7 +502,7 @@ class TopicCell<T : Any>(
     private fun ensureReader(id: String): SlotHandle<List<T>> =
         readers.getOrPut(id) {
             SlotHandle(
-                ctx.slotAny(memo = true) {
+                ctx.slotAny {
                     val sub = subscriptions[id]
                     if (sub == null || !sub.connected) {
                         emptyList<T>()

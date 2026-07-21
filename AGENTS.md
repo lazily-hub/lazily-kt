@@ -23,37 +23,52 @@ Mirrors lazily-rs `Context` semantics across all three context layers:
 single-threaded base (`Context`), lock-backed thread-safe (`ThreadSafeContext`),
 and coroutine-backed async (`AsyncContext`).
 
-- `Cell.kt` / `Context.kt` — the **Cell kernel** (`#lzcellkernel`) and the
-  reactive dependency graph. The genus is `Cell<T, K>` over two value kinds —
-  **`SourceCell<T>`** (written from outside) and **`FormulaCell<T>`** (computed
-  from upstream) — plus **`Effect`** (a side-effecting sink, outside the
-  hierarchy). Constructors: `source(v)`, `formula(f)`, `formula(f).drive(ctx)`.
-  - Pull-based, glitch-free refresh: a formula that reads other formulas always
+- `Cell.kt` / `Context.kt` — the **Cell kernel** (`#lzcellkernel`, v2) and the
+  reactive dependency graph. `Cell` is the **value-node concept**: a *cell* is a
+  value-bearing reactive node, and the two kinds are the two concrete handle
+  types **`Source<T>`** (written from outside) and **`Computed<T>`** (computed
+  from upstream) — plus **`Effect`** (a side-effecting sink, outside the `Cell`
+  hierarchy). Constructors: `source(v)`, `computed(f)`, `computed(f).eager(ctx)`.
+  - Pull-based, glitch-free refresh: a computed that reads other computeds always
     observes values consistent with the current inputs.
-  - `==` (PartialEq) guard on a source write: an equal value is a no-op.
-  - `formula` is **guarded by default** (`==` suppression) — a behaviour change
-    from the former unguarded `computed` (kept, deprecated).
-  - **Eager = a driven formula, not a kind.** `formula(f).drive(ctx)` attaches a
+  - **All cells are guarded — there is no unguarded mode.** A source write is
+    `==`-guarded (an equal value is a no-op); every `Computed` is `==`-guarded so
+    an equal recompute suppresses downstream (matching TC39 `Signal.Computed`).
+    The former `memo` constructor is **removed** (it was already an alias of the
+    guarded form); `computed` — which historically named the *unguarded* form in
+    these bindings — is now the guarded default.
+  - **Eager = an eager computed, not a kind.** `computed(f).eager(ctx)` attaches a
     puller `Effect` so the value is materialized by the time the invalidating
-    `set`/`batch` returns. Drivenness is graph state — a `driven` bit on the node
-    plus the `drivenBy` side table (keyed by formula id → puller id), cleared on
-    `undrive`/`dispose`. Idempotent: a second `drive` attaches no second puller,
-    so the `#lzsignaleager` double-compute is structurally unwritable. This
-    retires the former `Signal`/`SignalHandle` (kept as deprecated shims).
-  - **Write protection (§4).** `set`/`merge` are extension functions declared on
-    `Cell<T, Source<M>>`, so `formulaCell.set(…)` is a compile error (unresolved
-    reference) — the Kotlin realization of the kernel's kind-restricted writes.
-    The vestigial `Reactive<T>`/`Source<T>` interfaces are deleted; `Source<M>`
-    is now a phantom kind marker (policy stays runtime via `MergeCell`).
+    `set`/`batch` returns. Eagerness is graph state — an `eager` bit on the node
+    plus the `eagerBy` side table (keyed by computed id → puller id), cleared on
+    `.lazy(ctx)`/`dispose`. Idempotent: a second `.eager()` attaches no second
+    puller, so the `#lzsignaleager` double-compute is structurally unwritable.
+    Predicate `isEager(ctx)`. This retires the former `Signal`/`SignalHandle`
+    (kept as deprecated shims).
+  - **Write protection (§3).** `set`/`merge` are extension functions declared on
+    `Source<T>` only, so `computed.set(…)` is a compile error (unresolved
+    reference — no receiver candidate) with no trait in sight. There is no
+    kind-parametric `Cell<T, K>` genus anymore; the write receiver is the
+    concrete `Source<T>`.
+  - **The merge policy is runtime, not a type parameter.** lazily-rs spells the
+    source handle `Source<T, M = KeepLatest>`; Kotlin has neither a zero-cost
+    type-level policy nor default type arguments, so the bare handle is the
+    single-parameter `Source<T>` and a policy-carrying source keeps its
+    `MergePolicy` at runtime via `MergeCell` (Merge.kt). `Cell ≡ Source<T>` under
+    keep-latest holds by construction.
   - Effect reruns after any tracked dependency invalidates; cleanup closure runs
     before each rerun and on dispose.
   - `batch` coalesces invalidations into one effect flush.
   - Tracking stack auto-discovers dependencies; cycles are detected (throws).
-  - The two kinds are distinct value classes over a shared node table (like
+  - The two handles are distinct value classes over a shared node table (like
     lazily-rs), so the arena still discriminates a recycled stale handle by kind.
-    Back-compat aliases `CellHandle` = `SourceCell`, `SlotHandle` = `FormulaCell`
-    (deprecated). `Effect`/`EffectHandle` unchanged. `Slot` as a *storage*
-    identifier (`SlotMap`, slot state machine) is untouched (§5.0).
+    `Cell<T>` is a single-parameter **read** abstraction over the two — one type
+    for `Context.get` (avoids a value-class overload clash) and heterogeneous
+    readers; it carries no write surface. Deprecated aliases: `SourceCell` =
+    `Source`, `FormulaCell` = `Computed`, `CellHandle`/`SlotHandle`,
+    `EffectHandle` = `Effect`; constructor aliases `formula`/`slot` → `computed`,
+    `.drive`/`.undrive`/`.isDriven` → `.eager`/`.lazy`/`.isEager`. `Slot` as a
+    *storage* identifier (`SlotMap`, slot state machine) is untouched (§5.0).
   - **Disposal + teardown scopes** (`#lzspecedgeindex`, `Disposal.kt`). Handles
     are copyable ids, not owners, so nothing is reclaimed by dropping one: the
     arena and the reverse edge set hold strong references, and a long-lived

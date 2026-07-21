@@ -141,7 +141,7 @@ private data class MemoChainFixture(
 private fun setupContextMemoChain(depth: Int): MemoChainFixture {
     val ctx = Context()
     val root = ctx.cell(0L)
-    var tail: SlotHandle<Long> = ctx.memo { ctx.getCell(root) % 2L }
+    var tail: SlotHandle<Long> = ctx.computed { ctx.getCell(root) % 2L }
     repeat(depth) {
         val prev = tail
         tail = ctx.computed { ctx.get(prev) + 1L }

@@ -54,7 +54,7 @@ class StateMachine<S : Any, E>(
      * subsequent state changes. This is the FSM analog of on-enter/on-exit.
      * Dispose the returned handle to stop observing.
      */
-    fun onTransition(handler: (old: S, new: S) -> Unit): EffectHandle {
+    fun onTransition(handler: (old: S, new: S) -> Unit): Effect {
         var prev: S? = null
         var hasPrev = false
         return ctx.effect {
@@ -72,6 +72,6 @@ class StateMachine<S : Any, E>(
     /** An eager signal that is `true` when the machine is in [target], else `false`. */
     fun stateIs(target: S): SignalHandle<Boolean> {
         val ids = ctx.signalAny { state == target }
-        return SignalHandle(SlotHandle(ids.slot), EffectHandle(ids.effect))
+        return SignalHandle(SlotHandle(ids.slot), Effect(ids.effect))
     }
 }

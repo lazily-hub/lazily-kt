@@ -120,7 +120,7 @@ private fun runArm(width: Int, topics: Int, filler: Int): ArmSample {
     for (i in 0 until topics) topicIds += ctx.cell(0L)
     repeat(filler) { ctx.cell(0L) }
 
-    val handles = ArrayList<EffectHandle>(width)
+    val handles = ArrayList<Effect>(width)
     val perTopic = width / topics
 
     // Build: effect construction runs the body once, which is where the tracked

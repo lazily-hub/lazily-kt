@@ -80,7 +80,7 @@ class ReactiveContextTest {
         val ctx = Context()
         val trigger = ctx.cell(1)
         // Projects to a constant regardless of trigger; memo guard keeps downstream.
-        val constant = ctx.memo { ctx.getCell(trigger); 7 }
+        val constant = ctx.computed { ctx.getCell(trigger); 7 }
         var leafRuns = 0
         val leaf = ctx.computed { leafRuns++; ctx.get(constant) + 1 }
         assertEquals(8, ctx.get(leaf))

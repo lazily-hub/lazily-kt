@@ -61,13 +61,13 @@ class CollectionsConformanceTest {
     }
 
     /** A memo reading [key]'s value cell (a value-class reader). */
-    private fun Harness.valueReader(key: String) = ctx.memo { map.get(key) }
+    private fun Harness.valueReader(key: String) = ctx.computed { map.get(key) }
 
     /** A memo reading membership (len) — a membership-class reader. */
-    private fun Harness.membershipReader() = ctx.memo { ctx.get(map.len()) }
+    private fun Harness.membershipReader() = ctx.computed { ctx.get(map.len()) }
 
     /** A memo reading the order list — an order-class reader. */
-    private fun Harness.orderReader() = ctx.memo { ctx.get(map.keys()) }
+    private fun Harness.orderReader() = ctx.computed { ctx.get(map.keys()) }
 
     private fun applyOp(h: Harness, op: JsonObject) {
         val type = op.getValue("type").jsonPrimitive.content
@@ -235,8 +235,8 @@ class CollectionsConformanceTest {
         val prior = reconState(recon.getValue("prior").jsonObject)
         val map: CellMap<String, Int> =
             CellMap(ctx, prior.order.map { it to prior.values.getValue(it) })
-        val readerB = ctx.memo { map.get("b") }
-        val readerC = ctx.memo { map.get("c") }
+        val readerB = ctx.computed { map.get("b") }
+        val readerC = ctx.computed { map.get("c") }
         ctx.get(readerB); ctx.get(readerC)
 
         map.reconcile(target.order, target.values)

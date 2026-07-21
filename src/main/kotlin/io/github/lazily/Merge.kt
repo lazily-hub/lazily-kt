@@ -2,8 +2,9 @@ package io.github.lazily
 
 /**
  * Phase 1 of the RelayCell backpressure plan (#relaycell) — the merge algebra.
- * Under the Cell kernel (#lzcellkernel) the read/write split is the genus vs the
- * kind-restricted write surface, not the deleted `Reactive`/`Source` interfaces.
+ * Under the v2 Cell kernel (#lzcellkernel) the read/write split is `Cell<T>` read
+ * genus vs writes inherent to the concrete `Source<T>` handle, not any deleted
+ * `Reactive`/`Source` interface.
  *
  * See `lazily-spec/docs/reactive-graph.md` § "MergeCell and the merge algebra"
  * and `relaycell-backpressure-analysis.md` §4.0/§4.3. A merge policy is an
@@ -58,23 +59,24 @@ fun <E> rawFifo(): MergePolicy<List<E>> =
     )
 
 /**
- * A [SourceCell] whose write is a *merge* under [policy] rather than a plain
- * replace. `SourceCell ≡ MergeCell(KeepLatest)`. `merge` routes through the
+ * A [Source] whose write is a *merge* under [policy] rather than a plain
+ * replace. `Source ≡ MergeCell(KeepLatest)`. `merge` routes through the
  * cell's `!=`-guarded write, so an idempotent policy's no-op merge fires no
  * cascade (free dedup).
  *
- * This is the value-level home of the merge policy for Kotlin: the kernel's
- * `Source<M>` kind marker is phantom (Kotlin has no zero-cost type-level policy),
- * so a policy-carrying source keeps its [MergePolicy] here at runtime. Reads and
- * writes still go through the genus surface ([Context.get] / [set]).
+ * This is the value-level home of the merge policy for Kotlin: the v2 handle is
+ * the single-parameter [Source]`<T>` (Kotlin has neither a zero-cost type-level
+ * policy nor default type arguments, so there is no `Source<T, M>` phantom), so a
+ * policy-carrying source keeps its [MergePolicy] here at runtime. Reads go through
+ * [Context.get]; writes through the source-only [set].
  *
  * The former vestigial `Reactive<T>` (read) and `Source<T>` (write) interfaces
- * are deleted: the read genus is the concrete [Cell] type and the write surface
- * is kind-restricted, so neither trait carried its weight (#lzcellkernel §2).
+ * are deleted: reads are the [Cell]`<T>` read abstraction and writes are inherent
+ * to the concrete [Source] handle, so neither trait carried its weight.
  */
 class MergeCell<T : Any>(
     private val ctx: Context,
-    val cell: SourceCell<T>,
+    val cell: Source<T>,
     val policy: MergePolicy<T>,
 ) {
     // Uses the erased `*Any` accessors (not the `reified` genus `get`/`set`)

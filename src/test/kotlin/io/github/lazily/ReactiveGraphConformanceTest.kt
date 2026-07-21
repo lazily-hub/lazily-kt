@@ -126,8 +126,8 @@ class ReactiveGraphConformanceTest {
             "dispose",
             "dispose_fanout",
             // `dispose_signal` and `signal` are the on-disk vocab; `undrive` and
-            // `drive` are the Cell-kernel names for the same ops (a driven
-            // FormulaCell — #lzcellkernel), dual-accepted so a future
+            // `drive` are the Cell-kernel names for the same ops (an eager
+            // Computed — #lzcellkernel), dual-accepted so a future
             // spec-repo fixture emitting them does not panic as an unknown op.
             "dispose_signal",
             "drive",
@@ -207,7 +207,7 @@ class ReactiveGraphConformanceTest {
          * Counted from the start of the scenario, incremented by the compute
          * body itself (see [countCompute]) rather than derived from anything the
          * engine reports, and **never reset per step**. This is the only
-         * caller-observable difference between an eager signal and the lazy memo
+         * caller-observable difference between an eager signal and the lazy computed
          * it is built on: the two return identical values for every read
          * sequence in these fixtures, so a runner that faked or approximated
          * this key would defeat the entire point of them.
@@ -296,17 +296,17 @@ class ReactiveGraphConformanceTest {
         private val scopes = HashMap<String, TeardownScope>()
 
         /**
-         * The driven formulas, kept alongside [nodes] rather than in it: [nodes]
-         * holds the FormulaCell for an eager id, so reads, `readable`, and the
-         * degree assertions all resolve through the ordinary formula path — and so
-         * `dispose_signal`/`undrive` is visibly not a node teardown but a revert
-         * to lazy. This map exists only to reach the FormulaCell for `undrive`.
+         * The eager computeds, kept alongside [nodes] rather than in it: [nodes]
+         * holds the Computed for an eager id, so reads, `readable`, and the degree
+         * assertions all resolve through the ordinary computed path — and so
+         * `dispose_signal`/`lazy` is visibly not a node teardown but a revert to
+         * lazy. This map exists only to reach the Computed for `lazy`.
          */
-        private val signals = HashMap<String, FormulaCell<Int>>()
+        private val signals = HashMap<String, Computed<Int>>()
 
         @Suppress("UNCHECKED_CAST")
         private fun readNode(id: String): Int = when (val n = nodes[id]) {
-            is Cell<*, *> -> ctx.get(n as Cell<Int, *>)
+            is Cell<*> -> ctx.get(n as Cell<Int>)
             else -> error("unknown or unreadable node '$id'")
         }
 
@@ -321,28 +321,29 @@ class ReactiveGraphConformanceTest {
                 for (r in reads) sum += readNode(r)
                 sum
             }
-            // The `computed` op is UNGUARDED (no `==` suppression) — the corpus's
-            // `computes_of` counts are written against that. The guarded default
-            // is `formula`; the fixtures exercise the unguarded form here.
-            @Suppress("DEPRECATION")
+            // v2: every `computed` is guarded (`==` suppression) — there is no
+            // unguarded mode. The reactive-graph fixtures' `computes_of` counts do
+            // not distinguish the two on a `computed` node (an equal recompute
+            // that would diverge never appears on one), so guarded replays green,
+            // exactly as lazily-rs does.
             nodes[id] = scopes[scope]?.computed(compute) ?: ctx.computed(compute)
         }
 
         override fun defineSignal(id: String, reads: List<String>, offset: Int, scope: String?) {
-            // The eager construction: a driven FormulaCell (`formula().drive()`).
+            // The eager construction: an eager Computed (`computed().eager()`).
             val compute: Context.() -> Int = {
                 countCompute(id)
                 var sum = offset
                 for (r in reads) sum += readNode(r)
                 sum
             }
-            val fc = scopes[scope]?.drivenFormula(compute) ?: ctx.formula(compute).drive(ctx)
+            val fc = scopes[scope]?.eagerComputed(compute) ?: ctx.computed(compute).eager(ctx)
             signals[id] = fc
             nodes[id] = fc
         }
 
         override fun disposeSignal(id: String) =
-            (signals[id] ?: error("no signal '$id'")).undrive(ctx)
+            (signals[id] ?: error("no signal '$id'")).lazy(ctx)
 
         override fun batchWrites(writes: List<Pair<String, Int>>) {
             ctx.batch { for ((id, v) in writes) setCell(id, v) }
@@ -369,8 +370,8 @@ class ReactiveGraphConformanceTest {
 
         @Suppress("UNCHECKED_CAST")
         override fun setCell(id: String, value: Int) {
-            val cell = nodes[id] as? SourceCell<*> ?: error("set_cell on non-cell '$id'")
-            (cell as SourceCell<Int>).set(ctx, value)
+            val cell = nodes[id] as? Source<*> ?: error("set_cell on non-cell '$id'")
+            (cell as Source<Int>).set(ctx, value)
         }
 
         // The entry stays in the map: a disposed node remains
@@ -378,13 +379,13 @@ class ReactiveGraphConformanceTest {
         override fun disposeId(id: String) = ctx.disposeNode(nodes[id] ?: error("unknown '$id'"))
 
         override fun kindOf(id: String): Kind = when (nodes[id]) {
-            is SourceCell<*> -> Kind.CELL
-            is EffectHandle -> Kind.EFFECT
+            is Source<*> -> Kind.CELL
+            is Effect -> Kind.EFFECT
             else -> Kind.SLOT
         }
 
         override fun isEffectActive(id: String): Boolean =
-            ctx.isEffectActive(nodes[id] as EffectHandle)
+            ctx.isEffectActive(nodes[id] as Effect)
 
         override fun dependentsOf(id: String): Int = ctx.dependentCount(nodes[id]!!)
         override fun dependenciesOf(id: String): Int = ctx.dependencyCount(nodes[id]!!)
@@ -753,7 +754,7 @@ class ReactiveGraphConformanceTest {
                     scope,
                 )
                 // `signal`/`drive` both define the eager construction — a driven
-                // FormulaCell (vocab-map: `signal(f)` ≡ `formula(f).drive()`).
+                // Computed (vocab-map: `signal(f)` ≡ `computed(f).eager()`).
                 "signal", "drive" -> model.defineSignal(
                     op["id"]!!.jsonPrimitive.content,
                     strs(op["reads"]),

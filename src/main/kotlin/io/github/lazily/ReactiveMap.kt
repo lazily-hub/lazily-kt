@@ -84,7 +84,7 @@ class SlotMap<K : Any, V : Any> : ReactiveMap<K, V> {
     /** Mint (or return the cached) derived-slot node for [key], caching the handle. */
     private fun mint(ctx: Context, key: K, factory: (K) -> V): SlotHandle<V> {
         materialized[key]?.let { return it } // warm: already allocated.
-        val handle = SlotHandle<V>(ctx.slotAny(memo = false) { factory(key) })
+        val handle = SlotHandle<V>(ctx.slotAny { factory(key) })
         materialized[key] = handle
         return handle
     }

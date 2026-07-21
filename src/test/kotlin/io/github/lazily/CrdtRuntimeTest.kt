@@ -113,7 +113,7 @@ class CrdtRuntimeTest {
             codec = CrdtCodec.string,
             clock = CrdtClock(peer = 1),
         )
-        val downstream = ctx.memo { ctx.getCell(cell.backing) }
+        val downstream = ctx.computed { ctx.getCell(cell.backing) }
         ctx.get(downstream) // establish dep
 
         // An equal-value merge at a later stamp MUST NOT invalidate downstream
