@@ -77,12 +77,12 @@ private fun runRung(width: Int): RungResult {
     val before = usedBytes()
 
     val ctx = Context()
-    val topic = ctx.cell(0L)
-    val subs = ArrayList<SlotHandle<Long>>(width)
+    val topic = ctx.source(0L)
+    val subs = ArrayList<Computed<Long>>(width)
 
     val buildStart = System.nanoTime()
     for (i in 0 until width) {
-        subs += ctx.computed { ctx.getCell(topic) + i }
+        subs += ctx.computed { ctx.get(topic) + i }
     }
     // Force the edges to actually register: a lazy slot registers its
     // dependency on first compute, not at construction.
@@ -99,7 +99,7 @@ private fun runRung(width: Int): RungResult {
     for (round in 0 until NOTIFY_ROUNDS) {
         val v = (round + 1).toLong()
         val start = System.nanoTime()
-        ctx.setCell(topic, v)
+        topic.set(ctx, v)
         var acc = 0L
         for (s in subs) acc += ctx.get(s)
         notifySamples[round] = (System.nanoTime() - start).toDouble() / width
@@ -127,11 +127,11 @@ private fun warmup() {
     var sink = 0L
     repeat(400) {
         val ctx = Context()
-        val topic = ctx.cell(0L)
-        val subs = ArrayList<SlotHandle<Long>>(256)
-        for (i in 0 until 256) subs += ctx.computed { ctx.getCell(topic) + i }
+        val topic = ctx.source(0L)
+        val subs = ArrayList<Computed<Long>>(256)
+        for (i in 0 until 256) subs += ctx.computed { ctx.get(topic) + i }
         for (s in subs) sink += ctx.get(s)
-        ctx.setCell(topic, 1L)
+        topic.set(ctx, 1L)
         for (s in subs) sink += ctx.get(s)
     }
     check(sink != 0L)

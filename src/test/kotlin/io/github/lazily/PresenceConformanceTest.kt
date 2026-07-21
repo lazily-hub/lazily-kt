@@ -34,13 +34,13 @@ class PresenceConformanceTest {
         step["expected"]!!.jsonObject["present"]!!.jsonObject
             .entries.associate { (k, v) -> k.toLong() to v.jsonPrimitive.content }
 
-    private inline fun <reified T : Any> observe(ctx: Context, cell: CellHandle<T>): SlotHandle<Any> {
+    private inline fun <reified T : Any> observe(ctx: Context, cell: Source<T>): Computed<Any> {
         val obs = ctx.computed { getCell(cell) as Any }
         ctx.get(obs)
         return obs
     }
 
-    private fun checkInval(ctx: Context, obs: SlotHandle<Any>, step: JsonObject, reader: String) {
+    private fun checkInval(ctx: Context, obs: Computed<Any>, step: JsonObject, reader: String) {
         val wasCached = ctx.isSet(obs)
         ctx.get(obs)
         assertEquals(inval(step, reader), !wasCached, "$reader invalidation")

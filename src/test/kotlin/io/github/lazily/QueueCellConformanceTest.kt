@@ -54,11 +54,11 @@ class QueueCellConformanceTest {
 
     /** A reader-kind slot whose invalidation we can observe via [Context.isSet]. */
     private class Readers(
-        val head: SlotHandle<Unit>,
-        val len: SlotHandle<Unit>,
-        val isEmpty: SlotHandle<Unit>,
-        val isFull: SlotHandle<Unit>,
-        val closed: SlotHandle<Unit>,
+        val head: Computed<Unit>,
+        val len: Computed<Unit>,
+        val isEmpty: Computed<Unit>,
+        val isFull: Computed<Unit>,
+        val closed: Computed<Unit>,
     )
 
     private fun makeReaders(ctx: Context, q: QueueCell<V, *>): Readers {
@@ -94,7 +94,7 @@ class QueueCellConformanceTest {
      * test, so absence means "don't check", not "must be false".
      */
     private fun assertInvalidation(ctx: Context, readers: Readers, invalidates: JsonObject) {
-        fun check(name: String, reader: SlotHandle<Unit>) {
+        fun check(name: String, reader: Computed<Unit>) {
             val node = invalidates[name] ?: return
             val expectedInv = node.jsonPrimitive.boolean
             val cached = ctx.isSet(reader)

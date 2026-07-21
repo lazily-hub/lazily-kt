@@ -68,9 +68,9 @@ class CircuitBreakerCell(
     resetTimeout: Long,
 ) {
     private val core = CircuitBreakerCore(window, failureThreshold, resetTimeout)
-    val stateCell: CellHandle<BreakerState> = ctx.cell(BreakerState.Closed)
+    val stateCell: Source<BreakerState> = ctx.source(BreakerState.Closed)
 
-    private fun refresh() = ctx.setCell(stateCell, core.state)
+    private fun refresh() = stateCell.set(ctx, core.state)
 
     fun allow(now: Long): Boolean = core.allow(now).also { refresh() }
     fun record(success: Boolean, now: Long) = core.record(success, now).also { refresh() }
@@ -102,18 +102,18 @@ class RetryPolicyCore(private val base: Long, private val cap: Long) {
 /** Reactive retry policy: projects the current delay onto a `Cell`. */
 class RetryPolicyCell(private val ctx: Context, base: Long, cap: Long) {
     private val core = RetryPolicyCore(base, cap)
-    val delayCell: CellHandle<Long> = ctx.cell(0L)
+    val delayCell: Source<Long> = ctx.source(0L)
 
     fun nextDelay(): Long {
         val d = core.nextDelay()
-        ctx.setCell(delayCell, d)
+        delayCell.set(ctx, d)
         return d
     }
     fun reset() {
         core.reset()
-        ctx.setCell(delayCell, 0L)
+        delayCell.set(ctx, 0L)
     }
-    fun delay(): Long = ctx.getCell(delayCell)
+    fun delay(): Long = ctx.get(delayCell)
 }
 
 /** Bounded isolation-pool core. */
@@ -135,13 +135,13 @@ class BulkheadCore(private val capacity: Long) {
 /** Reactive bulkhead: projects permitsInUse onto a `Cell`. */
 class BulkheadCell(private val ctx: Context, capacity: Long) {
     private val core = BulkheadCore(capacity)
-    val inUseCell: CellHandle<Long> = ctx.cell(0L)
+    val inUseCell: Source<Long> = ctx.source(0L)
 
-    private fun refresh() = ctx.setCell(inUseCell, core.inUse)
+    private fun refresh() = inUseCell.set(ctx, core.inUse)
 
     fun acquire(): Boolean = core.acquire().also { refresh() }
     fun release() = core.release().also { refresh() }
-    fun permitsInUse(): Long = ctx.getCell(inUseCell)
+    fun permitsInUse(): Long = ctx.get(inUseCell)
 }
 
 /** Deadline-bounded call core. */
@@ -168,11 +168,11 @@ class TimeoutCore {
 /** Reactive timeout: projects isTimedOut onto a `Cell`. */
 class TimeoutCell(private val ctx: Context) {
     private val core = TimeoutCore()
-    val timedOutCell: CellHandle<Boolean> = ctx.cell(false)
+    val timedOutCell: Source<Boolean> = ctx.source(false)
 
-    private fun refresh() = ctx.setCell(timedOutCell, core.timedOut)
+    private fun refresh() = timedOutCell.set(ctx, core.timedOut)
 
     fun arm(now: Long, timeout: Long) = core.arm(now, timeout).also { refresh() }
     fun tick(now: Long): Boolean = core.tick(now).also { refresh() }
-    fun isTimedOut(): Boolean = ctx.getCell(timedOutCell)
+    fun isTimedOut(): Boolean = ctx.get(timedOutCell)
 }

@@ -14,7 +14,7 @@ package io.github.lazily
 //  - a pure reorder (atomic move) invalidates order readers only — the
 //    membership set is structurally unchanged.
 //
-// A key resolves to a stable `CellHandle` for its lifetime; moves never
+// A key resolves to a stable `Source` for its lifetime; moves never
 // remove + re-mint (atomic move keeps the same handle, dependents, and
 // lineage, bumping the order signal once).
 
@@ -36,11 +36,11 @@ sealed class InsertAt<out K> {
 private fun Context.cellValue(id: Int): Any = getCellAny(id)
 
 /** Allocate a cell holding [value] without a reified type parameter. */
-private fun Context.allocCell(): CellHandle<Any> = CellHandle(cellAny(UNSET))
+private fun Context.allocCell(): Source<Any> = Source(cellAny(UNSET))
 
 /** Allocate a memo/non-memo slot over [compute] without a reified type parameter. */
-private fun Context.allocSlot(compute: Context.() -> Any?): SlotHandle<Any> =
-    SlotHandle(slotAny(compute))
+private fun Context.allocSlot(compute: Context.() -> Any?): Computed<Any> =
+    Computed(slotAny(compute))
 
 private object UnsetSentinel
 private val UNSET: Any = UnsetSentinel
@@ -68,11 +68,11 @@ class CellMap<K : Any, V : Any>(
 ) : ReactiveMap<K, V> {
     /** [CellMap] is the input-cell specialization of [ReactiveMap]. */
     override val entryKind: EntryKind get() = EntryKind.Cell
-    private val entryCells: MutableMap<K, CellHandle<Any>> = LinkedHashMap()
-    private val membershipCell: CellHandle<Any> = ctx.allocCell().also { cell ->
+    private val entryCells: MutableMap<K, Source<Any>> = LinkedHashMap()
+    private val membershipCell: Source<Any> = ctx.allocCell().also { cell ->
         ctx.setCellAny(cell.id, entries.map { it.first }.toLinkedSet())
     }
-    private val orderCell: CellHandle<Any> = ctx.allocCell().also { cell ->
+    private val orderCell: Source<Any> = ctx.allocCell().also { cell ->
         ctx.setCellAny(cell.id, entries.map { it.first })
     }
 
@@ -88,8 +88,8 @@ class CellMap<K : Any, V : Any>(
 
     /** The stable value-cell handle for [key]; throws if [key] is absent. */
     @Suppress("UNCHECKED_CAST")
-    fun value(key: K): CellHandle<V> =
-        (entryCells[key] ?: error("CellMap has no entry for key $key")) as CellHandle<V>
+    fun value(key: K): Source<V> =
+        (entryCells[key] ?: error("CellMap has no entry for key $key")) as Source<V>
 
     /** Read the current value of [key]; auto-subscribes the reading node. */
     @Suppress("UNCHECKED_CAST")
@@ -105,13 +105,13 @@ class CellMap<K : Any, V : Any>(
 
     /** Slot over the membership-set size — a membership reader (`len`). */
     @Suppress("UNCHECKED_CAST")
-    fun len(): SlotHandle<Int> =
-        ctx.allocSlot { (cellValue(membershipCell.id) as Set<*>).size } as SlotHandle<Int>
+    fun len(): Computed<Int> =
+        ctx.allocSlot { (cellValue(membershipCell.id) as Set<*>).size } as Computed<Int>
 
     /** Slot over membership of [key] — a membership reader (`contains`). */
     @Suppress("UNCHECKED_CAST")
-    fun contains(key: K): SlotHandle<Boolean> =
-        ctx.allocSlot { key in (cellValue(membershipCell.id) as Set<*>) } as SlotHandle<Boolean>
+    fun contains(key: K): Computed<Boolean> =
+        ctx.allocSlot { key in (cellValue(membershipCell.id) as Set<*>) } as Computed<Boolean>
 
     /** Whether [key] is currently a member (non-reactive snapshot). */
     fun containsNow(key: K): Boolean = key in (ctx.cellValue(membershipCell.id) as Set<*>)
@@ -135,8 +135,8 @@ class CellMap<K : Any, V : Any>(
 
     /** Slot over the ordered key list — an order reader (`keys`). */
     @Suppress("UNCHECKED_CAST")
-    fun keys(): SlotHandle<List<K>> =
-        ctx.allocSlot { cellValue(orderCell.id) as List<*> } as SlotHandle<List<K>>
+    fun keys(): Computed<List<K>> =
+        ctx.allocSlot { cellValue(orderCell.id) as List<*> } as Computed<List<K>>
 
     /** Current ordered key list (non-reactive snapshot). */
     @Suppress("UNCHECKED_CAST")
@@ -306,15 +306,15 @@ private fun <K> Iterable<K>.toLinkedSet(): Set<K> = linkedSetOf<K>().apply { add
  * applies node-by-node.
  */
 class CellTree<K : Any, V : Any>(private val ctx: Context) {
-    private val values: MutableMap<K, CellHandle<Any>> = LinkedHashMap()
+    private val values: MutableMap<K, Source<Any>> = LinkedHashMap()
     private val children: MutableMap<K, CellMap<K, K>> = LinkedHashMap()
     private val parentOf: MutableMap<K, K> = HashMap()
     private val roots: CellMap<K, K> = CellMap(ctx)
 
     /** The value-cell handle for [node] (stable for the node's lifetime). */
     @Suppress("UNCHECKED_CAST")
-    fun value(node: K): CellHandle<V> =
-        (values[node] ?: error("CellTree has no node $node")) as CellHandle<V>
+    fun value(node: K): Source<V> =
+        (values[node] ?: error("CellTree has no node $node")) as Source<V>
 
     /** Read [node]'s value. */
     @Suppress("UNCHECKED_CAST")

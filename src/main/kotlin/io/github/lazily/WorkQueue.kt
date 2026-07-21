@@ -29,10 +29,10 @@ data class WorkQueueDeadLetter<T : Any>(
 
 /** Independent reactive reader kinds for lifecycle state. */
 data class WorkQueueReaderHandles(
-    val pendingLen: SlotHandle<Int>,
-    val isEmpty: SlotHandle<Boolean>,
-    val inFlightLen: SlotHandle<Int>,
-    val deadLetterLen: SlotHandle<Int>,
+    val pendingLen: Computed<Int>,
+    val isEmpty: Computed<Boolean>,
+    val inFlightLen: Computed<Int>,
+    val deadLetterLen: Computed<Int>,
 )
 
 /**
@@ -60,10 +60,10 @@ class WorkQueueCell<T : Any>(
         require(maxDeliveries >= 1) { "maxDeliveries must be at least one" }
         readers =
             WorkQueueReaderHandles(
-                pendingLen = SlotHandle(ctx.slotAny { pending.size }),
-                isEmpty = SlotHandle(ctx.slotAny { pending.isEmpty() }),
-                inFlightLen = SlotHandle(ctx.slotAny { inFlight.size }),
-                deadLetterLen = SlotHandle(ctx.slotAny { deadLetters.size }),
+                pendingLen = Computed(ctx.slotAny { pending.size }),
+                isEmpty = Computed(ctx.slotAny { pending.isEmpty() }),
+                inFlightLen = Computed(ctx.slotAny { inFlight.size }),
+                deadLetterLen = Computed(ctx.slotAny { deadLetters.size }),
             )
     }
 

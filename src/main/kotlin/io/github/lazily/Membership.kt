@@ -144,9 +144,9 @@ class MembershipCore<P : Comparable<P>>(private val config: MembershipConfig) {
  *  onto a `Cell` so the [peerSet] invalidates only on a set change. */
 class MembershipCell<P : Comparable<P>>(private val ctx: Context, config: MembershipConfig) {
     private val core = MembershipCore<P>(config)
-    val peerSetCell: CellHandle<Any> = ctx.cell<Any>(emptySet<P>())
+    val peerSetCell: Source<Any> = ctx.cell<Any>(emptySet<P>())
 
-    private fun refresh() = ctx.setCell(peerSetCell, core.aliveSet())
+    private fun refresh() = peerSetCell.set(ctx, core.aliveSet())
 
     fun join(peer: P, now: Long): List<PeerChangeEvent<P>> = core.join(peer, now).also { refresh() }
     fun heartbeat(peer: P, now: Long): List<PeerChangeEvent<P>> =
@@ -155,7 +155,7 @@ class MembershipCell<P : Comparable<P>>(private val ctx: Context, config: Member
     fun tick(now: Long): List<PeerChangeEvent<P>> = core.tick(now).also { refresh() }
 
     @Suppress("UNCHECKED_CAST")
-    fun peerSet(): Set<P> = ctx.getCell(peerSetCell) as Set<P>
+    fun peerSet(): Set<P> = ctx.get(peerSetCell) as Set<P>
 
     fun state(peer: P): PeerState? = core.state(peer)
 }

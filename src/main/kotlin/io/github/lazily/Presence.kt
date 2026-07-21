@@ -42,15 +42,15 @@ class EphemeralCore<T : Any> : Ephemeral {
 /** Reactive single-value ephemeral cell. */
 class EphemeralCell<T : Any>(private val ctx: Context) : Ephemeral {
     private val core = EphemeralCore<T>()
-    val valueCell: CellHandle<Any> = ctx.cell<Any>(EphemeralNone)
+    val valueCell: Source<Any> = ctx.cell<Any>(EphemeralNone)
 
-    private fun refresh() = ctx.setCell(valueCell, core.value() ?: EphemeralNone)
+    private fun refresh() = valueCell.set(ctx, core.value() ?: EphemeralNone)
 
     fun set(value: T, now: Long, ttl: Long) = core.set(value, now, ttl).also { refresh() }
     fun tick(now: Long) = core.tick(now).also { refresh() }
 
     @Suppress("UNCHECKED_CAST")
-    fun value(): T? = ctx.getCell(valueCell).let { if (it === EphemeralNone) null else it as T }
+    fun value(): T? = ctx.get(valueCell).let { if (it === EphemeralNone) null else it as T }
 }
 
 // -- Keyed per-peer ephemeral map (presence + awareness) ---------------------
@@ -76,10 +76,10 @@ class EphemeralMapCore<K : Any, V : Any> : Ephemeral {
 /** Reactive per-peer presence: heartbeat-kept, membership- and TTL-evicted. */
 class PresenceCell<K : Any, V : Any>(private val ctx: Context, private val ttl: Long) : Ephemeral {
     private val core = EphemeralMapCore<K, V>()
-    val presentCell: CellHandle<Any> = ctx.cell<Any>(emptyMap<K, V>())
+    val presentCell: Source<Any> = ctx.cell<Any>(emptyMap<K, V>())
 
     private fun refreshAt(now: Long) {
-        ctx.setCell(presentCell, core.present(now))
+        presentCell.set(ctx, core.present(now))
     }
 
     fun heartbeat(peer: K, value: V, now: Long) {
@@ -93,16 +93,16 @@ class PresenceCell<K : Any, V : Any>(private val ctx: Context, private val ttl: 
     }
 
     @Suppress("UNCHECKED_CAST")
-    fun present(): Map<K, V> = ctx.getCell(presentCell) as Map<K, V>
+    fun present(): Map<K, V> = ctx.get(presentCell) as Map<K, V>
 }
 
 /** Reactive typed ephemeral broadcast (cursors/selections): last-writer-per-peer. */
 class AwarenessCell<K : Any, V : Any>(private val ctx: Context, private val ttl: Long) : Ephemeral {
     private val core = EphemeralMapCore<K, V>()
-    val presentCell: CellHandle<Any> = ctx.cell<Any>(emptyMap<K, V>())
+    val presentCell: Source<Any> = ctx.cell<Any>(emptyMap<K, V>())
 
     private fun refreshAt(now: Long) {
-        ctx.setCell(presentCell, core.present(now))
+        presentCell.set(ctx, core.present(now))
     }
 
     fun set(peer: K, value: V, now: Long) {
@@ -114,5 +114,5 @@ class AwarenessCell<K : Any, V : Any>(private val ctx: Context, private val ttl:
     fun get(peer: K, now: Long): V? = core.get(peer, now)
 
     @Suppress("UNCHECKED_CAST")
-    fun present(): Map<K, V> = ctx.getCell(presentCell) as Map<K, V>
+    fun present(): Map<K, V> = ctx.get(presentCell) as Map<K, V>
 }

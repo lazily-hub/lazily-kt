@@ -80,10 +80,10 @@ class SlotMapConformanceTest {
     @Test
     fun slotEntriesRemainReactive() {
         val ctx = Context()
-        val base = ctx.cell(2)
+        val base = ctx.source(2)
         val map = SlotMap<Int, Int>()
-        assertEquals(10, map.getOrInsertWith(ctx, 5) { it * ctx.getCell(base) }) // 5 * 2
-        ctx.setCell(base, 3)
+        assertEquals(10, map.getOrInsertWith(ctx, 5) { it * ctx.get(base) }) // 5 * 2
+        base.set(ctx, 3)
         assertEquals(15, map.get(ctx, 5)) // 5 * 3 — recomputed
     }
 
@@ -105,8 +105,8 @@ class SlotMapConformanceTest {
         assertEquals(EntryKind.Cell, map.entryKind)
         assertEquals(1, map.presentCount)
         val handle = map.value(7)
-        assertEquals(7, ctx.getCell(handle))
-        ctx.setCell(handle, 100)
+        assertEquals(7, ctx.get(handle))
+        handle.set(ctx, 100)
         assertEquals(100, map.get(7))
     }
 }

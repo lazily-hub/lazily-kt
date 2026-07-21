@@ -23,8 +23,8 @@ package io.github.lazily
 
 private data class Graph(
     val ctx: Context,
-    val inputs: List<CellHandle<Long>>,
-    val formulas: List<SlotHandle<Long>>,
+    val inputs: List<Source<Long>>,
+    val formulas: List<Computed<Long>>,
 )
 
 private fun scaleN(): Int =
@@ -39,18 +39,18 @@ private const val DEFAULT_VIEWPORT = 1_000
 
 private fun buildGraph(n: Int): Graph {
     val ctx = Context()
-    val inputs = ArrayList<CellHandle<Long>>(n)
-    for (i in 0 until n) inputs += ctx.cell(i.toLong())
-    val formulas = ArrayList<SlotHandle<Long>>(n)
+    val inputs = ArrayList<Source<Long>>(n)
+    for (i in 0 until n) inputs += ctx.source(i.toLong())
+    val formulas = ArrayList<Computed<Long>>(n)
     for (i in 0 until n) {
         val a = inputs[i]
         val b = inputs[i.coerceAtLeast(1) - 1]
-        formulas += ctx.computed { ctx.getCell(a) + ctx.getCell(b) }
+        formulas += ctx.computed { ctx.get(a) + ctx.get(b) }
     }
     return Graph(ctx, inputs, formulas)
 }
 
-private fun readAll(ctx: Context, formulas: List<SlotHandle<Long>>): Long {
+private fun readAll(ctx: Context, formulas: List<Computed<Long>>): Long {
     var acc = 0L
     for (f in formulas) acc += ctx.get(f)
     return acc
@@ -108,7 +108,7 @@ fun runScaleBenchmarks(n: Int = scaleN()): List<ScaleResult> {
             var acc = 0L
             repeat(iters) {
                 tick += 1
-                graph.ctx.setCell(graph.inputs[mid], tick)
+                graph.inputs[mid].set(graph.ctx, tick)
                 for (f in graph.formulas.subList(lo, hi)) acc += graph.ctx.get(f)
             }
             acc
@@ -128,7 +128,7 @@ fun runScaleBenchmarks(n: Int = scaleN()): List<ScaleResult> {
                 tick += 1
                 val base = tick
                 for ((i, cell) in graph.inputs.withIndex()) {
-                    graph.ctx.setCell(cell, base + i)
+                    cell.set(graph.ctx, base + i)
                 }
                 acc += readAll(graph.ctx, graph.formulas)
             }

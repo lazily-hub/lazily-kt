@@ -68,12 +68,12 @@ class MergeTest {
     @Test
     fun cell_is_merge_cell_keep_latest() {
         val ctx = Context()
-        val cell = ctx.cell(0L)
+        val cell = ctx.source(0L)
         val mc = ctx.mergeCell(0L, keepLatest())
         for (v in listOf(3L, 3L, 7L, 7L, 1L)) {
-            ctx.setCell(cell, v)
+            cell.set(ctx, v)
             mc.merge(v)
-            assertEquals(ctx.getCell(cell), mc.get())
+            assertEquals(ctx.get(cell), mc.get())
         }
         assertEquals(1L, mc.get())
     }

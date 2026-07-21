@@ -11,22 +11,6 @@ class Effect @PublishedApi internal constructor(val id: Int) : GraphNode {
     override val nodeId: Int get() = id
 }
 
-/** @suppress Renamed to [Effect] (v2 Cell kernel — #lzcellkernel). */
-@Deprecated("Renamed to Effect (v2 Cell kernel — #lzcellkernel).", ReplaceWith("Effect"))
-typealias EffectHandle = Effect
-
-/**
- * @suppress Back-compat wrapper for the retired eager-`Signal` surface. The
- * eager construction is now an **eager** [Computed] (`computed().eager()`); this
- * pair of a computed cell plus its puller effect is kept only so callers of the
- * former `signal()` keep compiling.
- */
-@Deprecated("Signal is retired: use `ctx.computed { … }.eager(ctx)` — an eager Computed (#lzcellkernel).")
-class SignalHandle<T : Any> @PublishedApi internal constructor(
-    val slot: Computed<T>,
-    val effect: Effect,
-)
-
 // -- Context -----------------------------------------------------------------
 
 private const val INITIAL_NODE_CAPACITY = 16
@@ -165,10 +149,6 @@ class Context {
     inline fun <reified T : Any> computed(noinline compute: Context.() -> T): Computed<T> =
         Computed(slotAny { compute() })
 
-    /** @suppress Renamed to [computed] (guarded; v2 Cell kernel — #lzcellkernel). */
-    @Deprecated("Renamed to computed (guarded by default; v2 Cell kernel — #lzcellkernel).", ReplaceWith("computed(compute)"))
-    inline fun <reified T : Any> formula(noinline compute: Context.() -> T): Computed<T> = computed(compute)
-
     /** @suppress Renamed to [computed]. */
     @Deprecated("Renamed to computed (guarded by default; v2 Cell kernel — #lzcellkernel).", ReplaceWith("computed(compute)"))
     inline fun <reified T : Any> slot(noinline compute: Context.() -> T): Computed<T> = computed(compute)
@@ -181,30 +161,7 @@ class Context {
     }
 
     /**
-     * @suppress The eager construction is now `computed { … }.eager(ctx)` — an
-     * **eager** [Computed]. Kept as a thin wrapper over that so the former
-     * `signal` surface keeps compiling.
-     */
-    @Suppress("DEPRECATION")
-    @Deprecated("Use `computed { … }.eager(ctx)` — an eager Computed (#lzcellkernel).", ReplaceWith("computed(compute).eager(this)"))
-    inline fun <reified T : Any> signal(noinline compute: Context.() -> T): SignalHandle<T> {
-        val ids = signalAny { compute() }
-        return SignalHandle(Computed(ids.slot), Effect(ids.effect))
-    }
-
-    @PublishedApi
-    internal class SignalIds(@PublishedApi internal val slot: Int, @PublishedApi internal val effect: Int)
-
-    /** Build an eager computed and surface its (slot, puller) id pair for the back-compat [SignalHandle]. */
-    @PublishedApi
-    internal fun signalAny(compute: Context.() -> Any?): SignalIds {
-        val slot = slotAny(compute = compute)
-        makeEager(slot)
-        return SignalIds(slot, eagerBy[slot]!!)
-    }
-
-    /**
-     * Run [run] immediately, then rerun it after any tracked cell/slot/signal it
+     * Run [run] immediately, then rerun it after any tracked cell/computed it
      * reads invalidates. [run] may return a cleanup closure (`(() -> Unit)?`);
      * cleanup runs before each rerun and on dispose.
      */
@@ -243,11 +200,6 @@ class Context {
     /** @suppress Reads are unified on the genus [get]. */
     @Deprecated("Reads are unified — use `get` on any Cell (#lzcellkernel).", ReplaceWith("get(handle)"))
     inline fun <reified T : Any> getCell(handle: Source<T>): T = get(handle)
-
-    /** @suppress A eager computed reads with the ordinary [get]. */
-    @Suppress("DEPRECATION")
-    @Deprecated("Signal is retired — read the driven Computed with `get` (#lzcellkernel).", ReplaceWith("get(handle.slot)"))
-    inline fun <reified T : Any> getSignal(handle: SignalHandle<T>): T = get(handle.slot)
 
     @PublishedApi
     internal fun getSlotAny(id: Int): Any {
@@ -370,7 +322,7 @@ class Context {
      * A handle is stale when the arena slot is empty **or** holds a node of a
      * different kind. The second case is not hypothetical here: ids are recycled
      * LIFO, so a disposed cell's id is handed to the next node created, and a
-     * caller still holding the old [CellHandle] would otherwise tear down an
+     * caller still holding the old [Source] would otherwise tear down an
      * unrelated slot. Reading the node's kind out of the arena before acting is
      * exactly what `recycled_id_inherits_nothing.json` requires.
      *
@@ -456,17 +408,6 @@ class Context {
     /** @suppress Kind-agnostic teardown — prefer `sourceCell.dispose(ctx)`. */
     @Deprecated("Use `cell.dispose(ctx)` (#lzcellkernel).", ReplaceWith("handle.dispose(this)"))
     fun disposeCell(handle: Source<*>) = disposeNode(handle)
-
-    /**
-     * @suppress Full teardown of a eager computed. Disposing the [Computed]
-     * already tears down its puller (via the eager bit), so this is now just
-     * `disposeNode(handle.slot)`; kept for the retired `Signal` surface.
-     */
-    @Suppress("DEPRECATION")
-    @Deprecated("Signal is retired — dispose the driven Computed: `computed.dispose(ctx)` (#lzcellkernel).", ReplaceWith("handle.slot.dispose(this)"))
-    fun disposeSignalNode(handle: SignalHandle<*>) {
-        disposeNode(handle.slot)
-    }
 
     /**
      * The single teardown path all three kinds share.
@@ -577,16 +518,6 @@ class Context {
      */
     fun scope(): TeardownScope = TeardownScope(this)
 
-    /** @suppress Reverts a eager computed to lazy — use `computed.lazy(ctx)`. */
-    @Suppress("DEPRECATION")
-    @Deprecated("Use `computed.lazy(ctx)` (#lzcellkernel).", ReplaceWith("handle.slot.lazy(this)"))
-    fun disposeSignal(handle: SignalHandle<*>) = makeLazy(handle.slot.nodeId)
-
-    /** @suppress Use `computed.isEager(ctx)`. */
-    @Suppress("DEPRECATION")
-    @Deprecated("Use `computed.isEager(ctx)` (#lzcellkernel).", ReplaceWith("handle.slot.isEager(this)"))
-    fun isSignalActive(handle: SignalHandle<*>): Boolean = isEagerId(handle.slot.nodeId)
-
     // -- Eager computeds (the eager construction; #lzcellkernel §9.3) -------
 
     /**
@@ -615,8 +546,8 @@ class Context {
     /** Whether the formula at [id] is currently eager. */
     internal fun isEagerId(id: Int): Boolean = (nodes[id] as? Node.Slot)?.eager == true
 
-    /** Whether a slot currently has a fresh cached value (testing). */
-    fun isSet(handle: SlotHandle<*>): Boolean {
+    /** Whether a computed cell currently has a fresh cached value (testing). */
+    fun isSet(handle: Computed<*>): Boolean {
         val node = nodes[handle.id] as? Node.Slot ?: return false
         return node.hasValue && !node.dirty
     }
@@ -937,11 +868,6 @@ class TeardownScope internal constructor(
     inline fun <reified T : Any> computed(noinline compute: Context.() -> T): Computed<T> =
         adopt(ctx.computed(compute))
 
-    /** @suppress Renamed to [computed] (guarded; v2 Cell kernel — #lzcellkernel). */
-    @Deprecated("Renamed to computed (guarded by default; v2 Cell kernel — #lzcellkernel).", ReplaceWith("computed(compute)"))
-    inline fun <reified T : Any> formula(noinline compute: Context.() -> T): Computed<T> =
-        computed(compute)
-
     /** @suppress Renamed to [computed]. */
     @Deprecated("Renamed to computed (#lzcellkernel).", ReplaceWith("computed(compute)"))
     inline fun <reified T : Any> slot(noinline compute: Context.() -> T): Computed<T> =
@@ -956,25 +882,6 @@ class TeardownScope internal constructor(
      */
     inline fun <reified T : Any> eagerComputed(noinline compute: Context.() -> T): Computed<T> =
         adopt(ctx.computed(compute).eager(ctx))
-
-    /** @suppress Renamed to [eagerComputed] (v2 Cell kernel — #lzcellkernel). */
-    @Deprecated("Renamed to eagerComputed (v2 Cell kernel — #lzcellkernel).", ReplaceWith("eagerComputed(compute)"))
-    inline fun <reified T : Any> drivenFormula(noinline compute: Context.() -> T): Computed<T> =
-        eagerComputed(compute)
-
-    /**
-     * @suppress Eager signal owned by this scope. Both halves are adopted,
-     * backing computed first, so reverse-order teardown stops the puller before
-     * the computed it pulls. Prefer [eagerComputed].
-     */
-    @Suppress("DEPRECATION")
-    @Deprecated("Use `eagerComputed` — an eager Computed (#lzcellkernel).", ReplaceWith("eagerComputed(compute)"))
-    inline fun <reified T : Any> signal(noinline compute: Context.() -> T): SignalHandle<T> {
-        val handle = ctx.signal(compute)
-        adopt(handle.slot)
-        adopt(handle.effect)
-        return handle
-    }
 
     /**
      * Cancel this scope's teardown: ending it afterwards disposes nothing, and

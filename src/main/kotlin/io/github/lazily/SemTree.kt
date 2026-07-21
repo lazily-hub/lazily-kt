@@ -27,8 +27,8 @@ fun interface SemFold<V, D> {
 private fun Context.slotValue(id: Int): Any = getSlotAny(id)
 
 /** Allocate a memo slot over [compute] without a reified type parameter. */
-private fun Context.allocSemSlot(compute: Context.() -> Any?): SlotHandle<Any> =
-    SlotHandle(slotAny { compute() })
+private fun Context.allocSemSlot(compute: Context.() -> Any?): Computed<Any> =
+    Computed(slotAny { compute() })
 
 /**
  * A memoized semantic derivation over a [CellTree]: one `memo` slot per node,
@@ -42,7 +42,7 @@ class SemTree<K : Any, D : Any> private constructor(
     private val nodes: Map<K, Int>,
 ) {
     /** The root derived slot. */
-    fun root(): SlotHandle<@UnsafeVariance D> = SlotHandle(rootId)
+    fun root(): Computed<@UnsafeVariance D> = Computed(rootId)
 
     /** Read the derived value at the root (reactive). */
     fun value(ctx: Context): D {
@@ -51,7 +51,7 @@ class SemTree<K : Any, D : Any> private constructor(
     }
 
     /** The derived slot for a node id, if it was present at build time. */
-    fun node(id: K): SlotHandle<@UnsafeVariance D>? = nodes[id]?.let { SlotHandle(it) }
+    fun node(id: K): Computed<@UnsafeVariance D>? = nodes[id]?.let { Computed(it) }
 
     /** Read the derived value at a node id, if present (reactive). */
     fun nodeValue(ctx: Context, id: K): D? {

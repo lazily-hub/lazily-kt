@@ -6,7 +6,7 @@ package io.github.lazily
  *
  * `lazily-spec/cell-model.md` § "Keyed cell collections" unifies keyed
  * collections on ONE generic primitive — the Rust `ReactiveMap<K, V, H>` over a
- * `MapHandle` trait (`CellHandle` input cells / `SlotHandle` derived slots) — with
+ * `MapHandle` trait (`Source` input cells / `Computed` derived slots) — with
  * two specializations:
  *
  * - **[CellMap]** (input cells) — the settable, membership/order/move collection
@@ -32,10 +32,10 @@ package io.github.lazily
  * `EntryKind` in `lazily-formal`'s `Materialization` module.
  */
 enum class EntryKind {
-    /** An **input** cell ([CellHandle]) — always materialized on read. */
+    /** An **input** cell ([Source]) — always materialized on read. */
     Cell,
 
-    /** A **derived** slot ([SlotHandle]) — materialized eagerly (pre-mint) or lazily on first read. */
+    /** A **derived** slot ([Computed]) — materialized eagerly (pre-mint) or lazily on first read. */
     Slot,
 }
 
@@ -61,7 +61,7 @@ interface ReactiveMap<K : Any, V : Any> {
 
 /**
  * A keyed **derived-slot** collection (`#reactivemap`): the [ReactiveMap]
- * specialization over the [SlotHandle] handle kind. Every entry is a derived
+ * specialization over the [Computed] handle kind. Every entry is a derived
  * slot; [getOrInsertWith] mints one on first access (**lazy materialization**)
  * and [materializeAll] pre-mints the keyset (**eager**). A slot's value is
  * derived, so `SlotMap` has **no `set`**.
@@ -70,7 +70,7 @@ interface ReactiveMap<K : Any, V : Any> {
  * [materializeAll], lazy is mint-on-access [getOrInsertWith]. Both build the
  * *same* node for a key; strategy changes only *when* the node is allocated,
  * never the observed value (observational transparency). Mirrors lazily-rs
- * `SlotMap<K, V> = ReactiveMap<K, V, SlotHandle<V>>`.
+ * `SlotMap<K, V> = ReactiveMap<K, V, Computed<V>>`.
  *
  * Operations run against the owning [Context], like the rest of `lazily`; the
  * present set only grows (deferral, not de-allocation). [LinkedHashMap] preserves
@@ -79,12 +79,12 @@ interface ReactiveMap<K : Any, V : Any> {
 class SlotMap<K : Any, V : Any> : ReactiveMap<K, V> {
     override val entryKind: EntryKind get() = EntryKind.Slot
 
-    private val materialized = LinkedHashMap<K, SlotHandle<V>>()
+    private val materialized = LinkedHashMap<K, Computed<V>>()
 
     /** Mint (or return the cached) derived-slot node for [key], caching the handle. */
-    private fun mint(ctx: Context, key: K, factory: (K) -> V): SlotHandle<V> {
+    private fun mint(ctx: Context, key: K, factory: (K) -> V): Computed<V> {
         materialized[key]?.let { return it } // warm: already allocated.
-        val handle = SlotHandle<V>(ctx.slotAny { factory(key) })
+        val handle = Computed<V>(ctx.slotAny { factory(key) })
         materialized[key] = handle
         return handle
     }
@@ -110,7 +110,7 @@ class SlotMap<K : Any, V : Any> : ReactiveMap<K, V> {
     }
 
     /** The existing derived-slot handle for [key], or `null`. Non-reactive. */
-    fun handle(key: K): SlotHandle<V>? = materialized[key]
+    fun handle(key: K): Computed<V>? = materialized[key]
 
     /** Read the value at [key] if present (does not mint); `null` if absent. Reactive on that entry. */
     fun get(ctx: Context, key: K): V? {

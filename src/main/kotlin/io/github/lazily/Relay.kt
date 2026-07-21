@@ -78,10 +78,10 @@ class BackpressurePolicy(
     lowWater: Long,
     overflow: Overflow,
 ) {
-    val dimension: CellHandle<BoundDim> = ctx.cell(dimension)
-    val highWater: CellHandle<Long> = ctx.cell(highWater)
-    val lowWater: CellHandle<Long> = ctx.cell(lowWater)
-    val overflow: CellHandle<Overflow> = ctx.cell(overflow)
+    val dimension: Source<BoundDim> = ctx.source(dimension)
+    val highWater: Source<Long> = ctx.source(highWater)
+    val lowWater: Source<Long> = ctx.source(lowWater)
+    val overflow: Source<Overflow> = ctx.source(overflow)
 }
 
 /**
@@ -98,27 +98,27 @@ class RelayCell<T : Any>(
     val mergePolicy: MergePolicy<T>,
 ) {
     private val headId: Int = ctx.cellAny(RelayEmpty)
-    private val pending: CellHandle<Long> = ctx.cell(0L)
+    private val pending: Source<Long> = ctx.source(0L)
 
     /** Demand-driven reader: current window depth (`Count`). */
-    val depth: SlotHandle<Long> = ctx.computed { getCell(pending) }
+    val depth: Computed<Long> = ctx.computed { getCell(pending) }
 
     /** Demand-driven reader: depth ≥ `highWater`. */
-    val isFull: SlotHandle<Boolean> =
+    val isFull: Computed<Boolean> =
         ctx.computed { getCell(pending) >= getCell(policy.highWater) }
 
     /** Demand-driven reader: the window is empty (nothing to drain). */
-    val isEmpty: SlotHandle<Boolean> = ctx.computed { getCellAny(headId) === RelayEmpty }
+    val isEmpty: Computed<Boolean> = ctx.computed { getCellAny(headId) === RelayEmpty }
 
     init {
-        if (ctx.getCell(policy.overflow) == Overflow.Conflate && !mergePolicy.conflates) {
+        if (ctx.get(policy.overflow) == Overflow.Conflate && !mergePolicy.conflates) {
             throw RelayConfigException(RelayConfigError.ConflateNotBounding)
         }
     }
 
     /** Whether the current overflow choice is legal for [mergePolicy]. */
     fun overflowIsLegal(): Boolean =
-        ctx.getCell(policy.overflow) != Overflow.Conflate || mergePolicy.conflates
+        ctx.get(policy.overflow) != Overflow.Conflate || mergePolicy.conflates
 
     /** Current window depth (`Count`). */
     fun depth(): Long = ctx.get(depth)
@@ -129,7 +129,7 @@ class RelayCell<T : Any>(
     /** Whether the window is empty. */
     fun isEmpty(): Boolean = ctx.get(isEmpty)
 
-    private fun readFull(): Boolean = ctx.getCell(pending) >= ctx.getCell(policy.highWater)
+    private fun readFull(): Boolean = ctx.get(pending) >= ctx.get(policy.highWater)
 
     @Suppress("UNCHECKED_CAST")
     private fun mergeIntoHead(op: T) {
@@ -143,14 +143,14 @@ class RelayCell<T : Any>(
      * `highWater`; otherwise merges the op into the hot head under [mergePolicy].
      */
     fun ingress(op: T): IngressOutcome {
-        val wasEmpty = ctx.getCell(pending) == 0L
+        val wasEmpty = ctx.get(pending) == 0L
         if (readFull()) {
-            when (ctx.getCell(policy.overflow)) {
+            when (ctx.get(policy.overflow)) {
                 Overflow.Block -> return IngressOutcome.Blocked
                 Overflow.DropNewest -> return IngressOutcome.Dropped
                 Overflow.DropOldest -> {
                     ctx.setCellAny(headId, op)
-                    ctx.setCell(pending, 1L)
+                    pending.set(ctx, 1L)
                     return IngressOutcome.Dropped
                 }
                 // Conflate keeps merging; Spill degrades to Conflate until wired.
@@ -158,7 +158,7 @@ class RelayCell<T : Any>(
             }
         }
         mergeIntoHead(op)
-        ctx.setCell(pending, ctx.getCell(pending) + 1L)
+        pending.set(ctx, ctx.get(pending) + 1L)
         return if (wasEmpty) IngressOutcome.Accepted else IngressOutcome.Conflated
     }
 
@@ -172,7 +172,7 @@ class RelayCell<T : Any>(
         val cur = ctx.getCellAny(headId)
         if (cur !== RelayEmpty) {
             ctx.setCellAny(headId, RelayEmpty)
-            ctx.setCell(pending, 0L)
+            pending.set(ctx, 0L)
             return cur as T
         }
         return null
@@ -378,7 +378,7 @@ class Outbox<T : Any>(
     fun drain(): T? = relay.drain()
 
     /** The producer-facing backpressure signal (window at/over the watermark). */
-    fun isFull(): SlotHandle<Boolean> = relay.isFull
+    fun isFull(): Computed<Boolean> = relay.isFull
 }
 
 /**

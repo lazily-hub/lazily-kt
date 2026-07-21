@@ -100,24 +100,6 @@ value class Computed<T : Any> @PublishedApi internal constructor(val id: Int) : 
     override val nodeId: Int get() = id
 }
 
-// -- Back-compat aliases -----------------------------------------------------
-
-/** @suppress Renamed to [Source] (v2 Cell kernel — #lzcellkernel). */
-@Deprecated("Renamed to Source (v2 Cell kernel — #lzcellkernel).", ReplaceWith("Source<T>"))
-typealias SourceCell<T> = Source<T>
-
-/** @suppress Renamed to [Computed] (v2 Cell kernel — #lzcellkernel). */
-@Deprecated("Renamed to Computed (v2 Cell kernel — #lzcellkernel).", ReplaceWith("Computed<T>"))
-typealias FormulaCell<T> = Computed<T>
-
-/** @suppress Former name of [Source]. */
-@Deprecated("Renamed to Source (the Cell kernel — #lzcellkernel).", ReplaceWith("Source<T>"))
-typealias CellHandle<T> = Source<T>
-
-/** @suppress Former name of [Computed]. */
-@Deprecated("Renamed to Computed (the Cell kernel — #lzcellkernel).", ReplaceWith("Computed<T>"))
-typealias SlotHandle<T> = Computed<T>
-
 // -- Source-only writes (§3) -------------------------------------------------
 
 /**
@@ -173,20 +155,6 @@ fun Computed<*>.lazy(ctx: Context): Unit = ctx.makeLazy(nodeId)
 
 /** Whether this computed cell is currently eager (has an active puller). */
 fun Computed<*>.isEager(ctx: Context): Boolean = ctx.isEagerId(nodeId)
-
-// -- Deprecated eager-transition aliases (v1 `drive`/`undrive`) --------------
-
-/** @suppress Renamed to [eager] (v2 Cell kernel — #lzcellkernel). */
-@Deprecated("Renamed to eager (v2 Cell kernel — #lzcellkernel).", ReplaceWith("eager(ctx)"))
-fun <T : Any> Computed<T>.drive(ctx: Context): Computed<T> = eager(ctx)
-
-/** @suppress Renamed to [lazy] (v2 Cell kernel — #lzcellkernel). */
-@Deprecated("Renamed to lazy (v2 Cell kernel — #lzcellkernel).", ReplaceWith("lazy(ctx)"))
-fun Computed<*>.undrive(ctx: Context): Unit = lazy(ctx)
-
-/** @suppress Renamed to [isEager] (v2 Cell kernel — #lzcellkernel). */
-@Deprecated("Renamed to isEager (v2 Cell kernel — #lzcellkernel).", ReplaceWith("isEager(ctx)"))
-fun Computed<*>.isDriven(ctx: Context): Boolean = isEager(ctx)
 
 // -- Disposal (genus-level) --------------------------------------------------
 

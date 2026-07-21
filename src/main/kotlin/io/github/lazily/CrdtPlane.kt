@@ -42,7 +42,7 @@ private class LwwFamilyFactory<V : Any>(
         val value = decodeCrdtValue(codec, bytes) as V
         // Seed the backing cell with the decoded value; the caller's applyRemote(op)
         // sets the register's real stamp and drives the reactive graph.
-        val handle = CellHandle<V>(ctx.cellAny(value))
+        val handle = Source<V>(ctx.cellAny(value))
         return ReplicatedCell(ctx, handle, LwwRegister(codec), codec, clock)
     }
 }
@@ -81,7 +81,7 @@ class CrdtPlaneRuntime(private val peer: PeerId) {
     private val families = LinkedHashMap<String, LwwFamilyFactory<*>>()
     private val familyMembers = LinkedHashMap<String, MutableList<NodeKey>>()
     private var familyCtx: Context? = null
-    private var membershipEpochCell: CellHandle<Long>? = null
+    private var membershipEpochCell: Source<Long>? = null
     private var nextFamilyNode: Long = FAMILY_NODE_BASE
 
     /** The local replica identity. */
@@ -226,7 +226,7 @@ class CrdtPlaneRuntime(private val peer: PeerId) {
      */
     fun <V : Any> registerFamilyLww(ctx: Context, namespace: String, codec: CrdtCodec<V>) {
         familyCtx = ctx
-        if (membershipEpochCell == null) membershipEpochCell = CellHandle(ctx.cellAny(0L))
+        if (membershipEpochCell == null) membershipEpochCell = Source(ctx.cellAny(0L))
         familyMembers.getOrPut(namespace) { mutableListOf() }
         families[namespace] = LwwFamilyFactory(namespace, codec, clock)
     }
@@ -236,7 +236,7 @@ class CrdtPlaneRuntime(private val peer: PeerId) {
      * aggregate over a family so a remote-materialized key forces a recompute. `null`
      * until the first family is registered.
      */
-    fun membershipEpoch(): CellHandle<Long>? = membershipEpochCell
+    fun membershipEpoch(): Source<Long>? = membershipEpochCell
 
     /** The materialized keys of family [namespace], in first-materialization order. */
     fun familyKeys(namespace: String): List<NodeKey> =
@@ -266,7 +266,7 @@ class CrdtPlaneRuntime(private val peer: PeerId) {
         val stamp = clock.tick()
         val reg = LwwRegister(factory.codec)
         reg.merge(value, stamp)
-        val handle = CellHandle<V>(ctx.cellAny(value))
+        val handle = Source<V>(ctx.cellAny(value))
         val cell = ReplicatedCell(ctx, handle, reg, factory.codec, clock)
         register(node, key, cell)
         recordFamilyMember(namespace, key)

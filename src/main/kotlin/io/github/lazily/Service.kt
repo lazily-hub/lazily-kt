@@ -33,9 +33,9 @@ class HealthCore {
 /** Reactive health: projects the aggregate onto a `Cell` for /health. */
 class HealthCell(private val ctx: Context) {
     private val core = HealthCore()
-    val healthCell: CellHandle<Health> = ctx.cell(Health.Healthy)
+    val healthCell: Source<Health> = ctx.source(Health.Healthy)
 
-    private fun refresh() = ctx.setCell(healthCell, core.health())
+    private fun refresh() = healthCell.set(ctx, core.health())
 
     fun set(name: String, up: Boolean, critical: Boolean) = core.set(name, up, critical).also { refresh() }
     fun health(): Health = core.health()
@@ -53,9 +53,9 @@ class ReadinessCore {
 /** Reactive readiness: projects ready onto a `Cell` for /ready. */
 class ReadinessCell(private val ctx: Context) {
     private val core = ReadinessCore()
-    val readyCell: CellHandle<Boolean> = ctx.cell(true)
+    val readyCell: Source<Boolean> = ctx.source(true)
 
-    private fun refresh() = ctx.setCell(readyCell, core.ready())
+    private fun refresh() = readyCell.set(ctx, core.ready())
 
     fun set(name: String, ready: Boolean) = core.set(name, ready).also { refresh() }
     fun ready(): Boolean = core.ready()
@@ -82,9 +82,9 @@ class DiscoveryCore<P : Any> {
 /** Reactive service discovery. */
 class DiscoveryCell<P : Any>(private val ctx: Context) {
     private val core = DiscoveryCore<P>()
-    val discoveryCell: CellHandle<Any> = ctx.cell<Any>(emptyMap<String, String>())
+    val discoveryCell: Source<Any> = ctx.cell<Any>(emptyMap<String, String>())
 
-    private fun refresh() = ctx.setCell(discoveryCell, core.discovery())
+    private fun refresh() = discoveryCell.set(ctx, core.discovery())
 
     fun register(service: String, endpoint: String, peer: P) =
         core.register(service, endpoint, peer).also { refresh() }
@@ -93,7 +93,7 @@ class DiscoveryCell<P : Any>(private val ctx: Context) {
     fun resolve(service: String): String? = core.resolve(service)
 
     @Suppress("UNCHECKED_CAST")
-    fun discovery(): Map<String, String> = ctx.getCell(discoveryCell) as Map<String, String>
+    fun discovery(): Map<String, String> = ctx.get(discoveryCell) as Map<String, String>
 }
 
 /** A durable registry op (the ordered log entry). */
@@ -136,14 +136,14 @@ class ServiceRegistryCore {
 /** Reactive durable service registry. */
 class ServiceRegistry(private val ctx: Context) {
     private val core = ServiceRegistryCore()
-    val projectionCell: CellHandle<Any> = ctx.cell<Any>(emptyMap<String, String>())
+    val projectionCell: Source<Any> = ctx.cell<Any>(emptyMap<String, String>())
 
-    private fun refresh() = ctx.setCell(projectionCell, core.projection())
+    private fun refresh() = projectionCell.set(ctx, core.projection())
 
     fun register(service: String, endpoint: String) = core.register(service, endpoint).also { refresh() }
     fun deregister(service: String) = core.deregister(service).also { refresh() }
     fun replay() = core.replay().also { refresh() }
 
     @Suppress("UNCHECKED_CAST")
-    fun projection(): Map<String, String> = ctx.getCell(projectionCell) as Map<String, String>
+    fun projection(): Map<String, String> = ctx.get(projectionCell) as Map<String, String>
 }

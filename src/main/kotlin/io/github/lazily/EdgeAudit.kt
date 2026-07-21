@@ -116,9 +116,9 @@ private var auditSink: Long = 0L
  */
 private fun runArm(width: Int, topics: Int, filler: Int): ArmSample {
     val ctx = Context()
-    val topicIds = ArrayList<CellHandle<Long>>(topics)
-    for (i in 0 until topics) topicIds += ctx.cell(0L)
-    repeat(filler) { ctx.cell(0L) }
+    val topicIds = ArrayList<Source<Long>>(topics)
+    for (i in 0 until topics) topicIds += ctx.source(0L)
+    repeat(filler) { ctx.source(0L) }
 
     val handles = ArrayList<Effect>(width)
     val perTopic = width / topics
@@ -141,7 +141,7 @@ private fun runArm(width: Int, topics: Int, filler: Int): ArmSample {
     for (round in 0 until REPEATS) {
         val v = (round + 1).toLong()
         val start = System.nanoTime()
-        for (t in topicIds) ctx.setCell(t, v)
+        for (t in topicIds) t.set(ctx, v)
         notifySamples[round] = (System.nanoTime() - start).toDouble() / width
     }
     val notifyNs = auditMedian(notifySamples)

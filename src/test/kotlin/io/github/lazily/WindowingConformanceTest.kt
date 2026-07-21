@@ -34,13 +34,13 @@ class WindowingConformanceTest {
     private fun inval(step: JsonObject) =
         step["expected"]!!.jsonObject["invalidates"]!!.jsonObject["output"]!!.jsonPrimitive.boolean
 
-    private fun observe(ctx: Context, cell: CellHandle<Any>): SlotHandle<Any> {
+    private fun observe(ctx: Context, cell: Source<Any>): Computed<Any> {
         val obs = ctx.computed { getCell(cell) }
         ctx.get(obs)
         return obs
     }
 
-    private fun check(ctx: Context, obs: SlotHandle<Any>, step: JsonObject, out: Long?) {
+    private fun check(ctx: Context, obs: Computed<Any>, step: JsonObject, out: Long?) {
         assertEquals(expOut(step), out, "output")
         val wasCached = ctx.isSet(obs)
         ctx.get(obs)

@@ -339,7 +339,7 @@ class CrdtClock(private val peer: PeerId) {
  */
 class ReplicatedCell<V : Any>(
     val ctx: Context,
-    val backing: CellHandle<V>,
+    val backing: Source<V>,
     val register: CrdtRegister<V>,
     private val codec: CrdtCodec<V>,
     private val clock: CrdtClock,
@@ -414,7 +414,7 @@ fun <V : Any> Context.replicatedCell(
     codec: CrdtCodec<V>,
     clock: CrdtClock,
 ): ReplicatedCell<V> {
-    val handle = CellHandle<V>(cellAny(initial))
+    val handle = Source<V>(cellAny(initial))
     val cell = ReplicatedCell(this, handle, register, codec, clock)
     // Seed the register with the initial value at a pre-history stamp so the
     // first real remote write (any stamp > (0,0,0)) supersedes it cleanly.

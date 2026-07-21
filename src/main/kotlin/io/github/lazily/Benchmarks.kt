@@ -118,9 +118,9 @@ private data class FanOutFixture(
 
 private fun setupContextFanOut(width: Int): FanOutFixture {
     val ctx = Context()
-    val root = ctx.cell(0L)
-    val slots = (0 until width).map { offset -> ctx.computed { ctx.getCell(root) + offset } }
-    for (slot in slots) BlackholeSink.consume(ctx.get(slot as SlotHandle<Long>))
+    val root = ctx.source(0L)
+    val slots = (0 until width).map { offset -> ctx.computed { ctx.get(root) + offset } }
+    for (slot in slots) BlackholeSink.consume(ctx.get(slot as Computed<Long>))
     return FanOutFixture(ctx, root, slots)
 }
 
@@ -140,8 +140,8 @@ private data class MemoChainFixture(
 
 private fun setupContextMemoChain(depth: Int): MemoChainFixture {
     val ctx = Context()
-    val root = ctx.cell(0L)
-    var tail: SlotHandle<Long> = ctx.computed { ctx.getCell(root) % 2L }
+    val root = ctx.source(0L)
+    var tail: Computed<Long> = ctx.computed { ctx.get(root) % 2L }
     repeat(depth) {
         val prev = tail
         tail = ctx.computed { ctx.get(prev) + 1L }
@@ -170,12 +170,12 @@ private data class BatchStormFixture(
 
 private fun setupContextBatchStorm(cellsLen: Int): BatchStormFixture {
     val ctx = Context()
-    val cells = (0 until cellsLen).map { idx -> ctx.cell(idx.toLong()) }
+    val cells = (0 until cellsLen).map { idx -> ctx.source(idx.toLong()) }
     val cellsForEffect = cells.toList()
     val sink = longArrayOf(0L)
     ctx.effect {
         var total = 0L
-        for (cell in cellsForEffect) total += ctx.getCell(cell as CellHandle<Long>)
+        for (cell in cellsForEffect) total += ctx.get(cell as Source<Long>)
         sink[0] = total
         null
     }
@@ -203,13 +203,13 @@ fun benchCachedReads(): List<BenchmarkResult> {
     return listOf(
         timeOp(Benchmark(group, "context", setup = {
             val ctx = Context()
-            val root = ctx.cell(21L)
-            val doubled = ctx.computed { ctx.getCell(root) * 2L }
+            val root = ctx.source(21L)
+            val doubled = ctx.computed { ctx.get(root) * 2L }
             BlackholeSink.consume(ctx.get(doubled))
             Triple(ctx, root, doubled)
         }) { hole, fixture ->
-            val f = fixture as Triple<Context, CellHandle<Long>, SlotHandle<Long>>
-            hole.consume(f.first.get(f.third as SlotHandle<Long>))
+            val f = fixture as Triple<Context, Source<Long>, Computed<Long>>
+            hole.consume(f.first.get(f.third as Computed<Long>))
         }),
         timeOp(Benchmark(group, "thread_safe_context", setup = {
             val ctx = ThreadSafeContext()
@@ -230,8 +230,8 @@ fun benchColdFirstGet(): List<BenchmarkResult> {
         timeOp(Benchmark(group, "context", warmup = 200, samples = 1_000, setup = { 0 }) { hole, _ ->
             // Per-iteration fresh context + slot (build is part of the op).
             val ctx = Context()
-            val root = ctx.cell(21L)
-            val doubled = ctx.computed { ctx.getCell(root) * 2L }
+            val root = ctx.source(21L)
+            val doubled = ctx.computed { ctx.get(root) * 2L }
             hole.consume(ctx.get(doubled))
         }),
         timeOp(Benchmark(group, "thread_safe_context", warmup = 200, samples = 1_000, setup = { 0 }) { hole, _ ->
@@ -252,9 +252,9 @@ fun benchDependencyFanOut(): List<BenchmarkResult> {
         }) { hole, fixture ->
             val f = fixture as FanOutFixture
             val ctx = f.ctx as Context
-            ctx.setCell(f.root as CellHandle<Long>, 1L)
+            (f.root as Source<Long>).set(ctx, 1L)
             var total = 0L
-            for (slot in f.slots) total += ctx.get(slot as SlotHandle<Long>)
+            for (slot in f.slots) total += ctx.get(slot as Computed<Long>)
             hole.consume(total)
         })
         out += timeOp(Benchmark(group, "thread_safe_context/$width", samples = 2_000, setup = {
@@ -293,8 +293,8 @@ fun benchMemoEqualitySuppression(): List<BenchmarkResult> {
         }) { hole, fixture ->
             val f = fixture as MemoChainFixture
             val ctx = f.ctx as Context
-            ctx.setCell(f.root as CellHandle<Long>, 2L)
-            hole.consume(ctx.get(f.tail as SlotHandle<Long>))
+            (f.root as Source<Long>).set(ctx, 2L)
+            hole.consume(ctx.get(f.tail as Computed<Long>))
         }),
         timeOp(Benchmark(group, "thread_safe_context", samples = 5_000, setup = {
             setupThreadSafeMemoChain(MEMO_CHAIN_DEPTH)
@@ -312,17 +312,17 @@ fun benchEffectFlushing(): List<BenchmarkResult> {
     return listOf(
         timeOp(Benchmark(group, "context", samples = 5_000, setup = {
             val ctx = Context()
-            val root = ctx.cell(0L)
+            val root = ctx.source(0L)
             val seen = longArrayOf(0L)
             ctx.effect {
-                seen[0] += ctx.getCell(root)
+                seen[0] += ctx.get(root)
                 null
             }
             Fixture3(ctx, root, seen)
         }) { hole, fixture ->
-            val f = fixture as Fixture3<Context, CellHandle<Long>, LongArray>
+            val f = fixture as Fixture3<Context, Source<Long>, LongArray>
             val ctx = f.a
-            ctx.setCell(f.b, f.c[0] + 1L)
+            f.b.set(ctx, f.c[0] + 1L)
             hole.consume(f.c[0])
         }),
         timeOp(Benchmark(group, "thread_safe_context", samples = 5_000, setup = {
@@ -353,7 +353,7 @@ fun benchBatchStorms(): List<BenchmarkResult> {
             val ctx = f.ctx as Context
             var base = BATCH_STORM_CELLS.toLong() + 1
             ctx.batch {
-                for ((offset, cell) in (f.cells as List<CellHandle<Long>>).withIndex()) {
+                for ((offset, cell) in (f.cells as List<Source<Long>>).withIndex()) {
                     setCell(cell, base + offset)
                 }
             }
@@ -382,21 +382,21 @@ fun benchTypedCacheReads(): List<BenchmarkResult> {
     return listOf(
         timeOp(Benchmark(group, "context_slot", setup = {
             val ctx = Context()
-            val cell = ctx.cell(42L)
-            val slot = ctx.computed { ctx.getCell(cell) }
+            val cell = ctx.source(42L)
+            val slot = ctx.computed { ctx.get(cell) }
             BlackholeSink.consume(ctx.get(slot))
             Fixture2(ctx, slot)
         }) { hole, fixture ->
-            val f = fixture as Fixture2<Context, SlotHandle<Long>>
+            val f = fixture as Fixture2<Context, Computed<Long>>
             hole.consume(f.a.get(f.b))
         }),
         timeOp(Benchmark(group, "context_cell", setup = {
             val ctx = Context()
-            val cell = ctx.cell(99L)
+            val cell = ctx.source(99L)
             Fixture2(ctx, cell)
         }) { hole, fixture ->
-            val f = fixture as Fixture2<Context, CellHandle<Long>>
-            hole.consume(f.a.getCell(f.b))
+            val f = fixture as Fixture2<Context, Source<Long>>
+            hole.consume(f.a.get(f.b))
         }),
         timeOp(Benchmark(group, "thread_safe_slot", setup = {
             val ctx = ThreadSafeContext()

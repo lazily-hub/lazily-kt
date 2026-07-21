@@ -254,11 +254,11 @@ class QueueCell<T : Any, S : QueueStorage<T>>(
     // [invalidateReaders]). `closed` stays a Cell (a direct input, set by
     // [close]). The head slot holds either [NO_HEAD] (empty / no peek) or a real
     // element (it is typed `Any` because a Slot value cannot be null).
-    private val headSlot: SlotHandle<Any>
-    private val lenSlot: SlotHandle<Int>
-    private val isEmptySlot: SlotHandle<Boolean>
-    private val isFullSlot: SlotHandle<Boolean>
-    private val closedCell: CellHandle<Boolean>
+    private val headSlot: Computed<Any>
+    private val lenSlot: Computed<Int>
+    private val isEmptySlot: Computed<Boolean>
+    private val isFullSlot: Computed<Boolean>
+    private val closedCell: Source<Boolean>
 
     // `capacity` is an optional, fixed backend capability — cache it once.
     private val cap: Int?
@@ -271,7 +271,7 @@ class QueueCell<T : Any, S : QueueStorage<T>>(
         lenSlot = ctx.computed { s.len() }
         isEmptySlot = ctx.computed { s.len() == 0 }
         isFullSlot = ctx.computed { bound?.let { s.len() >= it } ?: false }
-        closedCell = ctx.cell(s.isClosed())
+        closedCell = ctx.source(s.isClosed())
     }
 
     companion object {
@@ -365,7 +365,7 @@ class QueueCell<T : Any, S : QueueStorage<T>>(
     fun close() {
         if (storage.isClosed()) return
         storage.close()
-        ctx.setCell(closedCell, true)
+        closedCell.set(ctx, true)
     }
 
     // -- Reactive reader-kind reads ----------------------------------------
@@ -387,10 +387,10 @@ class QueueCell<T : Any, S : QueueStorage<T>>(
     fun isFull(): Boolean = ctx.get(isFullSlot)
 
     /** Reactive read of the closed flag. Invalidated only on the open → closed transition. */
-    fun isClosed(): Boolean = ctx.getCell(closedCell)
+    fun isClosed(): Boolean = ctx.get(closedCell)
 
     /** Handle to the `head` reader-kind Slot, for wiring derived computeds directly. Subscribe-to-head semantics: invalidated on head-value change. */
-    fun headHandle(): SlotHandle<Any> = headSlot
+    fun headHandle(): Computed<Any> = headSlot
 
     // -- Non-reactive storage access ---------------------------------------
 
@@ -413,15 +413,15 @@ fun <T : Any> QueueCell<T, VecDequeStorage<T>>.elements(): List<T> = storage.ele
 /** Handles to all five reader-kinds of a [QueueCell], for effects that need to subscribe to several reader kinds at once. The four derived reader-kinds are demand-driven Slots; `closed` is a Cell (a direct input). */
 class QueueReaderHandles(
     /** The head value slot (`NO_HEAD` sentinel when empty). */
-    val head: SlotHandle<Any>,
+    val head: Computed<Any>,
     /** The element count slot. */
-    val len: SlotHandle<Int>,
+    val len: Computed<Int>,
     /** Whether the queue is empty. */
-    val isEmpty: SlotHandle<Boolean>,
+    val isEmpty: Computed<Boolean>,
     /** Whether the queue is at capacity (bounded backpressure signal). */
-    val isFull: SlotHandle<Boolean>,
+    val isFull: Computed<Boolean>,
     /** Whether the queue has been closed. */
-    val closed: CellHandle<Boolean>,
+    val closed: Source<Boolean>,
 )
 
 // ---------------------------------------------------------------------------
@@ -481,7 +481,7 @@ class TopicCell<T : Any>(
     private var baseOffset: Long = initial.baseOffset
     private val retained = ArrayDeque<T>(initial.elements.size)
     private val subscriptions = LinkedHashMap<String, TopicSubscription>()
-    private val readers = HashMap<String, SlotHandle<List<T>>>()
+    private val readers = HashMap<String, Computed<List<T>>>()
 
     init {
         require(baseOffset >= 0) { "TopicCell baseOffset must be non-negative" }
@@ -499,9 +499,9 @@ class TopicCell<T : Any>(
         for (id in subscriptions.keys) ensureReader(id)
     }
 
-    private fun ensureReader(id: String): SlotHandle<List<T>> =
+    private fun ensureReader(id: String): Computed<List<T>> =
         readers.getOrPut(id) {
-            SlotHandle(
+            Computed(
                 ctx.slotAny {
                     val sub = subscriptions[id]
                     if (sub == null || !sub.connected) {
@@ -608,7 +608,7 @@ class TopicCell<T : Any>(
         subscriptions[id]?.let { TopicSubscriptionSnapshot(it.cursor, it.durability, it.connected) }
 
     /** Handle to [id]'s demand-driven reactive unread suffix. */
-    fun readerHandle(id: String): SlotHandle<List<T>>? = readers[id]
+    fun readerHandle(id: String): Computed<List<T>>? = readers[id]
 
     /** Atomic durable/live-state snapshot suitable for restart. */
     fun snapshot(): TopicSnapshot<T> =

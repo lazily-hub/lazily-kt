@@ -45,7 +45,7 @@ class RateShapeConformanceTest {
     private fun run(
         ctx: Context,
         fx: JsonObject,
-        outputCell: CellHandle<Any>,
+        outputCell: Source<Any>,
         readOutput: () -> String?,
         drive: (JsonObject) -> String?,
     ) {

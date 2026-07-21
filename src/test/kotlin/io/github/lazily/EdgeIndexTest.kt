@@ -139,10 +139,10 @@ class EdgeIndexTest {
             EDGE_INDEX_THRESHOLD * 8,
         )) {
             val ctx = Context()
-            val topic = ctx.cell(0)
-            val subs = (0 until width).map { i -> ctx.computed { ctx.getCell(topic) + i } }
+            val topic = ctx.source(0)
+            val subs = (0 until width).map { i -> ctx.computed { ctx.get(topic) + i } }
             for (i in 0 until width) assertEquals(i, ctx.get(subs[i]), "width=$width initial")
-            ctx.setCell(topic, 100)
+            topic.set(ctx, 100)
             // A stale index entry surfaces as a *missed update*, not a crash.
             for (i in 0 until width) assertEquals(100 + i, ctx.get(subs[i]), "width=$width after publish")
         }
@@ -152,10 +152,10 @@ class EdgeIndexTest {
     fun `wide fan-out survives repeated invalidation`() {
         val ctx = Context()
         val width = EDGE_INDEX_THRESHOLD * 4
-        val topic = ctx.cell(0)
-        val subs = (0 until width).map { i -> ctx.computed { ctx.getCell(topic) + i } }
+        val topic = ctx.source(0)
+        val subs = (0 until width).map { i -> ctx.computed { ctx.get(topic) + i } }
         for (round in 1..25) {
-            ctx.setCell(topic, round)
+            topic.set(ctx, round)
             for (i in 0 until width) assertEquals(round + i, ctx.get(subs[i]), "round=$round i=$i")
         }
     }
@@ -174,22 +174,22 @@ class EdgeIndexTest {
 
         // Build a wide effect fan-out over a topic, then dispose it all so the
         // ids go back on the free list.
-        val topic = ctx.cell(0)
+        val topic = ctx.source(0)
         val seen = IntArray(width)
-        val effects = (0 until width).map { i -> ctx.effect { seen[i] = ctx.getCell(topic); null } }
-        ctx.setCell(topic, 7)
+        val effects = (0 until width).map { i -> ctx.effect { seen[i] = ctx.get(topic); null } }
+        topic.set(ctx, 7)
         for (i in 0 until width) assertEquals(7, seen[i])
         for (e in effects) ctx.disposeEffect(e)
 
         // Re-create the same number of nodes; allocId hands back the freed ids.
-        val topic2 = ctx.cell(0)
-        val subs = (0 until width).map { i -> ctx.computed { ctx.getCell(topic2) + i } }
+        val topic2 = ctx.source(0)
+        val subs = (0 until width).map { i -> ctx.computed { ctx.get(topic2) + i } }
         for (i in 0 until width) assertEquals(i, ctx.get(subs[i]))
-        ctx.setCell(topic2, 500)
+        topic2.set(ctx, 500)
         for (i in 0 until width) assertEquals(500 + i, ctx.get(subs[i]))
 
         // The disposed effects are gone and the old topic has no dependents left.
-        ctx.setCell(topic, 9)
+        topic.set(ctx, 9)
         for (i in 0 until width) assertEquals(7, seen[i], "disposed effect $i re-ran")
     }
 
@@ -217,22 +217,22 @@ class EdgeIndexTest {
     @Test
     fun `disposing a queued effect while flushing still deschedules it`() {
         val ctx = Context()
-        val c = ctx.cell(0)
+        val c = ctx.source(0)
         var victimRuns = 0
         var disposerRan = false
         // The frontier pops LIFO, so the *last* registered effect runs first.
         // The disposer must therefore be registered last for the victim to still
         // be queued when the dispose happens.
-        val victim = ctx.effect { ctx.getCell(c); victimRuns++; null }
+        val victim = ctx.effect { ctx.get(c); victimRuns++; null }
         val disposer = ctx.effect {
-            ctx.getCell(c)
+            ctx.get(c)
             disposerRan = true
             ctx.disposeEffect(victim)
             null
         }
         assertEquals(1, victimRuns, "victim runs once at registration")
 
-        ctx.setCell(c, 1)
+        c.set(ctx, 1)
         // Guard against a vacuous pass: if the victim ran before the disposer,
         // the dispose never happened against a queued effect and this test would
         // prove nothing.
@@ -247,11 +247,11 @@ class EdgeIndexTest {
         // The guard must not skip descheduling work it still owes: disposing an
         // effect that is not queued must leave every queued sibling running.
         val ctx = Context()
-        val c = ctx.cell(0)
+        val c = ctx.source(0)
         val runs = IntArray(3)
-        val hs = (0 until 3).map { i -> ctx.effect { ctx.getCell(c); runs[i]++; null } }
+        val hs = (0 until 3).map { i -> ctx.effect { ctx.get(c); runs[i]++; null } }
         ctx.disposeEffect(hs[1])
-        ctx.setCell(c, 1)
+        c.set(ctx, 1)
         assertEquals(2, runs[0])
         assertEquals(1, runs[1], "disposed effect must not rerun")
         assertEquals(2, runs[2])
@@ -265,15 +265,15 @@ class EdgeIndexTest {
         // retained capacity.
         val ctx = Context()
         val width = EDGE_INDEX_THRESHOLD * 8
-        val topic = ctx.cell(0)
+        val topic = ctx.source(0)
         val runs = IntArray(width)
-        val hs = (0 until width).map { i -> ctx.effect { ctx.getCell(topic); runs[i]++; null } }
-        ctx.setCell(topic, 1)
+        val hs = (0 until width).map { i -> ctx.effect { ctx.get(topic); runs[i]++; null } }
+        topic.set(ctx, 1)
         for (i in 0 until width) assertEquals(2, runs[i], "effect $i should have rerun once")
 
         for (h in hs) ctx.disposeEffect(h)
         for (h in hs) assertFalse(ctx.isEffectActive(h))
-        ctx.setCell(topic, 2)
+        topic.set(ctx, 2)
         for (i in 0 until width) assertEquals(2, runs[i], "disposed effect $i re-ran after teardown")
     }
 
@@ -298,12 +298,12 @@ class EdgeIndexTest {
         // that list on every recompute, which must drop the index with it.
         val ctx = Context()
         val width = EDGE_INDEX_THRESHOLD * 4
-        val inputs = (0 until width).map { ctx.cell(1) }
-        val total = ctx.computed { inputs.sumOf { ctx.getCell(it) } }
+        val inputs = (0 until width).map { ctx.source(1) }
+        val total = ctx.computed { inputs.sumOf { ctx.get(it) } }
         assertEquals(width, ctx.get(total))
-        ctx.setCell(inputs[width - 1], 100)
+        inputs[width - 1].set(ctx, 100)
         assertEquals(width - 1 + 100, ctx.get(total))
-        for (i in 0 until width) ctx.setCell(inputs[i], 2)
+        for (i in 0 until width) inputs[i].set(ctx, 2)
         assertEquals(width * 2, ctx.get(total))
     }
 
@@ -335,12 +335,12 @@ class EdgeIndexTest {
         // *through* the disposed node. This one the corpus does pin; it is here
         // because the three semantics belong together.
         val ctx = Context()
-        val src = ctx.cell(1)
-        val mid = ctx.computed { ctx.getCell(src) + 1 }
+        val src = ctx.source(1)
+        val mid = ctx.computed { ctx.get(src) + 1 }
         val reader = ctx.computed { ctx.get(mid) * 10 }
 
         assertEquals(20, ctx.get(reader))
-        ctx.disposeSlot(mid)
+        mid.dispose(ctx)
 
         assertFailsWith<DisposedNodeException>(
             "a live reader that still names a disposed dependency must error on its next " +
@@ -355,8 +355,8 @@ class EdgeIndexTest {
         // turns `dispose` itself into a throw and breaks teardown idempotence.
         // Mark dirty only — the contract is "errors on the next recompute".
         val ctx = Context()
-        val src = ctx.cell(1)
-        val mid = ctx.computed { ctx.getCell(src) + 1 }
+        val src = ctx.source(1)
+        val mid = ctx.computed { ctx.get(src) + 1 }
 
         var runs = 0
         var sawDisposed = false
@@ -367,7 +367,7 @@ class EdgeIndexTest {
             // `src` genuinely reaches it. An effect whose *only* dependency was
             // the disposed node has nothing left to schedule it and is deaf by
             // construction, which would make this test vacuous.
-            ctx.getCell(src)
+            ctx.get(src)
             try {
                 ctx.get(mid)
             } catch (_: DisposedNodeException) {
@@ -377,7 +377,7 @@ class EdgeIndexTest {
         }
         assertEquals(1, runs)
 
-        ctx.disposeSlot(mid)
+        mid.dispose(ctx)
         assertEquals(1, runs, "the effect reached by the disposal walk must not rerun")
         assertFalse(sawDisposed)
 
@@ -385,15 +385,15 @@ class EdgeIndexTest {
         // the damage rather than avoiding it: the effect then fires on the next
         // unrelated flush — a write to a cell it does not even read — as a
         // spurious rerun no publish asked for.
-        val unrelated = ctx.cell(0)
-        ctx.effect { ctx.getCell(unrelated); null }
-        ctx.setCell(unrelated, 1)
+        val unrelated = ctx.source(0)
+        ctx.effect { ctx.get(unrelated); null }
+        unrelated.set(ctx, 1)
         assertEquals(1, runs, "a publish the effect does not observe must not flush it")
         assertFalse(sawDisposed)
 
         // A real write still reaches it, and *that* recompute is where the error
         // surfaces.
-        ctx.setCell(src, 2)
+        src.set(ctx, 2)
         assertEquals(2, runs)
         assertTrue(sawDisposed, "the next real recompute must see the disposed dependency")
     }
@@ -442,10 +442,10 @@ class EdgeIndexTest {
         // produces the identical log, which is precisely why the corpus fixture
         // does not discriminate this.
         val ctx = Context()
-        val topic = ctx.cell(1)
+        val topic = ctx.source(1)
         val cleanups = mutableListOf<String>()
         val scope = ctx.scope()
-        val a = scope.computed { ctx.getCell(topic) + 1 }
+        val a = scope.computed { ctx.get(topic) + 1 }
         val b = scope.computed { ctx.get(a) + 2 }
         scope.effect { ctx.get(b); { cleanups.add("watch_b") } }
         scope.effect { ctx.get(b); { cleanups.add("watch_b2") } }
@@ -467,13 +467,13 @@ class EdgeIndexTest {
         // introduces no disposal semantics of its own.
         fun run(useScope: Boolean): List<Any> {
             val ctx = Context()
-            val topic = ctx.cell(1)
+            val topic = ctx.source(1)
             val cleanups = mutableListOf<String>()
             val scope = ctx.scope()
             val a = if (useScope) {
-                scope.computed { ctx.getCell(topic) + 1 }
+                scope.computed { ctx.get(topic) + 1 }
             } else {
-                ctx.computed { ctx.getCell(topic) + 1 }
+                ctx.computed { ctx.get(topic) + 1 }
             }
             val b = if (useScope) scope.computed { ctx.get(a) + 2 } else ctx.computed { ctx.get(a) + 2 }
             val run: Context.() -> (() -> Unit)? = { ctx.get(b); { cleanups.add("watch") } }
@@ -484,8 +484,8 @@ class EdgeIndexTest {
                 scope.end()
             } else {
                 ctx.disposeEffect(w)
-                ctx.disposeSlot(b)
-                ctx.disposeSlot(a)
+                b.dispose(ctx)
+                a.dispose(ctx)
             }
             return listOf(
                 cleanups.joinToString(","),
@@ -504,13 +504,13 @@ class EdgeIndexTest {
         // analogue of the Rust block scope. It has to hold on the exceptional
         // path too, or the leak comes back exactly where it is least visible.
         val ctx = Context()
-        val topic = ctx.cell(1)
+        val topic = ctx.source(1)
         val cleanups = mutableListOf<String>()
-        var member: SlotHandle<Int>? = null
+        var member: Computed<Int>? = null
 
         assertFailsWith<IllegalStateException> {
             ctx.scope().use { scope ->
-                member = scope.computed { ctx.getCell(topic) + 1 }
+                member = scope.computed { ctx.get(topic) + 1 }
                 scope.effect { ctx.get(member!!); { cleanups.add("watch") } }
                 assertEquals(2, ctx.get(member!!))
                 assertEquals(1, ctx.dependentCount(topic))
@@ -526,10 +526,10 @@ class EdgeIndexTest {
     @Test
     fun `disarm cancels teardown without detaching anything`() {
         val ctx = Context()
-        val topic = ctx.cell(1)
+        val topic = ctx.source(1)
         val cleanups = mutableListOf<String>()
         val scope = ctx.scope()
-        val escaped = scope.computed { ctx.getCell(topic) + 1 }
+        val escaped = scope.computed { ctx.get(topic) + 1 }
         scope.effect { ctx.get(escaped); { cleanups.add("watch") } }
 
         assertEquals(2, ctx.get(escaped))
@@ -541,42 +541,42 @@ class EdgeIndexTest {
         assertEquals(emptyList(), cleanups, "ending a disarmed scope disposes nothing")
         assertFalse(ctx.isDisposed(escaped))
         assertEquals(1, ctx.dependentCount(topic), "edges are untouched by disarm")
-        ctx.setCell(topic, 4)
+        topic.set(ctx, 4)
         assertEquals(5, ctx.get(escaped), "disarmed nodes keep propagating")
     }
 
     @Test
     fun `disposal is idempotent and stale handles are a no-op`() {
         val ctx = Context()
-        val cell = ctx.cell(1)
-        val slot = ctx.computed { ctx.getCell(cell) }
+        val cell = ctx.source(1)
+        val slot = ctx.computed { ctx.get(cell) }
         assertEquals(1, ctx.get(slot))
 
-        ctx.disposeSlot(slot)
-        ctx.disposeSlot(slot) // second teardown must be a no-op, not a throw
-        ctx.disposeCell(cell)
-        ctx.disposeCell(cell)
+        slot.dispose(ctx)
+        slot.dispose(ctx) // second teardown must be a no-op, not a throw
+        cell.dispose(ctx)
+        cell.dispose(ctx)
 
         // The arena recycles ids, so the *stale* cell handle now names whatever
         // took its id. Disposing through it must read the kind from the arena
         // and decline, or an unrelated live node would be torn down.
         val successor = ctx.computed { 7 }
         assertEquals(7, ctx.get(successor))
-        ctx.disposeCell(cell)
+        cell.dispose(ctx)
         assertEquals(7, ctx.get(successor), "a stale cell handle must not tear down a slot")
     }
 
     @Test
     fun `subscribe unsubscribe churn returns to baseline`() {
         val ctx = Context()
-        val topic = ctx.cell(0)
-        val subs = (0 until 8).map { ctx.effect { ctx.getCell(topic); null } }.toMutableList()
+        val topic = ctx.source(0)
+        val subs = (0 until 8).map { ctx.effect { ctx.get(topic); null } }.toMutableList()
         assertEquals(8, ctx.dependentCount(topic))
 
         for (c in 0 until 200) {
             val at = c % 8
             ctx.disposeEffect(subs[at])
-            subs[at] = ctx.effect { ctx.getCell(topic); null }
+            subs[at] = ctx.effect { ctx.get(topic); null }
         }
         assertEquals(
             8,

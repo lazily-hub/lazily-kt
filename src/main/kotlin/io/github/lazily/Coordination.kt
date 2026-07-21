@@ -63,9 +63,9 @@ class LeaseCore<P : Any> {
 /** Reactive lease: projects the holder onto a `Cell`. */
 class LeaseCell<P : Any>(private val ctx: Context) {
     private val core = LeaseCore<P>()
-    val holderCell: CellHandle<Any> = ctx.cell<Any>(CoordEmpty)
+    val holderCell: Source<Any> = ctx.cell<Any>(CoordEmpty)
 
-    private fun refresh(now: Long) = ctx.setCell(holderCell, core.holder(now) ?: CoordEmpty)
+    private fun refresh(now: Long) = holderCell.set(ctx, core.holder(now) ?: CoordEmpty)
 
     fun acquire(peer: P, now: Long, ttl: Long): Long? = core.acquire(peer, now, ttl).also { refresh(now) }
     fun renew(peer: P, now: Long, ttl: Long): Boolean = core.renew(peer, now, ttl).also { refresh(now) }
@@ -84,9 +84,9 @@ enum class LeaderRole { Leader, Follower, Candidate }
 /** Reactive leadership over a lease from node `me`'s perspective. */
 class LeaderCell<P : Any>(private val ctx: Context, private val me: P) {
     private val core = LeaseCore<P>()
-    val currentLeaderCell: CellHandle<Any> = ctx.cell<Any>(CoordEmpty)
+    val currentLeaderCell: Source<Any> = ctx.cell<Any>(CoordEmpty)
 
-    private fun refresh(now: Long) = ctx.setCell(currentLeaderCell, core.holder(now) ?: CoordEmpty)
+    private fun refresh(now: Long) = currentLeaderCell.set(ctx, core.holder(now) ?: CoordEmpty)
 
     fun campaign(now: Long, ttl: Long): LeaderRole {
         core.acquire(me, now, ttl)
@@ -121,9 +121,9 @@ class LeaderCell<P : Any>(private val ctx: Context, private val me: P) {
 /** Reactive distributed mutex over a lease + fencing token. */
 class LockCell<P : Any>(private val ctx: Context) {
     private val core = LeaseCore<P>()
-    val isLockedCell: CellHandle<Boolean> = ctx.cell(false)
+    val isLockedCell: Source<Boolean> = ctx.source(false)
 
-    private fun refresh(now: Long) = ctx.setCell(isLockedCell, core.isHeld(now))
+    private fun refresh(now: Long) = isLockedCell.set(ctx, core.isHeld(now))
 
     fun acquire(peer: P, now: Long, ttl: Long): Long? = core.acquire(peer, now, ttl).also { refresh(now) }
     fun release(peer: P, now: Long) = core.release(peer).also { refresh(now) }
@@ -157,13 +157,13 @@ class SemaphoreCore(private val capacity: Long) {
 /** Reactive semaphore: projects `permitsAvailable` onto a `Cell`. */
 class SemaphoreCell(private val ctx: Context, capacity: Long) {
     private val core = SemaphoreCore(capacity)
-    val permitsAvailableCell: CellHandle<Long> = ctx.cell(capacity)
+    val permitsAvailableCell: Source<Long> = ctx.source(capacity)
 
-    private fun refresh() = ctx.setCell(permitsAvailableCell, core.available())
+    private fun refresh() = permitsAvailableCell.set(ctx, core.available())
 
     fun acquire(): Boolean = core.acquire().also { refresh() }
     fun release() = core.release().also { refresh() }
-    fun permitsAvailable(): Long = ctx.getCell(permitsAvailableCell)
+    fun permitsAvailable(): Long = ctx.get(permitsAvailableCell)
 }
 
 // -- Barrier / quorum --------------------------------------------------------
@@ -182,13 +182,13 @@ class BarrierCore<P : Any>(private val required: Long) {
 /** Reactive wait-for-N gate. A quorum is a barrier with `required = total/2 + 1`. */
 class BarrierCell<P : Any>(private val ctx: Context, required: Long) {
     private val core = BarrierCore<P>(required)
-    val isOpenCell: CellHandle<Boolean> = ctx.cell(core.isOpen())
+    val isOpenCell: Source<Boolean> = ctx.source(core.isOpen())
 
-    private fun refresh() = ctx.setCell(isOpenCell, core.isOpen())
+    private fun refresh() = isOpenCell.set(ctx, core.isOpen())
 
     fun arrive(peer: P): Boolean = core.arrive(peer).also { refresh() }
     fun count(): Long = core.count()
-    fun isOpen(): Boolean = ctx.getCell(isOpenCell)
+    fun isOpen(): Boolean = ctx.get(isOpenCell)
 
     companion object {
         /** A quorum gate: opens at strict majority of `total`. */

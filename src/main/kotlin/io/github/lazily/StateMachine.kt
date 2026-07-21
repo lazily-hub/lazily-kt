@@ -4,7 +4,7 @@ package io.github.lazily
  * A finite state machine backed by a reactive [Context] — the native Kotlin
  * counterpart to `StateMachine<S, E>` in lazily-rs / lazily-py / lazily-zig.
  *
- * The state lives in a [CellHandle] so any slot, signal, or effect that reads
+ * The state lives in a [Source] so any slot, signal, or effect that reads
  * [state] is automatically invalidated when the machine transitions. The
  * transition function is pure: `(state, event) -> next?`. Returning `null`
  * rejects the event (guard); returning a value accepts it and sets the cell.
@@ -69,9 +69,7 @@ class StateMachine<S : Any, E>(
         }
     }
 
-    /** An eager signal that is `true` when the machine is in [target], else `false`. */
-    fun stateIs(target: S): SignalHandle<Boolean> {
-        val ids = ctx.signalAny { state == target }
-        return SignalHandle(SlotHandle(ids.slot), Effect(ids.effect))
-    }
+    /** An eager computed that is `true` when the machine is in [target], else `false`. */
+    fun stateIs(target: S): Computed<Boolean> =
+        ctx.computed { state == target }.eager(ctx)
 }

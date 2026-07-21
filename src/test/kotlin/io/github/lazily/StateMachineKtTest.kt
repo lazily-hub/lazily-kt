@@ -79,11 +79,11 @@ class StateMachineKtTest {
             }
         }
         val isGreen = m.stateIs(Light.Green)
-        assertFalse(ctx.getSignal(isGreen))
+        assertFalse(ctx.get(isGreen))
         m.send("advance")
-        assertTrue(ctx.getSignal(isGreen))
+        assertTrue(ctx.get(isGreen))
         m.send("advance")
-        assertFalse(ctx.getSignal(isGreen))
+        assertFalse(ctx.get(isGreen))
     }
 
     @Test

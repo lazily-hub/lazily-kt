@@ -47,18 +47,18 @@ class DebounceCore<T : Any>(private val quiet: Long) {
 /** Reactive debounce over any `Reactive<T>` source. */
 class DebounceCell<T : Any>(private val ctx: Context, quiet: Long) {
     private val core = DebounceCore<T>(quiet)
-    val outputCell: CellHandle<Any> = ctx.cell(RateShapeEmpty)
+    val outputCell: Source<Any> = ctx.source(RateShapeEmpty)
 
     fun input(now: Long, v: T) = core.input(now, v)
 
     fun tick(now: Long): T? {
         val emitted = core.tick(now)
-        if (emitted != null) ctx.setCell(outputCell, emitted)
+        if (emitted != null) outputCell.set(ctx, emitted)
         return emitted
     }
 
     @Suppress("UNCHECKED_CAST")
-    fun output(): T? = ctx.getCell(outputCell).let { if (it === RateShapeEmpty) null else it as T }
+    fun output(): T? = ctx.get(outputCell).let { if (it === RateShapeEmpty) null else it as T }
 }
 
 // -- Throttle ---------------------------------------------------------------
@@ -105,22 +105,22 @@ class ThrottleCore<T : Any>(private val edge: ThrottleEdge, private val window: 
 /** Reactive throttle over any `Reactive<T>` source. */
 class ThrottleCell<T : Any>(private val ctx: Context, edge: ThrottleEdge, window: Long) {
     private val core = ThrottleCore<T>(edge, window)
-    val outputCell: CellHandle<Any> = ctx.cell(RateShapeEmpty)
+    val outputCell: Source<Any> = ctx.source(RateShapeEmpty)
 
     fun input(now: Long, v: T): T? {
         val emitted = core.input(now, v)
-        if (emitted != null) ctx.setCell(outputCell, emitted)
+        if (emitted != null) outputCell.set(ctx, emitted)
         return emitted
     }
 
     fun tick(now: Long): T? {
         val emitted = core.tick(now)
-        if (emitted != null) ctx.setCell(outputCell, emitted)
+        if (emitted != null) outputCell.set(ctx, emitted)
         return emitted
     }
 
     @Suppress("UNCHECKED_CAST")
-    fun output(): T? = ctx.getCell(outputCell).let { if (it === RateShapeEmpty) null else it as T }
+    fun output(): T? = ctx.get(outputCell).let { if (it === RateShapeEmpty) null else it as T }
 }
 
 // -- Sample -----------------------------------------------------------------
@@ -163,22 +163,22 @@ class SampleCore<T : Any>(private val mode: SampleMode) {
 /** Reactive sampler over any `Reactive<T>` source. */
 class SampleCell<T : Any>(private val ctx: Context, mode: SampleMode) {
     private val core = SampleCore<T>(mode)
-    val outputCell: CellHandle<Any> = ctx.cell(RateShapeEmpty)
+    val outputCell: Source<Any> = ctx.source(RateShapeEmpty)
 
     fun input(v: T): T? {
         val emitted = core.input(v)
-        if (emitted != null) ctx.setCell(outputCell, emitted)
+        if (emitted != null) outputCell.set(ctx, emitted)
         return emitted
     }
 
     fun tick(now: Long): T? {
         val emitted = core.tick(now)
-        if (emitted != null) ctx.setCell(outputCell, emitted)
+        if (emitted != null) outputCell.set(ctx, emitted)
         return emitted
     }
 
     @Suppress("UNCHECKED_CAST")
-    fun output(): T? = ctx.getCell(outputCell).let { if (it === RateShapeEmpty) null else it as T }
+    fun output(): T? = ctx.get(outputCell).let { if (it === RateShapeEmpty) null else it as T }
 }
 
 // -- Probabilistic sample ----------------------------------------------------
@@ -216,18 +216,18 @@ class ProbabilisticSampleCell<T : Any>(
     private val rng: SampleRng,
 ) {
     private val core = ProbabilisticSampleCore(rate)
-    val outputCell: CellHandle<Any> = ctx.cell(RateShapeEmpty)
+    val outputCell: Source<Any> = ctx.source(RateShapeEmpty)
 
     fun input(v: T): T? = inputWithDraw(v, rng.nextDouble())
 
     fun inputWithDraw(v: T, draw: Double): T? {
         if (core.decide(draw)) {
-            ctx.setCell(outputCell, v)
+            outputCell.set(ctx, v)
             return v
         }
         return null
     }
 
     @Suppress("UNCHECKED_CAST")
-    fun output(): T? = ctx.getCell(outputCell).let { if (it === RateShapeEmpty) null else it as T }
+    fun output(): T? = ctx.get(outputCell).let { if (it === RateShapeEmpty) null else it as T }
 }

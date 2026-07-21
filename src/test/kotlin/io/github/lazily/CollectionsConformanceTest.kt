@@ -131,9 +131,9 @@ class CollectionsConformanceTest {
     }
 
     private class Readers(
-        val valueReaders: Map<String, SlotHandle<Int>>,
-        val membership: SlotHandle<Int>,
-        val order: SlotHandle<List<String>>,
+        val valueReaders: Map<String, Computed<Int>>,
+        val membership: Computed<Int>,
+        val order: Computed<List<String>>,
     )
 
     /** Build reader memos for every key currently present and read them once. */

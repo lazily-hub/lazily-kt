@@ -45,16 +45,16 @@ class TimerCore(private val fireAt: Long) {
 /** Reactive single-shot timer: edge-only invalidation of `fired`/`value`. */
 class TimerCell(private val ctx: Context, fireAt: Long) {
     private val core = TimerCore(fireAt)
-    val firedCell: CellHandle<Boolean> = ctx.cell(false)
+    val firedCell: Source<Boolean> = ctx.source(false)
 
     fun tick(now: Long): Boolean {
         val edge = core.tick(now)
-        if (edge) ctx.setCell(firedCell, true)
+        if (edge) firedCell.set(ctx, true)
         return edge
     }
 
-    fun hasFired(): Boolean = ctx.getCell(firedCell)
-    fun value(): Unit? = if (ctx.getCell(firedCell)) Unit else null
+    fun hasFired(): Boolean = ctx.get(firedCell)
+    fun value(): Unit? = if (ctx.get(firedCell)) Unit else null
     fun nextFire(): Long? = core.nextFire()
 }
 
@@ -85,15 +85,15 @@ class IntervalCore(period: Long) {
 /** Reactive periodic interval: invalidates only when `count` changes. */
 class IntervalCell(private val ctx: Context, period: Long) {
     private val core = IntervalCore(period)
-    val countCell: CellHandle<Long> = ctx.cell(0L)
+    val countCell: Source<Long> = ctx.source(0L)
 
     fun tick(now: Long): Boolean {
         val edge = core.tick(now)
-        if (edge) ctx.setCell(countCell, core.count)
+        if (edge) countCell.set(ctx, core.count)
         return edge
     }
 
-    fun count(): Long = ctx.getCell(countCell)
+    fun count(): Long = ctx.get(countCell)
     fun nextFire(): Long = core.nextFire()
 }
 
@@ -146,15 +146,15 @@ class CronCore(cycle: Long, offsets: List<Long>) {
 /** Reactive cron source: same reactive contract as [IntervalCell]. */
 class CronCell(private val ctx: Context, cycle: Long, offsets: List<Long>) {
     private val core = CronCore(cycle, offsets)
-    val countCell: CellHandle<Long> = ctx.cell(0L)
+    val countCell: Source<Long> = ctx.source(0L)
 
     fun tick(now: Long): Boolean {
         val edge = core.tick(now)
-        if (edge) ctx.setCell(countCell, core.count)
+        if (edge) countCell.set(ctx, core.count)
         return edge
     }
 
-    fun count(): Long = ctx.getCell(countCell)
+    fun count(): Long = ctx.get(countCell)
     fun nextFire(): Long? = core.nextFire()
 }
 
@@ -173,17 +173,17 @@ class DeadlineCore(deadline: Long) {
  * preserving the value; `state` invalidates only on the expiry edge. */
 class DeadlineCell<T : Any>(private val ctx: Context, private val value: T, deadline: Long) {
     private val core = DeadlineCore(deadline)
-    val expiredCell: CellHandle<Boolean> = ctx.cell(false)
+    val expiredCell: Source<Boolean> = ctx.source(false)
 
     fun tick(now: Long): Boolean {
         val edge = core.tick(now)
-        if (edge) ctx.setCell(expiredCell, true)
+        if (edge) expiredCell.set(ctx, true)
         return edge
     }
 
     fun state(): Deadlined<T> =
-        if (ctx.getCell(expiredCell)) Deadlined.Expired(value) else Deadlined.Live(value)
+        if (ctx.get(expiredCell)) Deadlined.Expired(value) else Deadlined.Live(value)
 
-    fun isExpired(): Boolean = ctx.getCell(expiredCell)
+    fun isExpired(): Boolean = ctx.get(expiredCell)
     fun nextFire(): Long? = core.nextFire()
 }

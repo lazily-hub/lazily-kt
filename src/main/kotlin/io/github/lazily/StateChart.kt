@@ -16,7 +16,7 @@ import kotlinx.serialization.json.jsonPrimitive
  * `lazily-formal/LazilyFormal/StateChart.lean`.
  *
  * A chart is **compute, not protocol**: it is never serialized as a distinct
- * wire kind. The active configuration lives in a [CellHandle], so any
+ * wire kind. The active configuration lives in a [Source], so any
  * slot/signal/effect reading [StateChart.configuration], [StateChart.activeLeaves],
  * or [StateChart.matches] is invalidated on a real transition; a no-op
  * self-transition is suppressed by the cell's `==` (PartialEq) guard (see the
