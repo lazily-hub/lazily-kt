@@ -34,8 +34,9 @@ class DisposedNodeException internal constructor(
 /**
  * A node in a [Context]'s reactive graph (`#lzspecedgeindex`).
  *
- * Sealed: [SlotHandle], [CellHandle], and [EffectHandle] are the only
- * implementations and the type cannot be implemented downstream. It exists so
+ * Sealed: the genus [Cell] (its kinds [SourceCell] / [FormulaCell]) and
+ * [EffectHandle] are the only implementations and the type cannot be implemented
+ * downstream. It exists so
  * [Context.dependentCount], [Context.dependencyCount], [Context.disposeNode],
  * and [TeardownScope] can accept any node kind *without* exposing the node's
  * edge lists or its cached value — the mirror of `lazily-rs`'s sealed

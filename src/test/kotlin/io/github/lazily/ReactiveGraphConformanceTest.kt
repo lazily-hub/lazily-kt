@@ -125,7 +125,12 @@ class ReactiveGraphConformanceTest {
             "disarm",
             "dispose",
             "dispose_fanout",
+            // `dispose_signal` and `signal` are the on-disk vocab; `undrive` and
+            // `drive` are the Cell-kernel names for the same ops (a driven
+            // FormulaCell — #lzcellkernel), dual-accepted so a future
+            // spec-repo fixture emitting them does not panic as an unknown op.
             "dispose_signal",
+            "drive",
             "dispose_stale_handle",
             "effect",
             "end_scope",
@@ -133,6 +138,7 @@ class ReactiveGraphConformanceTest {
             "read",
             "set_cell",
             "signal",
+            "undrive",
         )
 
         /**
@@ -290,23 +296,22 @@ class ReactiveGraphConformanceTest {
         private val scopes = HashMap<String, TeardownScope>()
 
         /**
-         * Signal handles, kept alongside [nodes] rather than in it: [nodes]
-         * holds the BACKING SLOT for a signal id, so reads, `readable`, and the
-         * degree assertions all resolve through the ordinary slot path — and so
-         * `dispose_signal` is visibly not a node teardown. This map exists only
-         * to reach the puller effect.
+         * The driven formulas, kept alongside [nodes] rather than in it: [nodes]
+         * holds the FormulaCell for an eager id, so reads, `readable`, and the
+         * degree assertions all resolve through the ordinary formula path — and so
+         * `dispose_signal`/`undrive` is visibly not a node teardown but a revert
+         * to lazy. This map exists only to reach the FormulaCell for `undrive`.
          */
-        private val signals = HashMap<String, SignalHandle<Int>>()
+        private val signals = HashMap<String, FormulaCell<Int>>()
 
         @Suppress("UNCHECKED_CAST")
         private fun readNode(id: String): Int = when (val n = nodes[id]) {
-            is CellHandle<*> -> ctx.getCell(n as CellHandle<Int>)
-            is SlotHandle<*> -> ctx.get(n as SlotHandle<Int>)
+            is Cell<*, *> -> ctx.get(n as Cell<Int, *>)
             else -> error("unknown or unreadable node '$id'")
         }
 
         override fun defineCell(id: String, value: Int, scope: String?) {
-            nodes[id] = scopes[scope]?.cell(value) ?: ctx.cell(value)
+            nodes[id] = scopes[scope]?.source(value) ?: ctx.source(value)
         }
 
         override fun defineComputed(id: String, reads: List<String>, offset: Int, scope: String?) {
@@ -316,23 +321,28 @@ class ReactiveGraphConformanceTest {
                 for (r in reads) sum += readNode(r)
                 sum
             }
+            // The `computed` op is UNGUARDED (no `==` suppression) — the corpus's
+            // `computes_of` counts are written against that. The guarded default
+            // is `formula`; the fixtures exercise the unguarded form here.
+            @Suppress("DEPRECATION")
             nodes[id] = scopes[scope]?.computed(compute) ?: ctx.computed(compute)
         }
 
         override fun defineSignal(id: String, reads: List<String>, offset: Int, scope: String?) {
-            val handle = ctx.signal {
+            // The eager construction: a driven FormulaCell (`formula().drive()`).
+            val compute: Context.() -> Int = {
                 countCompute(id)
                 var sum = offset
                 for (r in reads) sum += readNode(r)
                 sum
             }
-            signals[id] = handle
-            nodes[id] = handle.slot
-            scopes[scope]?.let { it.adopt(handle.slot); it.adopt(handle.effect) }
+            val fc = scopes[scope]?.drivenFormula(compute) ?: ctx.formula(compute).drive(ctx)
+            signals[id] = fc
+            nodes[id] = fc
         }
 
         override fun disposeSignal(id: String) =
-            ctx.disposeSignal(signals[id] ?: error("no signal '$id'"))
+            (signals[id] ?: error("no signal '$id'")).undrive(ctx)
 
         override fun batchWrites(writes: List<Pair<String, Int>>) {
             ctx.batch { for ((id, v) in writes) setCell(id, v) }
@@ -359,8 +369,8 @@ class ReactiveGraphConformanceTest {
 
         @Suppress("UNCHECKED_CAST")
         override fun setCell(id: String, value: Int) {
-            val cell = nodes[id] as? CellHandle<*> ?: error("set_cell on non-cell '$id'")
-            ctx.setCell(cell as CellHandle<Int>, value)
+            val cell = nodes[id] as? SourceCell<*> ?: error("set_cell on non-cell '$id'")
+            (cell as SourceCell<Int>).set(ctx, value)
         }
 
         // The entry stays in the map: a disposed node remains
@@ -368,7 +378,7 @@ class ReactiveGraphConformanceTest {
         override fun disposeId(id: String) = ctx.disposeNode(nodes[id] ?: error("unknown '$id'"))
 
         override fun kindOf(id: String): Kind = when (nodes[id]) {
-            is CellHandle<*> -> Kind.CELL
+            is SourceCell<*> -> Kind.CELL
             is EffectHandle -> Kind.EFFECT
             else -> Kind.SLOT
         }
@@ -742,13 +752,16 @@ class ReactiveGraphConformanceTest {
                     op["offset"]?.jsonPrimitive?.int ?: 0,
                     scope,
                 )
-                "signal" -> model.defineSignal(
+                // `signal`/`drive` both define the eager construction — a driven
+                // FormulaCell (vocab-map: `signal(f)` ≡ `formula(f).drive()`).
+                "signal", "drive" -> model.defineSignal(
                     op["id"]!!.jsonPrimitive.content,
                     strs(op["reads"]),
                     op["offset"]?.jsonPrimitive?.int ?: 0,
                     scope,
                 )
-                "dispose_signal" -> model.disposeSignal(op["id"]!!.jsonPrimitive.content)
+                // `dispose_signal`/`undrive` both revert an eager value to lazy.
+                "dispose_signal", "undrive" -> model.disposeSignal(op["id"]!!.jsonPrimitive.content)
                 // A single op carrying its writes, not a begin/end pair, so the
                 // runner needs no nesting state. All writes land in ONE batch.
                 "batch" -> model.batchWrites(

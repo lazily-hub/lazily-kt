@@ -1,18 +1,10 @@
 package io.github.lazily
 
 // -- Handles -----------------------------------------------------------------
-
-/** Lightweight typed reference to a lazy memoized slot, mirroring lazily-rs `SlotHandle<T>`. */
-@JvmInline
-value class SlotHandle<T : Any> @PublishedApi internal constructor(val id: Int) : GraphNode {
-    override val nodeId: Int get() = id
-}
-
-/** Lightweight typed reference to a mutable source cell, mirroring lazily-rs `CellHandle<T>`. */
-@JvmInline
-value class CellHandle<T : Any> @PublishedApi internal constructor(val id: Int) : GraphNode {
-    override val nodeId: Int get() = id
-}
+//
+// The reactive-node genus `Cell<T, K>` and its two kinds `SourceCell` /
+// `FormulaCell` live in Cell.kt (the Cell kernel — #lzcellkernel). Effect stays
+// here: it is a sink, outside the `Cell` hierarchy.
 
 /** Reference to a registered side-effecting observer. Dispose to stop reruns. */
 class EffectHandle @PublishedApi internal constructor(val id: Int) : GraphNode {
@@ -20,10 +12,16 @@ class EffectHandle @PublishedApi internal constructor(val id: Int) : GraphNode {
 }
 
 /**
- * Reference to an **eager** derived value. Composed of a memoized backing slot
- * plus a puller effect that re-materializes the slot after every invalidation.
+ * @suppress Back-compat wrapper for the retired eager-`Signal` surface. The
+ * eager construction is now a **driven** [FormulaCell] (`formula().drive()`);
+ * this pair of a formula plus its puller effect is kept only so callers of the
+ * former `signal()` keep compiling.
  */
-class SignalHandle<T : Any> @PublishedApi internal constructor(val slot: SlotHandle<T>, val effect: EffectHandle)
+@Deprecated("Signal is retired: use `ctx.formula { … }.drive(ctx)` — a driven FormulaCell (#lzcellkernel).")
+class SignalHandle<T : Any> @PublishedApi internal constructor(
+    val slot: FormulaCell<T>,
+    val effect: EffectHandle,
+)
 
 // -- Context -----------------------------------------------------------------
 
@@ -33,18 +31,22 @@ private const val INITIAL_NODE_CAPACITY = 16
  * A reactive dependency graph: the lazily-rs `Context` semantics ported to
  * native Kotlin.
  *
- * The reactive family is **Slot** (lazy memoized derived) → **Cell** (mutable
- * source) → **Signal** (eager derived), plus **Effect** (side-effecting
- * observer). Reading a cell/slot/signal inside a computation auto-registers a
- * dependency edge; mutating a cell invalidates dependents.
+ * The kernel is the genus [Cell]`<T, K>` (see Cell.kt) over two value kinds —
+ * [SourceCell] (written from outside) and [FormulaCell] (computed from upstream)
+ * — plus [EffectHandle] (a side-effecting sink, outside the hierarchy). Reading
+ * any cell inside a computation auto-registers a dependency edge; writing a
+ * source invalidates dependents.
  *
- * - Lazy slots mark dirty on invalidation and recompute on the next read
- *   (pull-based, glitch-free: a slot that reads other slots always observes
- *   values consistent with the current inputs).
- * - Cells use a `==` (PartialEq) guard: setting an equal value is a no-op.
- * - `memo` adds a `==` guard so an equal recompute suppresses downstream.
- * - Signals are eager: a backing memo slot plus a puller effect — the value is
- *   re-materialized by the time the invalidating `setCell`/`batch` returns.
+ * - A [FormulaCell] marks dirty on invalidation and recomputes on the next read
+ *   (pull-based, glitch-free: a formula that reads other formulas always
+ *   observes values consistent with the current inputs). `formula` is **guarded**
+ *   by default (`==`), so an equal recompute suppresses downstream.
+ * - A [SourceCell] uses a `==` (PartialEq) guard: setting an equal value is a
+ *   no-op.
+ * - A **driven** formula (`formula().drive()`) is eager: its value is
+ *   re-materialized by the time the invalidating `set`/`batch` returns. This is
+ *   the eager construction that retires the former `Signal`; drivenness is a bit
+ *   on the node plus the [drivenBy] side table, not a distinct type.
  * - Effects rerun after any tracked dependency invalidates.
  *
  * Single-threaded by design (mirrors lazily-rs `Context`, which uses `RefCell`).
@@ -65,6 +67,12 @@ class Context {
             var dirty: Boolean = false,
             var forceRecompute: Boolean = false,
             var inProgress: Boolean = false,
+            // "Am I driven?" — a driven formula has an eager puller effect
+            // (`formula().drive()`). Free: lands in the padding the other bools
+            // already occupy. The puller's id is kept off the node in the
+            // [drivenBy] side table (#lzcellkernel §9.3.3), so a lazy formula
+            // pays nothing.
+            var driven: Boolean = false,
         ) : Node
         class Effect(
             val run: Context.() -> (() -> Unit)?,
@@ -93,6 +101,13 @@ class Context {
     private val batchedCells: MutableSet<Int> = HashSet()
     private val batchedSlots: MutableSet<Int> = HashSet()
 
+    // "Which effect drives me?" — one entry per DRIVEN formula, keyed by the
+    // formula's slot id, valued by its puller effect id (#lzcellkernel §9.3.3).
+    // Owner-keyed, so it MUST be cleared on formula disposal/undrive or LIFO id
+    // recycling would alias a stale puller onto an unrelated node — the same
+    // hazard `recycled_id_inherits_nothing` guards. A lazy formula is absent.
+    private val drivenBy: HashMap<Int, Int> = HashMap()
+
     /**
      * Depth of the disposal-driven invalidation cascade (`#lzspecedgeindex`).
      *
@@ -116,8 +131,16 @@ class Context {
 
     // -- Creation ----------------------------------------------------------
 
-    /** A mutable source cell with an initial value. `setCell` invalidates dependents on `==` change. */
-    inline fun <reified T : Any> cell(value: T): CellHandle<T> = CellHandle(cellAny(value))
+    /**
+     * A [SourceCell] with an initial value — a node written from outside. `set`
+     * invalidates dependents on `==` change. Defaults to the keep-latest policy;
+     * a policy-carrying source is [mergeCell] (see Merge.kt).
+     */
+    inline fun <reified T : Any> source(value: T): SourceCell<T> = SourceCell(cellAny(value))
+
+    /** @suppress Renamed to [source] (the Cell kernel — #lzcellkernel). */
+    @Deprecated("Renamed to source (the Cell kernel — #lzcellkernel).", ReplaceWith("source(value)"))
+    inline fun <reified T : Any> cell(value: T): SourceCell<T> = source(value)
 
     @PublishedApi
     internal fun cellAny(value: Any): Int {
@@ -126,16 +149,33 @@ class Context {
         return id
     }
 
-    /** A lazy derived slot (no memo guard): recomputes on read when deps invalidate. */
-    inline fun <reified T : Any> computed(noinline compute: Context.() -> T): SlotHandle<T> =
-        SlotHandle(slotAny(memo = false) { compute() })
+    /**
+     * A [FormulaCell] computed from upstream — **guarded by default** (`==`), so
+     * an equal recompute suppresses downstream. Lazy until read; make it eager
+     * with `.drive(ctx)`.
+     *
+     * Note the guard is a **behaviour change** from the former unguarded
+     * [computed]: code migrating `computed` → `formula` gains suppression of
+     * equal recomputes (usually an improvement).
+     */
+    inline fun <reified T : Any> formula(noinline compute: Context.() -> T): FormulaCell<T> =
+        FormulaCell(slotAny(memo = true) { compute() })
 
-    /** Alias of [computed] for symmetry with lazily-rs/py/zig. */
-    inline fun <reified T : Any> slot(noinline compute: Context.() -> T): SlotHandle<T> = computed(compute)
+    /** @suppress Former unguarded derived slot. Prefer the guarded [formula]. */
+    @Deprecated(
+        "Use `formula` (guarded by default) — note formula suppresses equal recomputes, computed did not (#lzcellkernel).",
+        ReplaceWith("formula(compute)"),
+    )
+    inline fun <reified T : Any> computed(noinline compute: Context.() -> T): FormulaCell<T> =
+        FormulaCell(slotAny(memo = false) { compute() })
 
-    /** A lazy derived slot with a `==` memo guard: an equal recompute suppresses downstream. */
-    inline fun <reified T : Any> memo(noinline compute: Context.() -> T): SlotHandle<T> =
-        SlotHandle(slotAny(memo = true) { compute() })
+    /** @suppress Renamed to [formula]. */
+    @Deprecated("Renamed to formula (guarded by default; the Cell kernel — #lzcellkernel).", ReplaceWith("formula(compute)"))
+    inline fun <reified T : Any> slot(noinline compute: Context.() -> T): FormulaCell<T> = computed(compute)
+
+    /** @suppress Renamed to [formula]; both are now guarded, so this is an exact alias. */
+    @Deprecated("Renamed to formula (guarded by default; the Cell kernel — #lzcellkernel).", ReplaceWith("formula(compute)"))
+    inline fun <reified T : Any> memo(noinline compute: Context.() -> T): FormulaCell<T> = formula(compute)
 
     @PublishedApi
     internal fun slotAny(memo: Boolean, compute: Context.() -> Any?): Int {
@@ -145,23 +185,26 @@ class Context {
     }
 
     /**
-     * An **eager** derived value: a memo slot plus a puller effect. The value is
-     * materialized at creation and re-materialized by the time the invalidating
-     * `setCell`/`batch` returns — observers never see an intermediate unset state.
+     * @suppress The eager construction is now `formula { … }.drive(ctx)` — a
+     * **driven** [FormulaCell]. Kept as a thin wrapper over that so the former
+     * `signal` surface keeps compiling.
      */
+    @Suppress("DEPRECATION")
+    @Deprecated("Use `formula { … }.drive(ctx)` — a driven FormulaCell (#lzcellkernel).", ReplaceWith("formula(compute).drive(this)"))
     inline fun <reified T : Any> signal(noinline compute: Context.() -> T): SignalHandle<T> {
         val ids = signalAny { compute() }
-        return SignalHandle(SlotHandle(ids.slot), EffectHandle(ids.effect))
+        return SignalHandle(FormulaCell(ids.slot), EffectHandle(ids.effect))
     }
 
     @PublishedApi
     internal class SignalIds(@PublishedApi internal val slot: Int, @PublishedApi internal val effect: Int)
 
+    /** Build a driven formula and surface its (slot, puller) id pair for the back-compat [SignalHandle]. */
     @PublishedApi
     internal fun signalAny(compute: Context.() -> Any?): SignalIds {
         val slot = slotAny(memo = true, compute = compute)
-        val effect = effectAny { getSlotAny(slot); null }
-        return SignalIds(slot, effect)
+        driveFormula(slot)
+        return SignalIds(slot, drivenBy[slot]!!)
     }
 
     /**
@@ -182,19 +225,32 @@ class Context {
 
     // -- Read --------------------------------------------------------------
 
-    /** Read a slot, computing/refreshing if necessary; auto-subscribes the reading node. */
-    inline fun <reified T : Any> get(handle: SlotHandle<T>): T {
+    /**
+     * Read any [Cell] — the genus read. A [FormulaCell] is refreshed/recomputed
+     * if necessary; a [SourceCell] returns its stored value. Auto-subscribes the
+     * reading node either way.
+     *
+     * Dispatches on the **handle's** kind, not the arena node's: a stale handle
+     * whose id was recycled (LIFO) onto a node of another kind must throw
+     * [DisposedNodeException], not silently read the new occupant
+     * (`recycled_id_inherits_nothing`). `getSlotAny` / `getCellAny` each enforce
+     * that the live node matches the expected kind.
+     */
+    inline fun <reified T : Any> get(cell: Cell<T, *>): T {
         @Suppress("UNCHECKED_CAST")
-        return getSlotAny(handle.id) as T
+        return when (cell) {
+            is FormulaCell<*> -> getSlotAny(cell.id)
+            is SourceCell<*> -> getCellAny(cell.id)
+        } as T
     }
 
-    /** Read a cell; auto-subscribes the reading node. */
-    inline fun <reified T : Any> getCell(handle: CellHandle<T>): T {
-        @Suppress("UNCHECKED_CAST")
-        return getCellAny(handle.id) as T
-    }
+    /** @suppress Reads are unified on the genus [get]. */
+    @Deprecated("Reads are unified — use `get` on any Cell (#lzcellkernel).", ReplaceWith("get(handle)"))
+    inline fun <reified T : Any> getCell(handle: SourceCell<T>): T = get(handle)
 
-    /** Read a signal's current (always-materialized) value; auto-subscribes. */
+    /** @suppress A driven formula reads with the ordinary [get]. */
+    @Suppress("DEPRECATION")
+    @Deprecated("Signal is retired — read the driven FormulaCell with `get` (#lzcellkernel).", ReplaceWith("get(handle.slot)"))
     inline fun <reified T : Any> getSignal(handle: SignalHandle<T>): T = get(handle.slot)
 
     @PublishedApi
@@ -222,8 +278,9 @@ class Context {
 
     // -- Write -------------------------------------------------------------
 
-    /** Set a cell's value. A no-op (no invalidation) when the new value `==` the old. */
-    fun <T : Any> setCell(handle: CellHandle<T>, value: T) = setCellAny(handle.id, value)
+    /** @suppress Writes are kind-restricted extensions — use `sourceCell.set(ctx, value)` (Cell.kt). */
+    @Deprecated("Use `sourceCell.set(ctx, value)` — writes live on the source kind (#lzcellkernel).", ReplaceWith("handle.set(this, value)"))
+    fun <T : Any> setCell(handle: SourceCell<T>, value: T) = setCellAny(handle.id, value)
 
     @PublishedApi
     internal fun setCellAny(id: Int, value: Any) {
@@ -331,8 +388,8 @@ class Context {
         if (id < 0 || id >= nodes.size) return null
         val n = nodes[id] ?: return null
         return when (node) {
-            is CellHandle<*> -> n as? Node.Cell
-            is SlotHandle<*> -> n as? Node.Slot
+            is SourceCell<*> -> n as? Node.Cell
+            is FormulaCell<*> -> n as? Node.Slot
             is EffectHandle -> n as? Node.Effect
         }
     }
@@ -396,19 +453,22 @@ class Context {
         disposeResolved(node.nodeId, resolved)
     }
 
-    /** Tear down a derived slot. See [disposeNode]. */
-    fun disposeSlot(handle: SlotHandle<*>) = disposeNode(handle)
+    /** @suppress Kind-agnostic teardown — prefer `formulaCell.dispose(ctx)`. */
+    @Deprecated("Use `cell.dispose(ctx)` (#lzcellkernel).", ReplaceWith("handle.dispose(this)"))
+    fun disposeSlot(handle: FormulaCell<*>) = disposeNode(handle)
 
-    /** Tear down a source cell. See [disposeNode]. */
-    fun disposeCell(handle: CellHandle<*>) = disposeNode(handle)
+    /** @suppress Kind-agnostic teardown — prefer `sourceCell.dispose(ctx)`. */
+    @Deprecated("Use `cell.dispose(ctx)` (#lzcellkernel).", ReplaceWith("handle.dispose(this)"))
+    fun disposeCell(handle: SourceCell<*>) = disposeNode(handle)
 
     /**
-     * Tear down both halves of a signal — the puller effect first, then the
-     * backing slot, so the slot is never transiently read by its own puller.
-     * Contrast [disposeSignal], which only stops the eager pull.
+     * @suppress Full teardown of a driven formula. Disposing the [FormulaCell]
+     * already tears down its puller (via the driven bit), so this is now just
+     * `disposeNode(handle.slot)`; kept for the retired `Signal` surface.
      */
+    @Suppress("DEPRECATION")
+    @Deprecated("Signal is retired — dispose the driven FormulaCell: `formulaCell.dispose(ctx)` (#lzcellkernel).", ReplaceWith("handle.slot.dispose(this)"))
     fun disposeSignalNode(handle: SignalHandle<*>) {
-        disposeNode(handle.effect)
         disposeNode(handle.slot)
     }
 
@@ -441,6 +501,11 @@ class Context {
         when (node) {
             is Node.Cell -> detachDependents(id, node.dependents)
             is Node.Slot -> {
+                // A driven formula owns a puller effect: tear it down and clear
+                // the owner-keyed side-table entry, or LIFO id recycling would
+                // strand the puller and alias its id onto the next node
+                // (#lzcellkernel §9.3.4). The bit means disposal always knows.
+                if (node.driven) drivenBy.remove(id)?.let { disposeNode(EffectHandle(it)) }
                 for (dep in node.dependencies) removeDependentEdge(dep, id)
                 node.dependencies.clear()
                 detachDependents(id, node.dependents)
@@ -516,10 +581,43 @@ class Context {
      */
     fun scope(): TeardownScope = TeardownScope(this)
 
-    /** Dispose a signal's eager puller; the backing value stays readable (reverts to lazy). */
-    fun disposeSignal(handle: SignalHandle<*>) = disposeEffect(handle.effect)
+    /** @suppress Reverts a driven formula to lazy — use `formulaCell.undrive(ctx)`. */
+    @Suppress("DEPRECATION")
+    @Deprecated("Use `formulaCell.undrive(ctx)` (#lzcellkernel).", ReplaceWith("handle.slot.undrive(this)"))
+    fun disposeSignal(handle: SignalHandle<*>) = undriveFormula(handle.slot.nodeId)
 
-    fun isSignalActive(handle: SignalHandle<*>): Boolean = isEffectActive(handle.effect)
+    /** @suppress Use `formulaCell.isDriven(ctx)`. */
+    @Suppress("DEPRECATION")
+    @Deprecated("Use `formulaCell.isDriven(ctx)` (#lzcellkernel).", ReplaceWith("handle.slot.isDriven(this)"))
+    fun isSignalActive(handle: SignalHandle<*>): Boolean = isDrivenId(handle.slot.nodeId)
+
+    // -- Driven formulas (the eager construction; #lzcellkernel §9.3) -------
+
+    /**
+     * Ensure the formula at [id] is driven: attach a puller [EffectHandle] that
+     * re-materializes it after each invalidation, mark the driven bit, and record
+     * the puller in [drivenBy]. Idempotent — a second call is a no-op, so a
+     * formula never accumulates two pullers (the `#lzsignaleager` double-compute
+     * cannot be built).
+     */
+    internal fun driveFormula(id: Int) {
+        val node = nodes[id] as? Node.Slot ?: throw DisposedNodeException(id, "formula")
+        if (node.driven) return
+        val effect = effectAny { getSlotAny(id); null }
+        node.driven = true
+        drivenBy[id] = effect
+    }
+
+    /** Stop driving the formula at [id]: dispose its puller, clear the bit and side-table entry. */
+    internal fun undriveFormula(id: Int) {
+        val node = nodes[id] as? Node.Slot ?: return
+        if (!node.driven) return
+        node.driven = false
+        drivenBy.remove(id)?.let { disposeNode(EffectHandle(it)) }
+    }
+
+    /** Whether the formula at [id] is currently driven. */
+    internal fun isDrivenId(id: Int): Boolean = (nodes[id] as? Node.Slot)?.driven == true
 
     /** Whether a slot currently has a fresh cached value (testing). */
     fun isSet(handle: SlotHandle<*>): Boolean {
@@ -832,28 +930,50 @@ class TeardownScope internal constructor(
         return node
     }
 
-    /** A source cell owned by this scope. */
-    inline fun <reified T : Any> cell(value: T): CellHandle<T> = adopt(ctx.cell(value))
+    /** A [SourceCell] owned by this scope. */
+    inline fun <reified T : Any> source(value: T): SourceCell<T> = adopt(ctx.source(value))
 
-    /** A lazy derived slot owned by this scope. */
-    inline fun <reified T : Any> computed(noinline compute: Context.() -> T): SlotHandle<T> =
+    /** @suppress Renamed to [source]. */
+    @Deprecated("Renamed to source (#lzcellkernel).", ReplaceWith("source(value)"))
+    inline fun <reified T : Any> cell(value: T): SourceCell<T> = source(value)
+
+    /** A guarded [FormulaCell] owned by this scope. */
+    inline fun <reified T : Any> formula(noinline compute: Context.() -> T): FormulaCell<T> =
+        adopt(ctx.formula(compute))
+
+    /** @suppress Former unguarded derived slot; prefer the guarded [formula]. */
+    @Suppress("DEPRECATION")
+    @Deprecated("Use `formula` (guarded by default) (#lzcellkernel).", ReplaceWith("formula(compute)"))
+    inline fun <reified T : Any> computed(noinline compute: Context.() -> T): FormulaCell<T> =
         adopt(ctx.computed(compute))
 
-    /** Alias of [computed]. */
-    inline fun <reified T : Any> slot(noinline compute: Context.() -> T): SlotHandle<T> =
-        computed(compute)
+    /** @suppress Renamed to [formula]. */
+    @Deprecated("Renamed to formula (#lzcellkernel).", ReplaceWith("formula(compute)"))
+    inline fun <reified T : Any> slot(noinline compute: Context.() -> T): FormulaCell<T> =
+        formula(compute)
 
-    /** A memoized derived slot owned by this scope. */
-    inline fun <reified T : Any> memo(noinline compute: Context.() -> T): SlotHandle<T> =
-        adopt(ctx.memo(compute))
+    /** @suppress Renamed to [formula]. */
+    @Deprecated("Renamed to formula (#lzcellkernel).", ReplaceWith("formula(compute)"))
+    inline fun <reified T : Any> memo(noinline compute: Context.() -> T): FormulaCell<T> =
+        formula(compute)
 
     /** An effect owned by this scope. */
     fun effect(run: Context.() -> (() -> Unit)?): EffectHandle = adopt(ctx.effect(run))
 
     /**
-     * An eager signal owned by this scope. Both halves are adopted, backing slot
-     * first, so reverse-order teardown stops the puller before the slot it pulls.
+     * A driven [FormulaCell] owned by this scope — the eager construction. Owns
+     * the formula; disposing it tears down the puller too (via the driven bit).
      */
+    inline fun <reified T : Any> drivenFormula(noinline compute: Context.() -> T): FormulaCell<T> =
+        adopt(ctx.formula(compute).drive(ctx))
+
+    /**
+     * @suppress Eager signal owned by this scope. Both halves are adopted,
+     * backing formula first, so reverse-order teardown stops the puller before
+     * the formula it pulls. Prefer [drivenFormula].
+     */
+    @Suppress("DEPRECATION")
+    @Deprecated("Use `drivenFormula` — a driven FormulaCell (#lzcellkernel).", ReplaceWith("drivenFormula(compute)"))
     inline fun <reified T : Any> signal(noinline compute: Context.() -> T): SignalHandle<T> {
         val handle = ctx.signal(compute)
         adopt(handle.slot)

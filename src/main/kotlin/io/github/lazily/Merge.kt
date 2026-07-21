@@ -1,8 +1,9 @@
 package io.github.lazily
 
 /**
- * Phase 1 of the RelayCell backpressure plan (#relaycell) — the merge algebra
- * and the Reactive/Source read/write split.
+ * Phase 1 of the RelayCell backpressure plan (#relaycell) — the merge algebra.
+ * Under the Cell kernel (#lzcellkernel) the read/write split is the genus vs the
+ * kind-restricted write surface, not the deleted `Reactive`/`Source` interfaces.
  *
  * See `lazily-spec/docs/reactive-graph.md` § "MergeCell and the merge algebra"
  * and `relaycell-backpressure-analysis.md` §4.0/§4.3. A merge policy is an
@@ -56,38 +57,37 @@ fun <E> rawFifo(): MergePolicy<List<E>> =
         conflates = false,
     )
 
-/** The read supertype: `get` (analysis §4.0). Every reader satisfies it. */
-interface Reactive<T : Any> {
-    fun get(): T
-}
-
-/** A writable [Reactive] — adds `set` (replace) and `merge` (fold under policy). */
-interface Source<T : Any> : Reactive<T> {
-    fun set(value: T)
-    fun merge(op: T)
-}
-
 /**
- * A cell whose write is a *merge* under [policy] rather than a replace.
- * `Cell ≡ MergeCell(KeepLatest)`. `merge` routes through the cell's `!=`-guarded
- * `setCell`, so an idempotent policy's no-op merge fires no cascade (free dedup).
+ * A [SourceCell] whose write is a *merge* under [policy] rather than a plain
+ * replace. `SourceCell ≡ MergeCell(KeepLatest)`. `merge` routes through the
+ * cell's `!=`-guarded write, so an idempotent policy's no-op merge fires no
+ * cascade (free dedup).
+ *
+ * This is the value-level home of the merge policy for Kotlin: the kernel's
+ * `Source<M>` kind marker is phantom (Kotlin has no zero-cost type-level policy),
+ * so a policy-carrying source keeps its [MergePolicy] here at runtime. Reads and
+ * writes still go through the genus surface ([Context.get] / [set]).
+ *
+ * The former vestigial `Reactive<T>` (read) and `Source<T>` (write) interfaces
+ * are deleted: the read genus is the concrete [Cell] type and the write surface
+ * is kind-restricted, so neither trait carried its weight (#lzcellkernel §2).
  */
 class MergeCell<T : Any>(
     private val ctx: Context,
-    val cell: CellHandle<T>,
+    val cell: SourceCell<T>,
     val policy: MergePolicy<T>,
-) : Source<T> {
-    // Uses the erased `*Any` accessors (not the `reified` `getCell`/`setCell`)
+) {
+    // Uses the erased `*Any` accessors (not the `reified` genus `get`/`set`)
     // because `T` is a class type parameter, not reified. `getCellAny` still
     // registers the dependency, so a `get()` inside a computation is reactive.
     @Suppress("UNCHECKED_CAST")
-    override fun get(): T = ctx.getCellAny(cell.id) as T
+    fun get(): T = ctx.getCellAny(cell.id) as T
 
-    override fun set(value: T) = ctx.setCellAny(cell.id, value)
+    fun set(value: T) = ctx.setCellAny(cell.id, value)
 
-    override fun merge(op: T) = ctx.setCellAny(cell.id, policy.merge(get(), op))
+    fun merge(op: T) = ctx.setCellAny(cell.id, policy.merge(get(), op))
 }
 
 /** Create a [MergeCell] over this context. */
 inline fun <reified T : Any> Context.mergeCell(initial: T, policy: MergePolicy<T>): MergeCell<T> =
-    MergeCell(this, cell(initial), policy)
+    MergeCell(this, source(initial), policy)

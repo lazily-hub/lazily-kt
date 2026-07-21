@@ -23,21 +23,37 @@ Mirrors lazily-rs `Context` semantics across all three context layers:
 single-threaded base (`Context`), lock-backed thread-safe (`ThreadSafeContext`),
 and coroutine-backed async (`AsyncContext`).
 
-- `Context.kt` — `Context`: the reactive dependency graph. Reactive family is
-  **Slot** (lazy memoized derived) → **Cell** (mutable source) → **Signal**
-  (eager derived), plus **Effect** (side-effecting observer).
-  - Pull-based, glitch-free refresh: a slot that reads other slots always
+- `Cell.kt` / `Context.kt` — the **Cell kernel** (`#lzcellkernel`) and the
+  reactive dependency graph. The genus is `Cell<T, K>` over two value kinds —
+  **`SourceCell<T>`** (written from outside) and **`FormulaCell<T>`** (computed
+  from upstream) — plus **`Effect`** (a side-effecting sink, outside the
+  hierarchy). Constructors: `source(v)`, `formula(f)`, `formula(f).drive(ctx)`.
+  - Pull-based, glitch-free refresh: a formula that reads other formulas always
     observes values consistent with the current inputs.
-  - `==` (PartialEq) guard on `setCell`: equal value is a no-op.
-  - `memo` adds a `==` guard so an equal recompute suppresses downstream.
-  - Signal = memo slot + puller effect (eager; value materialized by the time
-    `setCell`/`batch` returns).
+  - `==` (PartialEq) guard on a source write: an equal value is a no-op.
+  - `formula` is **guarded by default** (`==` suppression) — a behaviour change
+    from the former unguarded `computed` (kept, deprecated).
+  - **Eager = a driven formula, not a kind.** `formula(f).drive(ctx)` attaches a
+    puller `Effect` so the value is materialized by the time the invalidating
+    `set`/`batch` returns. Drivenness is graph state — a `driven` bit on the node
+    plus the `drivenBy` side table (keyed by formula id → puller id), cleared on
+    `undrive`/`dispose`. Idempotent: a second `drive` attaches no second puller,
+    so the `#lzsignaleager` double-compute is structurally unwritable. This
+    retires the former `Signal`/`SignalHandle` (kept as deprecated shims).
+  - **Write protection (§4).** `set`/`merge` are extension functions declared on
+    `Cell<T, Source<M>>`, so `formulaCell.set(…)` is a compile error (unresolved
+    reference) — the Kotlin realization of the kernel's kind-restricted writes.
+    The vestigial `Reactive<T>`/`Source<T>` interfaces are deleted; `Source<M>`
+    is now a phantom kind marker (policy stays runtime via `MergeCell`).
   - Effect reruns after any tracked dependency invalidates; cleanup closure runs
     before each rerun and on dispose.
   - `batch` coalesces invalidations into one effect flush.
   - Tracking stack auto-discovers dependencies; cycles are detected (throws).
-  - Handles (`SlotHandle`/`CellHandle`/`SignalHandle`/`EffectHandle`) are
-    lightweight ids over a shared node table, like lazily-rs.
+  - The two kinds are distinct value classes over a shared node table (like
+    lazily-rs), so the arena still discriminates a recycled stale handle by kind.
+    Back-compat aliases `CellHandle` = `SourceCell`, `SlotHandle` = `FormulaCell`
+    (deprecated). `Effect`/`EffectHandle` unchanged. `Slot` as a *storage*
+    identifier (`SlotMap`, slot state machine) is untouched (§5.0).
   - **Disposal + teardown scopes** (`#lzspecedgeindex`, `Disposal.kt`). Handles
     are copyable ids, not owners, so nothing is reclaimed by dropping one: the
     arena and the reverse edge set hold strong references, and a long-lived
@@ -212,10 +228,13 @@ and coroutine-backed async (`AsyncContext`).
   fixtures replayed by `QueueCellConformanceTest`).
 - `Merge.kt` — RelayCell Phase 1 (`#relaycell`): the `MergePolicy` merge algebra
   (associative `⊕`, `commutative`/`idempotent`/`conflates` flags), policies
-  (`keepLatest`/`sum`/`max`/`setUnion`/`rawFifo`), `MergeCell<T>` (`Cell ≡
-  MergeCell(KeepLatest)`, backed by a cell so it inherits the store-guard), and
-  the `Reactive<T>` read supertype + `Source<T>` write sub-interface. Law-tests +
-  `mergecell_algebra.json` fixture replay in `MergeTest`.
+  (`keepLatest`/`sum`/`max`/`setUnion`/`rawFifo`), `MergeCell<T>` (`SourceCell ≡
+  MergeCell(KeepLatest)`, backed by a `SourceCell` so it inherits the
+  store-guard) — the value-level home of the merge policy, since the kernel's
+  `Source<M>` marker is phantom. The former `Reactive<T>`/`Source<T>` interfaces
+  are deleted (the read genus is the concrete `Cell` type; writes are
+  kind-restricted). Law-tests + `mergecell_algebra.json` fixture replay in
+  `MergeTest`.
 - `Relay.kt` — RelayCell Phases 2–6 (`#relaycell`): the in-proc `RelayCell<T>`
   conflating relay (hot head + reactive `BackpressurePolicy` cells + `Overflow`
   Block/DropNewest/DropOldest/Conflate/Spill + demand-driven `depth`/`isFull`/
@@ -262,7 +281,7 @@ conformance gate. They default to `../lazily-spec/formal/lean` and
   Harel `StateChart`) — the executable reference behind the chart fixtures.
 - `lazily-rs` / `lazily-py` / `lazily-zig` — sibling reactive cores.
 
-<!-- tsift:code-navigation v=0.1.74 -->
+<!-- tsift:code-navigation v=0.1.77 -->
 ## Code Navigation
 
 Keep this block self-contained for Codex/OpenCode prompt reuse. If this repository also ships current `.claude/skills/tsift/SKILL.md` or `runbooks/code-navigation.md`, use those deeper runbooks for command detail instead of expanding this block.
