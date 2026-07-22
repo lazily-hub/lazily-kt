@@ -80,6 +80,24 @@ class AsyncContext(
      */
     private var disposalDepth = 0
 
+    /**
+     * Depth of an in-progress multi-root invalidation drain that owns its own
+     * terminal flush (`#lzsignaleager` clause 3). While positive, [invalidateSlot]
+     * marks its cone dirty but does **not** flush effects — the drain's caller
+     * flushes exactly once when every root has been marked.
+     *
+     * This is what makes the async [batch] coalesce like the synchronous
+     * `Context.flushBatched`: a per-cell flush mid-drain launches one puller run
+     * per write, and because puller runs (and their computes) are dispatched
+     * rather than inline, a run's compute can begin before the next write's
+     * invalidation supersedes it — materializing the signal more than once per
+     * batch under some schedules (green locally, red under CI's scheduling).
+     * Suppressing the mid-drain flush makes a batch launch exactly one coalesced
+     * puller run, hence one compute, regardless of scheduling. Only read or
+     * written under [lock].
+     */
+    private var flushSuppressed = 0
+
     // -- Handles ----------------------------------------------------------
 
     /** A mutable input cell — the synchronous input layer. */
@@ -612,13 +630,27 @@ class AsyncContext(
                 batchDepth -= 1
                 if (batchDepth == 0) batchedCells.toList().also { batchedCells.clear() } else emptyList()
             }
-            for (cellId in drained) {
-                val dependents = locked {
-                    (nodes[cellId] as? AsyncNode.Cell)?.dependents?.toList() ?: emptyList()
+            if (drained.isNotEmpty()) {
+                // Mark every batched cell's cone dirty WITHOUT flushing mid-drain
+                // (`flushSuppressed`), then flush effects exactly once at the
+                // boundary — mirroring the synchronous `Context.flushBatched`
+                // (one frontier pass + one flush). A per-cell flush would launch
+                // one puller run per write and let the signal materialize more
+                // than once per batch under async scheduling (#lzsignaleager
+                // clause 3, #lzcellkernel).
+                locked { flushSuppressed += 1 }
+                try {
+                    for (cellId in drained) {
+                        val dependents = locked {
+                            (nodes[cellId] as? AsyncNode.Cell)?.dependents?.toList() ?: emptyList()
+                        }
+                        invalidateDependents(dependents)
+                    }
+                } finally {
+                    locked { flushSuppressed -= 1 }
                 }
-                invalidateDependents(dependents)
+                flushEffects()
             }
-            if (drained.isNotEmpty()) flushEffects()
         }
     }
 
@@ -671,7 +703,7 @@ class AsyncContext(
         // effects this walk reached (`scheduleEffectLocked` already dropped
         // those) — it would drain any *pre-existing* queue entry, firing an
         // unrelated effect as a side effect of a teardown.
-        if (effectDeps.isNotEmpty() && locked { disposalDepth == 0 }) flushEffects()
+        if (effectDeps.isNotEmpty() && locked { disposalDepth == 0 && flushSuppressed == 0 }) flushEffects()
     }
 
     private fun updateDependenciesLocked(nodeId: Int, newDeps: Set<Int>) {

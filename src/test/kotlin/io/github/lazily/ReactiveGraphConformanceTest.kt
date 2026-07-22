@@ -577,7 +577,17 @@ class ReactiveGraphConformanceTest {
         override val computeCounts = HashMap<String, Int>()
 
         private val ctx = AsyncContext()
-        private val nodes = HashMap<String, AsyncGraphNode>()
+        // Concurrent, NOT a plain HashMap: async compute/effect bodies resolve
+        // node handles through [readNode] on the context's dispatcher while the
+        // replay thread is still `put`ting later nodes (a fanout does 64 puts,
+        // each a possible resize). A plain HashMap read during a concurrent
+        // put-resize can spuriously return null, so `readNode` would throw
+        // "unknown node" mid-effect, the effect would register no dependency,
+        // and its edge would silently vanish — surfacing as a flaky
+        // `dependents_of` undercount (e.g. `wide` got 63/62, want 64). This is
+        // the same off-thread-access hazard the synchronized logs above guard;
+        // the node map was the one shared reader that was missed.
+        private val nodes = java.util.concurrent.ConcurrentHashMap<String, AsyncGraphNode>()
         private val scopes = HashMap<String, AsyncTeardownScope>()
 
         /** See [SyncModel.signals]. */

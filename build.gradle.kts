@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "io.github.lazily"
-version = "0.35.0"
+version = "0.35.1"
 
 repositories {
     mavenCentral()
