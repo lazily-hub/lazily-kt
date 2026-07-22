@@ -49,6 +49,12 @@ class Context {
             var value: Any? = null,
             var hasValue: Boolean = false,
             val compute: Context.() -> Any? = { null },
+            // Propagate guard as an equality predicate: `true` = equal =
+            // suppress downstream. `null` = natural equality (`==`), the guarded
+            // `computed` default. A non-null predicate is installed by
+            // `computedRippleWhen`, where it is the negation of the caller's
+            // `changed` (true = propagate) — see slotAnyWithEquals (#lzcellkernel).
+            val equalsFn: ((Any?, Any?) -> Boolean)? = null,
             val dependencies: SmallEdgeList = SmallEdgeList(),
             val dependents: SmallEdgeList = SmallEdgeList(),
             var dirty: Boolean = false,
@@ -153,10 +159,60 @@ class Context {
     @Deprecated("Renamed to computed (guarded by default; v2 Cell kernel — #lzcellkernel).", ReplaceWith("computed(compute)"))
     inline fun <reified T : Any> slot(noinline compute: Context.() -> T): Computed<T> = computed(compute)
 
+    /**
+     * A **guarded [Computed]** with an explicit change predicate
+     * (`#lzcellkernel`).
+     *
+     * Like [computed], but propagation is gated by `changed(old, new)` instead
+     * of the value's natural equality (`equals`): `changed` returns `true` to
+     * **propagate** the recompute downstream, and `false` to **suppress** it
+     * (treat it as "no meaningful change"). So `computed(f)` is exactly
+     * `computedRippleWhen(f) { o, n -> o != n }` (natural equality), and the
+     * always-propagate pass-through is `computedRippleWhen(f) { _, _ -> true }`
+     * — the identity the deprecated pass-through [slot] name once carried in the
+     * other bindings (here [slot] is a guarded alias of [computed]).
+     *
+     * Use it for a **custom significance policy** — dedup a large value by a
+     * version/hash field, epsilon float compare, hysteresis, a monotonic gate,
+     * or "propagate every N" when the counter lives in the value.
+     *
+     * The value is **always computed** (the predicate needs `new`); `changed`
+     * gates only the downstream cascade, not the computation. `changed` MUST be
+     * a **pure** function of `(old, new)` — reading value-carried state
+     * (version/counter/sequence) is fine and stays deterministic; capturing
+     * external mutable state is not (it keys off recompute/read frequency under
+     * laziness and breaks determinism).
+     */
+    inline fun <reified T : Any> computedRippleWhen(
+        noinline compute: Context.() -> T,
+        noinline changed: (old: T, new: T) -> Boolean,
+    ): Computed<T> =
+        Computed(
+            slotAnyWithEquals(
+                { compute() },
+                // Internal engine guards on equality (true = equal = suppress);
+                // `changed` is its negation (true = propagate).
+                { old, new ->
+                    @Suppress("UNCHECKED_CAST")
+                    !changed(old as T, new as T)
+                },
+            ),
+        )
+
     @PublishedApi
     internal fun slotAny(compute: Context.() -> Any?): Int {
         val id = allocId()
         nodes[id] = Node.Slot(compute = compute)
+        return id
+    }
+
+    @PublishedApi
+    internal fun slotAnyWithEquals(
+        compute: Context.() -> Any?,
+        equals: (Any?, Any?) -> Boolean,
+    ): Int {
+        val id = allocId()
+        nodes[id] = Node.Slot(compute = compute, equalsFn = equals)
         return id
     }
 
@@ -648,7 +704,8 @@ class Context {
         } finally {
             trackingStack.removeLast()
         }
-        val unchanged = node.hasValue && node.value == result
+        val unchanged = node.hasValue &&
+            (node.equalsFn?.invoke(node.value, result) ?: (node.value == result))
         node.dirty = false
         node.forceRecompute = false
         if (unchanged) return false
@@ -867,6 +924,16 @@ class TeardownScope internal constructor(
     /** A guarded [Computed] owned by this scope. */
     inline fun <reified T : Any> computed(noinline compute: Context.() -> T): Computed<T> =
         adopt(ctx.computed(compute))
+
+    /**
+     * A [Computed] owned by this scope, guarded by a custom change predicate.
+     * See [Context.computedRippleWhen]: `changed(old, new) == true` propagates
+     * downstream, `false` suppresses. `changed` MUST be pure in `(old, new)`.
+     */
+    inline fun <reified T : Any> computedRippleWhen(
+        noinline compute: Context.() -> T,
+        noinline changed: (old: T, new: T) -> Boolean,
+    ): Computed<T> = adopt(ctx.computedRippleWhen(compute, changed))
 
     /** @suppress Renamed to [computed]. */
     @Deprecated("Renamed to computed (#lzcellkernel).", ReplaceWith("computed(compute)"))
