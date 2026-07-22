@@ -65,11 +65,11 @@ class QueueCellConformanceTest {
         // Each reader subscribes to exactly one reader-kind cell. We wrap the
         // reactive read in a `computed` returning `Unit` so `ctx.isSet` reports
         // whether the cached value survived the last op.
-        val head = ctx.computed { q.head(); Unit }
-        val len = ctx.computed { q.len(); Unit }
-        val isEmpty = ctx.computed { q.isEmpty(); Unit }
-        val isFull = ctx.computed { q.isFull(); Unit }
-        val closed = ctx.computed { q.isClosed(); Unit }
+        val head = ctx.computed { q.head(this); Unit }
+        val len = ctx.computed { q.len(this); Unit }
+        val isEmpty = ctx.computed { q.isEmpty(this); Unit }
+        val isFull = ctx.computed { q.isFull(this); Unit }
+        val closed = ctx.computed { q.isClosed(this); Unit }
         return Readers(head, len, isEmpty, isFull, closed)
     }
 
@@ -236,8 +236,8 @@ class QueueCellConformanceTest {
         // (records Ready).
         val log = mutableListOf<Pair<Boolean, Int>>()
         ctx.effect {
-            val full = q.isFull()
-            val len = q.len()
+            val full = q.isFull(this)
+            val len = q.len(this)
             log.add(full to len)
             null
         }
@@ -362,7 +362,7 @@ class QueueCellConformanceTest {
         val q = QueueCell<Int, MinimalFifo<Int>>(ctx, MinimalFifo())
         val log = mutableListOf<Int>()
         ctx.effect {
-            log.add(q.len())
+            log.add(q.len(this))
             null
         }
 

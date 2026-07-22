@@ -82,7 +82,7 @@ class SlotMapConformanceTest {
         val ctx = Context()
         val base = ctx.source(2)
         val map = SlotMap<Int, Int>()
-        assertEquals(10, map.getOrInsertWith(ctx, 5) { it * ctx.get(base) }) // 5 * 2
+        assertEquals(10, map.getOrInsertWith(ctx, 5) { it * get(base) }) // 5 * 2
         base.set(ctx, 3)
         assertEquals(15, map.get(ctx, 5)) // 5 * 3 — recomputed
     }

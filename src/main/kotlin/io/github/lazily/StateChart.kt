@@ -274,18 +274,18 @@ class StateChart internal constructor(
     fun lastActions(): List<String> = lastActions
 
     /** The full active configuration (active leaves plus all active ancestors). */
-    fun configuration(ctx: Context): TreeSet<String> {
+    fun configuration(ops: ComputeOps): TreeSet<String> {
         @Suppress("UNCHECKED_CAST")
-        val stored = ctx.getCellAny(configId) as TreeSet<String>
+        val stored = ops.getCellAny(configId) as TreeSet<String>
         return TreeSet(stored) // defensive copy: callers / setCellAny must not alias the live cell
     }
 
     /** Active atomic leaves, sorted (one per parallel region; one for single-region). */
-    fun activeLeaves(ctx: Context): List<String> =
-        configuration(ctx).filter { def.kind(it).isLeaf() }.sorted()
+    fun activeLeaves(ops: ComputeOps): List<String> =
+        configuration(ops).filter { def.kind(it).isLeaf() }.sorted()
 
     /** Hierarchical "state-in" predicate: `true` iff [id] is in the active configuration. */
-    fun matches(ctx: Context, id: String): Boolean = configuration(ctx).contains(id)
+    fun matches(ops: ComputeOps, id: String): Boolean = configuration(ops).contains(id)
 
     /**
      * Send an event (run-to-completion). Returns `true` if any transition was

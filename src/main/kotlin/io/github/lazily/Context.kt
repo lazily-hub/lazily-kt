@@ -84,11 +84,14 @@ class Context : ComputeOps {
     private val freeIds: ArrayDeque<Int> = ArrayDeque()
 
     // Execution stack of currently-recomputing slot / running effect ids. Under
-    // value-threaded tracking (#lzcellkernel) this NO LONGER drives edge
-    // attribution — that rides in the per-recompute [Compute] view. It survives
-    // only for the glitch-free reentrancy skip in [notifySlotValueChanged]: a
-    // dependent already mid-recompute reads the fresh value directly, so it must
-    // not be re-invalidated.
+    // value-threaded tracking (#lzcellkernel) this does NOT drive edge attribution
+    // — that rides *entirely* in the per-recompute [Compute] view, and the ambient
+    // compatibility bridge that once consulted this stack from [getSlotAny] /
+    // [getCellAny] is deleted. It survives ONLY for the glitch-free reentrancy skip
+    // in [notifySlotValueChanged]: a dependent already mid-recompute reads the fresh
+    // value directly, so it must not be re-invalidated. (The single-threaded core
+    // has no ambient tracking stack; `ThreadSafeContext` / `AsyncContext` keep their
+    // own ambient engines, matching lazily-rs.)
     private val executingStack: ArrayDeque<Int> = ArrayDeque()
 
     // Generation stamps of the recompute/effect frames currently on
@@ -274,25 +277,24 @@ class Context : ComputeOps {
      * The genus read of a computed cell through the [Context] surface
      * (`#lzcellkernel`): refresh if necessary and return the value.
      *
-     * This is the **compatibility bridge** (mirrors lazily-rs keeping a
-     * thread-local bridge for closures not yet value-threaded): while a recompute
-     * is on [executingStack], a read *through a captured `ctx`* — a domain reader
-     * helper (`map.get`, `queue.head`, `mergeCell.get`) that has not been ported
-     * to take a compute surface — attributes to the recomputing node via the
-     * stack. Reads through the fortified [Compute] surface are value-threaded and
-     * bypass this (they use [getSlotRaw]); the [untracked] escape bypasses it too.
-     * At top level the stack is empty, so a plain `ctx.get(...)` registers nothing.
+     * The [Context] is the **top-level / untracked** read surface: reading through
+     * it registers **no** dependency edge. Dependency tracking is now *solely*
+     * value-threaded — the only surface that forms an edge is the per-recompute
+     * [Compute] view handed to a compute/effect closure (`getSlotRaw`/`getCellRaw`
+     * plus [registerDependencyInternal]). The former ambient **compatibility
+     * bridge** — attributing a captured `ctx.get(...)` to the top of [executingStack]
+     * — is deleted (`#lzcellkernel`): every domain reader now threads a
+     * [ComputeOps] surface, so a read inside a recompute goes through the [Compute]
+     * view, and a `ctx.get(...)` at top level (or a snapshot read) registers nothing.
      */
     override fun getSlotAny(id: Int): Any {
         if (nodes[id] !is Node.Slot) throw DisposedNodeException(id, "slot")
-        executingStack.lastOrNull()?.let { registerDependency(id, it) }
         return getSlotRaw(id)
     }
 
-    /** The genus read of a source cell through [Context] — bridge counterpart of [getSlotAny]. */
+    /** The genus read of a source cell through [Context] — untracked counterpart of [getSlotAny]. */
     override fun getCellAny(id: Int): Any {
         val node = nodes[id] as? Node.Cell ?: throw DisposedNodeException(id, "cell")
-        executingStack.lastOrNull()?.let { registerDependency(id, it) }
         return node.value as Any
     }
 

@@ -83,7 +83,7 @@ class MergeCell<T : Any>(
     // because `T` is a class type parameter, not reified. `getCellAny` still
     // registers the dependency, so a `get()` inside a computation is reactive.
     @Suppress("UNCHECKED_CAST")
-    fun get(): T = ctx.getCellAny(cell.id) as T
+    fun get(ops: ComputeOps = ctx): T = ops.getCellAny(cell.id) as T
 
     fun set(value: T) = ctx.setCellAny(cell.id, value)
 

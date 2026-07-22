@@ -81,8 +81,12 @@ class SlotMap<K : Any, V : Any> : ReactiveMap<K, V> {
 
     private val materialized = LinkedHashMap<K, Computed<V>>()
 
-    /** Mint (or return the cached) derived-slot node for [key], caching the handle. */
-    private fun mint(ctx: Context, key: K, factory: (K) -> V): Computed<V> {
+    /**
+     * Mint (or return the cached) derived-slot node for [key], caching the handle.
+     * [factory] is a [ComputeOps] receiver so upstream reads it performs are
+     * value-threaded against the minted slot's recompute (`#lzcellkernel`).
+     */
+    private fun mint(ctx: Context, key: K, factory: ComputeOps.(K) -> V): Computed<V> {
         materialized[key]?.let { return it } // warm: already allocated.
         val handle = Computed<V>(ctx.slotAny { factory(key) })
         materialized[key] = handle
@@ -95,9 +99,9 @@ class SlotMap<K : Any, V : Any> : ReactiveMap<K, V> {
      * Re-reading an existing key returns its current value without re-running
      * [factory].
      */
-    fun getOrInsertWith(ctx: Context, key: K, factory: (K) -> V): V {
+    fun getOrInsertWith(ops: ComputeOps, key: K, factory: ComputeOps.(K) -> V): V {
         @Suppress("UNCHECKED_CAST")
-        return ctx.getSlotAny(mint(ctx, key, factory).id) as V
+        return ops.getSlotAny(mint(ops.computeContext, key, factory).id) as V
     }
 
     /**
@@ -105,7 +109,7 @@ class SlotMap<K : Any, V : Any> : ReactiveMap<K, V> {
      * via [factory], up front. Observationally identical to minting each key
      * lazily on first read — it only changes *when* the nodes are allocated.
      */
-    fun materializeAll(ctx: Context, keys: Iterable<K>, factory: (K) -> V) {
+    fun materializeAll(ctx: Context, keys: Iterable<K>, factory: ComputeOps.(K) -> V) {
         for (key in keys) mint(ctx, key, factory)
     }
 
@@ -113,10 +117,10 @@ class SlotMap<K : Any, V : Any> : ReactiveMap<K, V> {
     fun handle(key: K): Computed<V>? = materialized[key]
 
     /** Read the value at [key] if present (does not mint); `null` if absent. Reactive on that entry. */
-    fun get(ctx: Context, key: K): V? {
+    fun get(ops: ComputeOps, key: K): V? {
         val handle = materialized[key] ?: return null
         @Suppress("UNCHECKED_CAST")
-        return ctx.getSlotAny(handle.id) as V
+        return ops.getSlotAny(handle.id) as V
     }
 
     override fun isPresent(key: K): Boolean = materialized.containsKey(key)

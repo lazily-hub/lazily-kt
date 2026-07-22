@@ -113,7 +113,7 @@ class RetryPolicyCell(private val ctx: Context, base: Long, cap: Long) {
         core.reset()
         delayCell.set(ctx, 0L)
     }
-    fun delay(): Long = ctx.get(delayCell)
+    fun delay(ops: ComputeOps = ctx): Long = ops.get(delayCell)
 }
 
 /** Bounded isolation-pool core. */
@@ -141,7 +141,7 @@ class BulkheadCell(private val ctx: Context, capacity: Long) {
 
     fun acquire(): Boolean = core.acquire().also { refresh() }
     fun release() = core.release().also { refresh() }
-    fun permitsInUse(): Long = ctx.get(inUseCell)
+    fun permitsInUse(ops: ComputeOps = ctx): Long = ops.get(inUseCell)
 }
 
 /** Deadline-bounded call core. */
@@ -174,5 +174,5 @@ class TimeoutCell(private val ctx: Context) {
 
     fun arm(now: Long, timeout: Long) = core.arm(now, timeout).also { refresh() }
     fun tick(now: Long): Boolean = core.tick(now).also { refresh() }
-    fun isTimedOut(): Boolean = ctx.get(timedOutCell)
+    fun isTimedOut(ops: ComputeOps = ctx): Boolean = ops.get(timedOutCell)
 }

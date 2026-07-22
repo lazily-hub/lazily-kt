@@ -93,7 +93,7 @@ class DiscoveryCell<P : Any>(private val ctx: Context) {
     fun resolve(service: String): String? = core.resolve(service)
 
     @Suppress("UNCHECKED_CAST")
-    fun discovery(): Map<String, String> = ctx.get(discoveryCell) as Map<String, String>
+    fun discovery(ops: ComputeOps = ctx): Map<String, String> = ops.get(discoveryCell) as Map<String, String>
 }
 
 /** A durable registry op (the ordered log entry). */
@@ -145,5 +145,5 @@ class ServiceRegistry(private val ctx: Context) {
     fun replay() = core.replay().also { refresh() }
 
     @Suppress("UNCHECKED_CAST")
-    fun projection(): Map<String, String> = ctx.get(projectionCell) as Map<String, String>
+    fun projection(ops: ComputeOps = ctx): Map<String, String> = ops.get(projectionCell) as Map<String, String>
 }

@@ -96,7 +96,7 @@ class MergeTest {
         val mc = ctx.mergeCell(10L, max())
         var runs = 0
         ctx.effect {
-            mc.get()
+            mc.get(this)
             runs++
             null
         }
@@ -126,7 +126,7 @@ class MergeTest {
             val mc = ctx.mergeCell(scenario["initial"]!!.jsonPrimitive.int.toLong(), policy)
             var runs = 0
             ctx.effect {
-                mc.get()
+                mc.get(this)
                 runs++
                 null
             }

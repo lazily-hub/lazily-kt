@@ -48,19 +48,19 @@ class SemTree<K : Any, D : Any> private constructor(
     fun root(): Computed<@UnsafeVariance D> = Computed(rootId)
 
     /** Read the derived value at the root (reactive). */
-    fun value(ctx: Context): D {
+    fun value(ops: ComputeOps): D {
         @Suppress("UNCHECKED_CAST")
-        return ctx.slotValue(rootId) as D
+        return ops.slotValue(rootId) as D
     }
 
     /** The derived slot for a node id, if it was present at build time. */
     fun node(id: K): Computed<@UnsafeVariance D>? = nodes[id]?.let { Computed(it) }
 
     /** Read the derived value at a node id, if present (reactive). */
-    fun nodeValue(ctx: Context, id: K): D? {
+    fun nodeValue(ops: ComputeOps, id: K): D? {
         val slotId = nodes[id] ?: return null
         @Suppress("UNCHECKED_CAST")
-        return ctx.slotValue(slotId) as D
+        return ops.slotValue(slotId) as D
     }
 
     companion object {

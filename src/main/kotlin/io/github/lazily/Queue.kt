@@ -372,22 +372,22 @@ class QueueCell<T : Any, S : QueueStorage<T>>(
 
     /** Reactive read of the current head value. `null` when the queue is empty. A reader is invalidated when the head value *changes* — every pop, and a push only when transitioning from empty. */
     @Suppress("UNCHECKED_CAST")
-    fun head(): T? {
-        val v = ctx.get(headSlot)
+    fun head(ops: ComputeOps = ctx): T? {
+        val v = ops.get(headSlot)
         return if (v === NO_HEAD) null else v as T
     }
 
     /** Reactive read of the number of buffered elements. Invalidated whenever the count changes (every successful push/pop). */
-    fun len(): Int = ctx.get(lenSlot)
+    fun len(ops: ComputeOps = ctx): Int = ops.get(lenSlot)
 
     /** Reactive emptiness check. Invalidated only on the empty ↔ non-empty transition. */
-    fun isEmpty(): Boolean = ctx.get(isEmptySlot)
+    fun isEmpty(ops: ComputeOps = ctx): Boolean = ops.get(isEmptySlot)
 
     /** Reactive fullness check (only meaningful when the backend is bounded). Invalidated on the full ↔ not-full transition — this is the backpressure signal: a producer observes `isFull` and backs off; a consumer's pop that transitions full → not-full invalidates the producer's `isFull` subscription and the producer resumes. For an unbounded backend this is always `false` and never invalidates. */
-    fun isFull(): Boolean = ctx.get(isFullSlot)
+    fun isFull(ops: ComputeOps = ctx): Boolean = ops.get(isFullSlot)
 
     /** Reactive read of the closed flag. Invalidated only on the open → closed transition. */
-    fun isClosed(): Boolean = ctx.get(closedCell)
+    fun isClosed(ops: ComputeOps = ctx): Boolean = ops.get(closedCell)
 
     /** Handle to the `head` reader-kind Slot, for wiring derived computeds directly. Subscribe-to-head semantics: invalidated on head-value change. */
     fun headHandle(): Computed<Any> = headSlot
@@ -562,13 +562,13 @@ class TopicCell<T : Any>(
 
     /** Reactive unread suffix for one connected subscriber. */
     @Suppress("UNCHECKED_CAST")
-    fun readStream(id: String): List<T> {
+    fun readStream(id: String, ops: ComputeOps = ctx): List<T> {
         val reader = readers[id] ?: return emptyList()
-        return ctx.getSlotAny(reader.id) as List<T>
+        return ops.getSlotAny(reader.id) as List<T>
     }
 
     /** Reactive element at the subscriber's cursor, or null at the tail/offline. */
-    fun read(id: String): T? = readStream(id).firstOrNull()
+    fun read(id: String, ops: ComputeOps = ctx): T? = readStream(id, ops).firstOrNull()
 
     /** Advance only [id], returning the element it passed. */
     fun advance(id: String): T? {

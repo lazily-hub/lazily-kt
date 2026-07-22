@@ -97,7 +97,7 @@ class CellMap<K : Any, V : Any>(
 
     /** Read the current value of [key]; auto-subscribes the reading node. */
     @Suppress("UNCHECKED_CAST")
-    fun get(key: K): V = ctx.getCellAny(value(key).id) as V
+    fun get(key: K, ops: ComputeOps = ctx): V = ops.getCellAny(value(key).id) as V
 
     /** Write [value] to [key]'s entry cell. Membership and order are untouched. */
     fun setValue(key: K, value: V) {
@@ -322,7 +322,7 @@ class CellTree<K : Any, V : Any>(private val ctx: Context) {
 
     /** Read [node]'s value. */
     @Suppress("UNCHECKED_CAST")
-    fun get(node: K): V = ctx.getCellAny(value(node).id) as V
+    fun get(node: K, ops: ComputeOps = ctx): V = ops.getCellAny(value(node).id) as V
 
     /** Write [node]'s value — invalidates only [node]'s value readers. */
     fun setValue(node: K, v: V) {

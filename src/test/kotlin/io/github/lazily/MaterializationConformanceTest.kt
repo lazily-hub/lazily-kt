@@ -64,7 +64,7 @@ class MaterializationConformanceTest {
 
         // eager: pre-mint the whole keyset.
         val eager = SlotMap<String, Int>()
-        eager.materializeAll(ctx, vals.keys, lookup)
+        eager.materializeAll(ctx, vals.keys) { lookup(it) }
         assertEquals(EntryKind.Slot, eager.entryKind)
         assertEquals(vals.size, eager.presentCount)
         assertEquals(strArray(expected, "eager_present").toSet(), eager.presentKeys().toSet())
@@ -76,13 +76,13 @@ class MaterializationConformanceTest {
         // observe_canonical / eager_lazy_observationally_equivalent.
         for ((k, want) in expected.getValue("observe").jsonObject) {
             assertEquals(want.jsonPrimitive.int, eager.get(ctx, k), "eager observe $k")
-            assertEquals(want.jsonPrimitive.int, lazy.getOrInsertWith(ctx, k, lookup), "lazy observe $k")
+            assertEquals(want.jsonPrimitive.int, lazy.getOrInsertWith(ctx, k) { lookup(it) }, "lazy observe $k")
         }
 
         // Fresh lazy replay of the read sequence -> present set is exactly the reads.
         val ctx2 = Context()
         val lazy2 = SlotMap<String, Int>()
-        for (k in strArray(fixture, "reads")) lazy2.getOrInsertWith(ctx2, k, lookup)
+        for (k in strArray(fixture, "reads")) lazy2.getOrInsertWith(ctx2, k) { lookup(it) }
         assertEquals(strArray(expected, "lazy_present_after_reads").toSet(), lazy2.presentKeys().toSet())
     }
 
@@ -100,7 +100,7 @@ class MaterializationConformanceTest {
         val wantSizes = expected.getValue("present_after_each_read").jsonArray.map { it.jsonPrimitive.int }
         val gotSizes = mutableListOf<Int>()
         for (k in strArray(fixture, "reads")) {
-            lazy.getOrInsertWith(ctx, k, lookup)
+            lazy.getOrInsertWith(ctx, k) { lookup(it) }
             gotSizes.add(lazy.presentCount)
         }
         assertEquals(wantSizes, gotSizes, "cumulative present-set sizes")
@@ -141,7 +141,7 @@ class MaterializationConformanceTest {
         val eagerCells = CellMap<String, Int>(ctx)
         for (k in cellKeys) eagerCells.insert(k, lookup(k))
         val eagerSlots = SlotMap<String, Int>()
-        eagerSlots.materializeAll(ctx, slotKeys, lookup)
+        eagerSlots.materializeAll(ctx, slotKeys) { lookup(it) }
         assertEquals(EntryKind.Cell, eagerCells.entryKind)
         assertEquals(EntryKind.Slot, eagerSlots.entryKind)
         val eagerPresent = (eagerCells.presentKeys() + eagerSlots.presentKeys()).toSet()
@@ -157,7 +157,7 @@ class MaterializationConformanceTest {
 
         // Reads (slot pulls) grow only the slot present set.
         for (k in strArray(fixture, "reads")) {
-            if (k in slotKeys) lazySlots.getOrInsertWith(lazyCtx, k, lookup)
+            if (k in slotKeys) lazySlots.getOrInsertWith(lazyCtx, k) { lookup(it) }
         }
         val lazyAfter = (lazyCells.presentKeys() + lazySlots.presentKeys()).toSet()
         assertEquals(strArray(expected, "lazy_present_after_reads").toSet(), lazyAfter)
@@ -170,7 +170,7 @@ class MaterializationConformanceTest {
                 assertEquals(w, lazyCells.get(k), "lazy cell observe $k")
             } else {
                 assertEquals(w, eagerSlots.get(ctx, k), "eager slot observe $k")
-                assertEquals(w, lazySlots.getOrInsertWith(lazyCtx, k, lookup), "lazy slot observe $k")
+                assertEquals(w, lazySlots.getOrInsertWith(lazyCtx, k) { lookup(it) }, "lazy slot observe $k")
             }
         }
     }

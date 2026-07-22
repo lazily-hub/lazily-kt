@@ -10,20 +10,23 @@ package io.github.lazily
 //
 // A read through the [Compute] handed to a closure registers the edge against
 // that closure's node — by construction, not via an ambient frame that a
-// suspension could clobber. [Context] additionally keeps a **compatibility
-// bridge** (an execution stack) so a *captured* `ctx.get(...)` from a domain
-// reader helper not yet ported to take a surface still tracks — the same
-// pragmatic bridge lazily-rs retains for its not-yet-migrated closure shape. The
-// [Untracked] escape bypasses both.
+// suspension could clobber. This is now the **sole** tracking surface of the
+// single-threaded core: every domain reader threads a [ComputeOps] surface, so a
+// read inside a recompute goes through the [Compute] view and a read through a
+// bare [Context] (top level or a snapshot) registers nothing. The former ambient
+// **compatibility bridge** — an execution stack that attributed a captured
+// `ctx.get(...)` to the recomputing node — has been deleted (`#lzcellkernel`).
+// (`ThreadSafeContext` / `AsyncContext` keep their own ambient engines, matching
+// lazily-rs.) The [Untracked] escape registers nothing on any surface.
 
 /**
  * The **compute-time operations subset** shared by the read surfaces
  * (`#lzcellkernel`) — the Kotlin analogue of lazily-rs `ComputeOps`. Implemented
  * by three types:
  *
- * - [Context] — the owning graph; a `ctx.get` at top level registers nothing, and
- *   inside a recompute it registers via the compatibility bridge (see
- *   [Context.getSlotAny]).
+ * - [Context] — the owning graph; the **top-level / untracked** surface: a
+ *   `ctx.get` registers no dependency edge (see [Context.getSlotAny]). Tracking is
+ *   solely value-threaded through [Compute].
  * - [Compute] — the per-recompute *view*; its reads are **value-threaded**,
  *   registering a dependency edge against the recomputing node, and are
  *   generation-guarded against escape.

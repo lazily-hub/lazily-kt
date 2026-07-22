@@ -163,7 +163,7 @@ class SemaphoreCell(private val ctx: Context, capacity: Long) {
 
     fun acquire(): Boolean = core.acquire().also { refresh() }
     fun release() = core.release().also { refresh() }
-    fun permitsAvailable(): Long = ctx.get(permitsAvailableCell)
+    fun permitsAvailable(ops: ComputeOps = ctx): Long = ops.get(permitsAvailableCell)
 }
 
 // -- Barrier / quorum --------------------------------------------------------
@@ -188,7 +188,7 @@ class BarrierCell<P : Any>(private val ctx: Context, required: Long) {
 
     fun arrive(peer: P): Boolean = core.arrive(peer).also { refresh() }
     fun count(): Long = core.count()
-    fun isOpen(): Boolean = ctx.get(isOpenCell)
+    fun isOpen(ops: ComputeOps = ctx): Boolean = ops.get(isOpenCell)
 
     companion object {
         /** A quorum gate: opens at strict majority of `total`. */

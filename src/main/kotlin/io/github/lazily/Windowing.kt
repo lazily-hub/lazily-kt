@@ -112,14 +112,14 @@ class SessionCore<T : Any>(private val gap: Long, private val merge: (T, T) -> T
 // -- Reactive cells ----------------------------------------------------------
 
 /** Shared reactive-cell projection: last emitted aggregate on a `Cell`. */
-private class WindowOutput<T : Any>(private val ctx: Context) {
+private class WindowOutput<T : Any>(val ctx: Context) {
     val cell: Source<Any> = ctx.cell<Any>(WindowEmpty)
     fun emit(e: T?): T? {
         if (e != null) cell.set(ctx, e)
         return e
     }
     @Suppress("UNCHECKED_CAST")
-    fun value(): T? = ctx.get(cell).let { if (it === WindowEmpty) null else it as T }
+    fun value(ops: ComputeOps = ctx): T? = ops.get(cell).let { if (it === WindowEmpty) null else it as T }
 }
 
 class TumblingCountWindow<T : Any>(ctx: Context, n: Long, merge: (T, T) -> T) {
@@ -127,7 +127,7 @@ class TumblingCountWindow<T : Any>(ctx: Context, n: Long, merge: (T, T) -> T) {
     private val out = WindowOutput<T>(ctx)
     val outputCell: Source<Any> get() = out.cell
     fun push(v: T): T? = out.emit(core.push(v))
-    fun output(): T? = out.value()
+    fun output(ops: ComputeOps = out.ctx): T? = out.value(ops)
 }
 
 class TumblingTimeWindow<T : Any>(ctx: Context, period: Long, merge: (T, T) -> T) {
@@ -136,7 +136,7 @@ class TumblingTimeWindow<T : Any>(ctx: Context, period: Long, merge: (T, T) -> T
     val outputCell: Source<Any> get() = out.cell
     fun push(now: Long, v: T) = core.push(now, v)
     fun tick(now: Long): T? = out.emit(core.tick(now))
-    fun output(): T? = out.value()
+    fun output(ops: ComputeOps = out.ctx): T? = out.value(ops)
 }
 
 class SlidingWindow<T : Any>(ctx: Context, size: Long, slide: Long, merge: (T, T) -> T) {
@@ -144,7 +144,7 @@ class SlidingWindow<T : Any>(ctx: Context, size: Long, slide: Long, merge: (T, T
     private val out = WindowOutput<T>(ctx)
     val outputCell: Source<Any> get() = out.cell
     fun push(v: T): T? = out.emit(core.push(v))
-    fun output(): T? = out.value()
+    fun output(ops: ComputeOps = out.ctx): T? = out.value(ops)
 }
 
 class SessionWindow<T : Any>(ctx: Context, gap: Long, merge: (T, T) -> T) {
@@ -153,5 +153,5 @@ class SessionWindow<T : Any>(ctx: Context, gap: Long, merge: (T, T) -> T) {
     val outputCell: Source<Any> get() = out.cell
     fun push(now: Long, v: T): T? = out.emit(core.push(now, v))
     fun flush(now: Long): T? = out.emit(core.flush(now))
-    fun output(): T? = out.value()
+    fun output(ops: ComputeOps = out.ctx): T? = out.value(ops)
 }

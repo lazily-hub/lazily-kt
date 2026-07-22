@@ -50,7 +50,7 @@ class EphemeralCell<T : Any>(private val ctx: Context) : Ephemeral {
     fun tick(now: Long) = core.tick(now).also { refresh() }
 
     @Suppress("UNCHECKED_CAST")
-    fun value(): T? = ctx.get(valueCell).let { if (it === EphemeralNone) null else it as T }
+    fun value(ops: ComputeOps = ctx): T? = ops.get(valueCell).let { if (it === EphemeralNone) null else it as T }
 }
 
 // -- Keyed per-peer ephemeral map (presence + awareness) ---------------------
@@ -93,7 +93,7 @@ class PresenceCell<K : Any, V : Any>(private val ctx: Context, private val ttl: 
     }
 
     @Suppress("UNCHECKED_CAST")
-    fun present(): Map<K, V> = ctx.get(presentCell) as Map<K, V>
+    fun present(ops: ComputeOps = ctx): Map<K, V> = ops.get(presentCell) as Map<K, V>
 }
 
 /** Reactive typed ephemeral broadcast (cursors/selections): last-writer-per-peer. */
@@ -114,5 +114,5 @@ class AwarenessCell<K : Any, V : Any>(private val ctx: Context, private val ttl:
     fun get(peer: K, now: Long): V? = core.get(peer, now)
 
     @Suppress("UNCHECKED_CAST")
-    fun present(): Map<K, V> = ctx.get(presentCell) as Map<K, V>
+    fun present(ops: ComputeOps = ctx): Map<K, V> = ops.get(presentCell) as Map<K, V>
 }

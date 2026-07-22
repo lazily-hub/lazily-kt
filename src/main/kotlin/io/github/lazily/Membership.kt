@@ -155,7 +155,7 @@ class MembershipCell<P : Comparable<P>>(private val ctx: Context, config: Member
     fun tick(now: Long): List<PeerChangeEvent<P>> = core.tick(now).also { refresh() }
 
     @Suppress("UNCHECKED_CAST")
-    fun peerSet(): Set<P> = ctx.get(peerSetCell) as Set<P>
+    fun peerSet(ops: ComputeOps = ctx): Set<P> = ops.get(peerSetCell) as Set<P>
 
     fun state(peer: P): PeerState? = core.state(peer)
 }

@@ -58,7 +58,7 @@ class DebounceCell<T : Any>(private val ctx: Context, quiet: Long) {
     }
 
     @Suppress("UNCHECKED_CAST")
-    fun output(): T? = ctx.get(outputCell).let { if (it === RateShapeEmpty) null else it as T }
+    fun output(ops: ComputeOps = ctx): T? = ops.get(outputCell).let { if (it === RateShapeEmpty) null else it as T }
 }
 
 // -- Throttle ---------------------------------------------------------------
@@ -120,7 +120,7 @@ class ThrottleCell<T : Any>(private val ctx: Context, edge: ThrottleEdge, window
     }
 
     @Suppress("UNCHECKED_CAST")
-    fun output(): T? = ctx.get(outputCell).let { if (it === RateShapeEmpty) null else it as T }
+    fun output(ops: ComputeOps = ctx): T? = ops.get(outputCell).let { if (it === RateShapeEmpty) null else it as T }
 }
 
 // -- Sample -----------------------------------------------------------------
@@ -178,7 +178,7 @@ class SampleCell<T : Any>(private val ctx: Context, mode: SampleMode) {
     }
 
     @Suppress("UNCHECKED_CAST")
-    fun output(): T? = ctx.get(outputCell).let { if (it === RateShapeEmpty) null else it as T }
+    fun output(ops: ComputeOps = ctx): T? = ops.get(outputCell).let { if (it === RateShapeEmpty) null else it as T }
 }
 
 // -- Probabilistic sample ----------------------------------------------------
@@ -229,5 +229,5 @@ class ProbabilisticSampleCell<T : Any>(
     }
 
     @Suppress("UNCHECKED_CAST")
-    fun output(): T? = ctx.get(outputCell).let { if (it === RateShapeEmpty) null else it as T }
+    fun output(ops: ComputeOps = ctx): T? = ops.get(outputCell).let { if (it === RateShapeEmpty) null else it as T }
 }

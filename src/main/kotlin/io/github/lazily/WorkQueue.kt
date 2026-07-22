@@ -172,13 +172,13 @@ class WorkQueueCell<T : Any>(
         return expired.size
     }
 
-    fun pendingLen(): Int = ctx.get(readers.pendingLen)
+    fun pendingLen(ops: ComputeOps = ctx): Int = ops.get(readers.pendingLen)
 
-    fun isEmpty(): Boolean = ctx.get(readers.isEmpty)
+    fun isEmpty(ops: ComputeOps = ctx): Boolean = ops.get(readers.isEmpty)
 
-    fun inFlightLen(): Int = ctx.get(readers.inFlightLen)
+    fun inFlightLen(ops: ComputeOps = ctx): Int = ops.get(readers.inFlightLen)
 
-    fun deadLetterLen(): Int = ctx.get(readers.deadLetterLen)
+    fun deadLetterLen(ops: ComputeOps = ctx): Int = ops.get(readers.deadLetterLen)
 
     fun pendingItems(): List<WorkQueueItem<T>> = pending.toList()
 

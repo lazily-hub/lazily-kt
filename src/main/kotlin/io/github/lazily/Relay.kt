@@ -117,17 +117,17 @@ class RelayCell<T : Any>(
     }
 
     /** Whether the current overflow choice is legal for [mergePolicy]. */
-    fun overflowIsLegal(): Boolean =
-        ctx.get(policy.overflow) != Overflow.Conflate || mergePolicy.conflates
+    fun overflowIsLegal(ops: ComputeOps = ctx): Boolean =
+        ops.get(policy.overflow) != Overflow.Conflate || mergePolicy.conflates
 
     /** Current window depth (`Count`). */
-    fun depth(): Long = ctx.get(depth)
+    fun depth(ops: ComputeOps = ctx): Long = ops.get(depth)
 
     /** Whether the window is at/over `highWater`. */
-    fun isFull(): Boolean = ctx.get(isFull)
+    fun isFull(ops: ComputeOps = ctx): Boolean = ops.get(isFull)
 
     /** Whether the window is empty. */
-    fun isEmpty(): Boolean = ctx.get(isEmpty)
+    fun isEmpty(ops: ComputeOps = ctx): Boolean = ops.get(isEmpty)
 
     private fun readFull(): Boolean = ctx.get(pending) >= ctx.get(policy.highWater)
 

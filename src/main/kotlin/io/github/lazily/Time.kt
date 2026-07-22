@@ -53,8 +53,8 @@ class TimerCell(private val ctx: Context, fireAt: Long) {
         return edge
     }
 
-    fun hasFired(): Boolean = ctx.get(firedCell)
-    fun value(): Unit? = if (ctx.get(firedCell)) Unit else null
+    fun hasFired(ops: ComputeOps = ctx): Boolean = ops.get(firedCell)
+    fun value(ops: ComputeOps = ctx): Unit? = if (ops.get(firedCell)) Unit else null
     fun nextFire(): Long? = core.nextFire()
 }
 
@@ -93,7 +93,7 @@ class IntervalCell(private val ctx: Context, period: Long) {
         return edge
     }
 
-    fun count(): Long = ctx.get(countCell)
+    fun count(ops: ComputeOps = ctx): Long = ops.get(countCell)
     fun nextFire(): Long = core.nextFire()
 }
 
@@ -154,7 +154,7 @@ class CronCell(private val ctx: Context, cycle: Long, offsets: List<Long>) {
         return edge
     }
 
-    fun count(): Long = ctx.get(countCell)
+    fun count(ops: ComputeOps = ctx): Long = ops.get(countCell)
     fun nextFire(): Long? = core.nextFire()
 }
 
@@ -181,9 +181,9 @@ class DeadlineCell<T : Any>(private val ctx: Context, private val value: T, dead
         return edge
     }
 
-    fun state(): Deadlined<T> =
-        if (ctx.get(expiredCell)) Deadlined.Expired(value) else Deadlined.Live(value)
+    fun state(ops: ComputeOps = ctx): Deadlined<T> =
+        if (ops.get(expiredCell)) Deadlined.Expired(value) else Deadlined.Live(value)
 
-    fun isExpired(): Boolean = ctx.get(expiredCell)
+    fun isExpired(ops: ComputeOps = ctx): Boolean = ops.get(expiredCell)
     fun nextFire(): Long? = core.nextFire()
 }

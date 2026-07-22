@@ -22,10 +22,10 @@ class CollectionsTest {
             ctx,
             listOf("a" to 1, "b" to 2, "c" to 3),
         )
-        val readerA = ctx.computed { map.get("a") }
-        val readerB = ctx.computed { map.get("b") }
-        val membership = ctx.computed { ctx.get(map.len()) }
-        val order = ctx.computed { ctx.get(map.keys()) }
+        val readerA = ctx.computed { map.get("a", this) }
+        val readerB = ctx.computed { map.get("b", this) }
+        val membership = ctx.computed { get(map.len()) }
+        val order = ctx.computed { get(map.keys()) }
         // establish deps
         ctx.get(readerA); ctx.get(readerB); ctx.get(membership); ctx.get(order)
 
@@ -42,9 +42,9 @@ class CollectionsTest {
     fun `insert invalidates membership and order only`() {
         val ctx = Context()
         val map: CellMap<String, Int> = CellMap(ctx, listOf("a" to 1, "b" to 2, "c" to 3))
-        val readerA = ctx.computed { map.get("a") }
-        val membership = ctx.computed { ctx.get(map.len()) }
-        val order = ctx.computed { ctx.get(map.keys()) }
+        val readerA = ctx.computed { map.get("a", this) }
+        val membership = ctx.computed { get(map.len()) }
+        val order = ctx.computed { get(map.keys()) }
         ctx.get(readerA); ctx.get(membership); ctx.get(order)
 
         map.insert("d", 4, InsertAt.End)
@@ -60,9 +60,9 @@ class CollectionsTest {
         val ctx = Context()
         val map: CellMap<String, Int> = CellMap(ctx, listOf("a" to 1, "b" to 2, "c" to 3, "d" to 4))
         val handleB = map.value("b").id
-        val readerB = ctx.computed { map.get("b") }
-        val membership = ctx.computed { ctx.get(map.contains("c")) }
-        val order = ctx.computed { ctx.get(map.keys()) }
+        val readerB = ctx.computed { map.get("b", this) }
+        val membership = ctx.computed { get(map.contains("c")) }
+        val order = ctx.computed { get(map.keys()) }
         ctx.get(readerB); ctx.get(membership); ctx.get(order)
 
         map.moveTo("b", 3) // a c d b
@@ -88,9 +88,9 @@ class CollectionsTest {
     fun `remove invalidates membership and order only`() {
         val ctx = Context()
         val map: CellMap<String, Int> = CellMap(ctx, listOf("a" to 1, "b" to 2, "c" to 3))
-        val readerA = ctx.computed { map.get("a") }
-        val membership = ctx.computed { ctx.get(map.len()) }
-        val order = ctx.computed { ctx.get(map.keys()) }
+        val readerA = ctx.computed { map.get("a", this) }
+        val membership = ctx.computed { get(map.len()) }
+        val order = ctx.computed { get(map.keys()) }
         ctx.get(readerA); ctx.get(membership); ctx.get(order)
 
         map.remove("b")
@@ -118,9 +118,9 @@ class CollectionsTest {
         tree.insertChild("root", "b", 2)
         tree.insertChild("root", "c", 3)
 
-        val rootValueReader = ctx.computed { tree.get("root") }
-        val childAValueReader = ctx.computed { tree.get("a") }
-        val rootChildrenOrder = ctx.computed { ctx.get(tree.children("root").keys()) }
+        val rootValueReader = ctx.computed { tree.get("root", this) }
+        val childAValueReader = ctx.computed { tree.get("a", this) }
+        val rootChildrenOrder = ctx.computed { get(tree.children("root").keys()) }
         ctx.get(rootValueReader); ctx.get(childAValueReader); ctx.get(rootChildrenOrder)
 
         // edit a node value -> only that node's readers invalidate.
@@ -131,9 +131,9 @@ class CollectionsTest {
         assertEquals(11, tree.get("a"))
 
         // Re-prime readers so the next op's effect is measured from a fresh state.
-        val rootValueReader2 = ctx.computed { tree.get("root") }
-        val childAValueReader2 = ctx.computed { tree.get("a") }
-        val rootChildrenOrder2 = ctx.computed { ctx.get(tree.children("root").keys()) }
+        val rootValueReader2 = ctx.computed { tree.get("root", this) }
+        val childAValueReader2 = ctx.computed { tree.get("a", this) }
+        val rootChildrenOrder2 = ctx.computed { get(tree.children("root").keys()) }
         ctx.get(rootValueReader2); ctx.get(childAValueReader2); ctx.get(rootChildrenOrder2)
 
         // atomic child move -> only child order invalidates; node values untouched.
@@ -168,9 +168,9 @@ class CollectionsTest {
         val ctx = Context()
         val map: CellMap<String, Int> =
             CellMap(ctx, listOf("a" to 1, "b" to 2, "c" to 3, "d" to 4))
-        val readerB = ctx.computed { map.get("b") }
-        val readerC = ctx.computed { map.get("c") }
-        val readerA = ctx.computed { map.get("a") }
+        val readerB = ctx.computed { map.get("b", this) }
+        val readerC = ctx.computed { map.get("c", this) }
+        val readerA = ctx.computed { map.get("a", this) }
         ctx.get(readerB); ctx.get(readerC); ctx.get(readerA)
 
         map.reconcile(listOf("b", "c", "a"), mapOf("a" to 1, "b" to 2, "c" to 3))
