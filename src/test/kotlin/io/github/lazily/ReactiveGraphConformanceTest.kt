@@ -362,9 +362,12 @@ class ReactiveGraphConformanceTest {
          */
         private val signals = HashMap<String, Computed<Int>>()
 
+        // Value-threaded read (#lzcellkernel): the tracking surface is a parameter,
+        // so a read inside a compute/effect closure (Compute receiver) tracks and a
+        // top-level read (Context receiver) does not.
         @Suppress("UNCHECKED_CAST")
-        private fun readNode(id: String): Int = when (val n = nodes[id]) {
-            is Cell<*> -> ctx.get(n as Cell<Int>)
+        private fun readNode(cx: ComputeOps, id: String): Int = when (val n = nodes[id]) {
+            is Cell<*> -> cx.get(n as Cell<Int>)
             else -> error("unknown or unreadable node '$id'")
         }
 
@@ -373,10 +376,10 @@ class ReactiveGraphConformanceTest {
         }
 
         override fun defineComputed(id: String, reads: List<String>, offset: Int, scope: String?) {
-            val compute: Context.() -> Int = {
+            val compute: Compute.() -> Int = {
                 countCompute(id)
                 var sum = offset
-                for (r in reads) sum += readNode(r)
+                for (r in reads) sum += readNode(this, r)
                 sum
             }
             // v2: every `computed` is guarded (`==` suppression) — there is no
@@ -389,10 +392,10 @@ class ReactiveGraphConformanceTest {
 
         override fun defineSignal(id: String, reads: List<String>, offset: Int, scope: String?) {
             // The eager construction: an eager Computed (`computed().eager()`).
-            val compute: Context.() -> Int = {
+            val compute: Compute.() -> Int = {
                 countCompute(id)
                 var sum = offset
-                for (r in reads) sum += readNode(r)
+                for (r in reads) sum += readNode(this, r)
                 sum
             }
             val fc = scopes[scope]?.eagerComputed(compute) ?: ctx.computed(compute).eager(ctx)
@@ -408,14 +411,14 @@ class ReactiveGraphConformanceTest {
         }
 
         override fun defineEffect(id: String, reads: List<String>, scope: String?) {
-            val run: Context.() -> (() -> Unit)? = {
+            val run: Compute.() -> (() -> Unit)? = {
                 runLog.add(id)
                 // Swallowed, not propagated: an effect that reads through a
                 // disposed node must not turn the publish that scheduled it into
                 // a throw. The corpus asserts read-after-dispose at top-level
                 // reads.
                 try {
-                    for (r in reads) readNode(r)
+                    for (r in reads) readNode(this, r)
                 } catch (_: DisposedNodeException) {
                     // Observed by the top-level read that names the same node.
                 }
@@ -424,7 +427,7 @@ class ReactiveGraphConformanceTest {
             nodes[id] = scopes[scope]?.effect(run) ?: ctx.effect(run)
         }
 
-        override fun read(id: String): Int = readNode(id)
+        override fun read(id: String): Int = readNode(ctx, id)
 
         @Suppress("UNCHECKED_CAST")
         override fun setCell(id: String, value: Int) {

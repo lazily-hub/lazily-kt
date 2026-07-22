@@ -119,7 +119,7 @@ private data class FanOutFixture(
 private fun setupContextFanOut(width: Int): FanOutFixture {
     val ctx = Context()
     val root = ctx.source(0L)
-    val slots = (0 until width).map { offset -> ctx.computed { ctx.get(root) + offset } }
+    val slots = (0 until width).map { offset -> ctx.computed { get(root) + offset } }
     for (slot in slots) BlackholeSink.consume(ctx.get(slot as Computed<Long>))
     return FanOutFixture(ctx, root, slots)
 }
@@ -141,10 +141,10 @@ private data class MemoChainFixture(
 private fun setupContextMemoChain(depth: Int): MemoChainFixture {
     val ctx = Context()
     val root = ctx.source(0L)
-    var tail: Computed<Long> = ctx.computed { ctx.get(root) % 2L }
+    var tail: Computed<Long> = ctx.computed { get(root) % 2L }
     repeat(depth) {
         val prev = tail
-        tail = ctx.computed { ctx.get(prev) + 1L }
+        tail = ctx.computed { get(prev) + 1L }
     }
     BlackholeSink.consume(ctx.get(tail))
     return MemoChainFixture(ctx, root, tail)
@@ -175,7 +175,7 @@ private fun setupContextBatchStorm(cellsLen: Int): BatchStormFixture {
     val sink = longArrayOf(0L)
     ctx.effect {
         var total = 0L
-        for (cell in cellsForEffect) total += ctx.get(cell as Source<Long>)
+        for (cell in cellsForEffect) total += get(cell as Source<Long>)
         sink[0] = total
         null
     }
@@ -204,7 +204,7 @@ fun benchCachedReads(): List<BenchmarkResult> {
         timeOp(Benchmark(group, "context", setup = {
             val ctx = Context()
             val root = ctx.source(21L)
-            val doubled = ctx.computed { ctx.get(root) * 2L }
+            val doubled = ctx.computed { get(root) * 2L }
             BlackholeSink.consume(ctx.get(doubled))
             Triple(ctx, root, doubled)
         }) { hole, fixture ->
@@ -231,7 +231,7 @@ fun benchColdFirstGet(): List<BenchmarkResult> {
             // Per-iteration fresh context + slot (build is part of the op).
             val ctx = Context()
             val root = ctx.source(21L)
-            val doubled = ctx.computed { ctx.get(root) * 2L }
+            val doubled = ctx.computed { get(root) * 2L }
             hole.consume(ctx.get(doubled))
         }),
         timeOp(Benchmark(group, "thread_safe_context", warmup = 200, samples = 1_000, setup = { 0 }) { hole, _ ->
@@ -315,7 +315,7 @@ fun benchEffectFlushing(): List<BenchmarkResult> {
             val root = ctx.source(0L)
             val seen = longArrayOf(0L)
             ctx.effect {
-                seen[0] += ctx.get(root)
+                seen[0] += get(root)
                 null
             }
             Fixture3(ctx, root, seen)
@@ -383,7 +383,7 @@ fun benchTypedCacheReads(): List<BenchmarkResult> {
         timeOp(Benchmark(group, "context_slot", setup = {
             val ctx = Context()
             val cell = ctx.source(42L)
-            val slot = ctx.computed { ctx.get(cell) }
+            val slot = ctx.computed { get(cell) }
             BlackholeSink.consume(ctx.get(slot))
             Fixture2(ctx, slot)
         }) { hole, fixture ->

@@ -60,14 +60,18 @@ class CollectionsConformanceTest {
         }
     }
 
-    /** A memo reading [key]'s value cell (a value-class reader). */
-    private fun Harness.valueReader(key: String) = ctx.computed { map.get(key) }
+    /**
+     * A memo reading [key]'s value cell (a value-class reader). Value-threaded
+     * tracking (#lzcellkernel): read the entry's [Source] handle through the
+     * compute view so the reader actually subscribes to that one cell.
+     */
+    private fun Harness.valueReader(key: String) = ctx.computed { get(map.value(key)) }
 
     /** A memo reading membership (len) — a membership-class reader. */
-    private fun Harness.membershipReader() = ctx.computed { ctx.get(map.len()) }
+    private fun Harness.membershipReader() = ctx.computed { get(map.len()) }
 
     /** A memo reading the order list — an order-class reader. */
-    private fun Harness.orderReader() = ctx.computed { ctx.get(map.keys()) }
+    private fun Harness.orderReader() = ctx.computed { get(map.keys()) }
 
     private fun applyOp(h: Harness, op: JsonObject) {
         val type = op.getValue("type").jsonPrimitive.content

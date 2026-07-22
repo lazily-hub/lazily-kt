@@ -40,13 +40,27 @@ class StateMachine<S : Any, E>(
         return true
     }
 
-    /** The current state. Auto-subscribes when read inside a slot/signal/effect. */
+    /**
+     * The current state — an **untracked** snapshot (`#lzcellkernel`). Tracking is
+     * value-threaded now, so a subscribing read inside a slot/effect goes through
+     * the [Compute] view (`getCellAny(stateId)` on the closure receiver), which
+     * [onTransition] / [stateIs] do; this property is for reads outside a compute.
+     */
     @Suppress("UNCHECKED_CAST")
     val state: S
         get() = ctx.getCellAny(stateId) as S
 
     /** The underlying cell id, for reactive composition via the owning [Context]. */
     fun stateId(): Int = stateId
+
+    /**
+     * The state as a [Source] handle, for **tracked** reactive composition under
+     * value-threading (`#lzcellkernel`): read it through a compute view —
+     * `ctx.computed { get(m.stateCell()) }` — to subscribe. (The FSM still owns
+     * writes via [send]; this handle is the composition read surface, like
+     * [stateId] but typed.)
+     */
+    fun stateCell(): Source<S> = Source(stateId)
 
     /**
      * Register an effect that fires with `(old, new)` whenever the machine
@@ -58,7 +72,9 @@ class StateMachine<S : Any, E>(
         var prev: S? = null
         var hasPrev = false
         return ctx.effect {
-            val current = state
+            // Tracked read through the effect's Compute view (#lzcellkernel).
+            @Suppress("UNCHECKED_CAST")
+            val current = getCellAny(stateId) as S
             if (hasPrev && prev != current) {
                 @Suppress("UNCHECKED_CAST")
                 handler(prev as S, current)
@@ -71,5 +87,9 @@ class StateMachine<S : Any, E>(
 
     /** An eager computed that is `true` when the machine is in [target], else `false`. */
     fun stateIs(target: S): Computed<Boolean> =
-        ctx.computed { state == target }.eager(ctx)
+        ctx.computed {
+            // Tracked read through the computed's Compute view (#lzcellkernel).
+            @Suppress("UNCHECKED_CAST")
+            (getCellAny(stateId) as S) == target
+        }.eager(ctx)
 }

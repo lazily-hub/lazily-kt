@@ -41,7 +41,7 @@ package io.github.lazily
  * val ctx = Context()
  * val n = ctx.source(1)                       // Source<Int>
  * n.set(ctx, 2)                               // ok — `set` lives on the source handle
- * val doubled = ctx.computed { ctx.get(n) * 2 }.eager(ctx)
+ * val doubled = ctx.computed { get(n) * 2 }.eager(ctx)   // `get` = the tracked Compute view
  * check(ctx.get(doubled) == 4)
  * // doubled.set(ctx, 9)                      // COMPILE ERROR: unresolved reference `set`
  * ```

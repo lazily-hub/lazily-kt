@@ -42,13 +42,13 @@ private const val INITIAL_NODE_CAPACITY = 16
  *
  * Compose with [StateMachine] for a reactive FSM, exactly as in lazily-rs/py/zig.
  */
-class Context {
+class Context : ComputeOps {
     private sealed interface Node {
         class Cell(var value: Any?, val dependents: SmallEdgeList = SmallEdgeList()) : Node
         class Slot(
             var value: Any? = null,
             var hasValue: Boolean = false,
-            val compute: Context.() -> Any? = { null },
+            val compute: Compute.() -> Any? = { null },
             // Propagate guard as an equality predicate: `true` = equal =
             // suppress downstream. `null` = natural equality (`==`), the guarded
             // `computed` default. A non-null predicate is installed by
@@ -68,7 +68,7 @@ class Context {
             var eager: Boolean = false,
         ) : Node
         class Effect(
-            val run: Context.() -> (() -> Unit)?,
+            val run: Compute.() -> (() -> Unit)?,
             val dependencies: SmallEdgeList = SmallEdgeList(),
             var cleanup: (() -> Unit)? = null,
             var forceRun: Boolean = false,
@@ -83,8 +83,21 @@ class Context {
     private var nextId: Int = 1
     private val freeIds: ArrayDeque<Int> = ArrayDeque()
 
-    /** Tracking frame stack: the currently-computing slot/effect id (auto-dep discovery). */
-    private val trackingStack: ArrayDeque<Int> = ArrayDeque()
+    // Execution stack of currently-recomputing slot / running effect ids. Under
+    // value-threaded tracking (#lzcellkernel) this NO LONGER drives edge
+    // attribution — that rides in the per-recompute [Compute] view. It survives
+    // only for the glitch-free reentrancy skip in [notifySlotValueChanged]: a
+    // dependent already mid-recompute reads the fresh value directly, so it must
+    // not be re-invalidated.
+    private val executingStack: ArrayDeque<Int> = ArrayDeque()
+
+    // Generation stamps of the recompute/effect frames currently on
+    // [executingStack]. A [Compute] view captures the generation of the frame
+    // that minted it; [assertComputeValid] rejects a read whose generation has
+    // left this stack — the runtime half of the non-escapability fortification
+    // (the JVM cannot forbid storing the view at compile time).
+    private var computeGenCounter: Long = 0
+    private val liveGenerations: ArrayDeque<Long> = ArrayDeque()
 
     private val pendingEffects: ArrayDeque<Int> = ArrayDeque()
     private val scheduledEffects: MutableSet<Int> = HashSet()
@@ -152,12 +165,12 @@ class Context {
      * form), and `computed` — which historically named the *unguarded* form in
      * these bindings — is now the guarded default.
      */
-    inline fun <reified T : Any> computed(noinline compute: Context.() -> T): Computed<T> =
+    inline fun <reified T : Any> computed(noinline compute: Compute.() -> T): Computed<T> =
         Computed(slotAny { compute() })
 
     /** @suppress Renamed to [computed]. */
     @Deprecated("Renamed to computed (guarded by default; v2 Cell kernel — #lzcellkernel).", ReplaceWith("computed(compute)"))
-    inline fun <reified T : Any> slot(noinline compute: Context.() -> T): Computed<T> = computed(compute)
+    inline fun <reified T : Any> slot(noinline compute: Compute.() -> T): Computed<T> = computed(compute)
 
     /**
      * A **guarded [Computed]** with an explicit change predicate
@@ -184,7 +197,7 @@ class Context {
      * laziness and breaks determinism).
      */
     inline fun <reified T : Any> computedRippleWhen(
-        noinline compute: Context.() -> T,
+        noinline compute: Compute.() -> T,
         noinline changed: (old: T, new: T) -> Boolean,
     ): Computed<T> =
         Computed(
@@ -200,7 +213,7 @@ class Context {
         )
 
     @PublishedApi
-    internal fun slotAny(compute: Context.() -> Any?): Int {
+    internal fun slotAny(compute: Compute.() -> Any?): Int {
         val id = allocId()
         nodes[id] = Node.Slot(compute = compute)
         return id
@@ -208,7 +221,7 @@ class Context {
 
     @PublishedApi
     internal fun slotAnyWithEquals(
-        compute: Context.() -> Any?,
+        compute: Compute.() -> Any?,
         equals: (Any?, Any?) -> Boolean,
     ): Int {
         val id = allocId()
@@ -221,10 +234,10 @@ class Context {
      * reads invalidates. [run] may return a cleanup closure (`(() -> Unit)?`);
      * cleanup runs before each rerun and on dispose.
      */
-    fun effect(run: Context.() -> (() -> Unit)?): Effect = Effect(effectAny(run))
+    fun effect(run: Compute.() -> (() -> Unit)?): Effect = Effect(effectAny(run))
 
     @PublishedApi
-    internal fun effectAny(run: Context.() -> (() -> Unit)?): Int {
+    internal fun effectAny(run: Compute.() -> (() -> Unit)?): Int {
         val id = allocId()
         nodes[id] = Node.Effect(run = run, forceRun = true)
         scheduleEffect(id, force = false)
@@ -257,28 +270,77 @@ class Context {
     @Deprecated("Reads are unified — use `get` on any Cell (#lzcellkernel).", ReplaceWith("get(handle)"))
     inline fun <reified T : Any> getCell(handle: Source<T>): T = get(handle)
 
-    @PublishedApi
-    internal fun getSlotAny(id: Int): Any {
-        // The disposed check comes *before* [registerDependency] deliberately: a
-        // reader that hits a torn-down node must not leave an edge pointing at
-        // it, or the arena's LIFO id recycling would silently re-point that edge
-        // at whatever node next occupies the id. Throwing first leaves the
-        // reader's upstream set clean (`#lzspecedgeindex`).
+    /**
+     * The genus read of a computed cell through the [Context] surface
+     * (`#lzcellkernel`): refresh if necessary and return the value.
+     *
+     * This is the **compatibility bridge** (mirrors lazily-rs keeping a
+     * thread-local bridge for closures not yet value-threaded): while a recompute
+     * is on [executingStack], a read *through a captured `ctx`* — a domain reader
+     * helper (`map.get`, `queue.head`, `mergeCell.get`) that has not been ported
+     * to take a compute surface — attributes to the recomputing node via the
+     * stack. Reads through the fortified [Compute] surface are value-threaded and
+     * bypass this (they use [getSlotRaw]); the [untracked] escape bypasses it too.
+     * At top level the stack is empty, so a plain `ctx.get(...)` registers nothing.
+     */
+    override fun getSlotAny(id: Int): Any {
         if (nodes[id] !is Node.Slot) throw DisposedNodeException(id, "slot")
-        currentFrame()?.let { registerDependency(id, it) }
+        executingStack.lastOrNull()?.let { registerDependency(id, it) }
+        return getSlotRaw(id)
+    }
+
+    /** The genus read of a source cell through [Context] — bridge counterpart of [getSlotAny]. */
+    override fun getCellAny(id: Int): Any {
+        val node = nodes[id] as? Node.Cell ?: throw DisposedNodeException(id, "cell")
+        executingStack.lastOrNull()?.let { registerDependency(id, it) }
+        return node.value as Any
+    }
+
+    /**
+     * The **raw untracked** read of a computed cell: refresh and return, register
+     * **no** edge and consult no bridge. The value-threaded [Compute] surface and
+     * the [Untracked] escape both read through here.
+     */
+    internal fun getSlotRaw(id: Int): Any {
+        if (nodes[id] !is Node.Slot) throw DisposedNodeException(id, "slot")
         refreshSlot(id)
         val node = nodes[id] as? Node.Slot ?: throw DisposedNodeException(id, "slot")
         check(node.hasValue) { "slot $id has no value" }
         return node.value as Any
     }
 
-    @PublishedApi
-    internal fun getCellAny(id: Int): Any {
-        // `disposeCell` and `disposeSlot` share one read-after-dispose contract.
+    /** The **raw untracked** read of a source cell — counterpart of [getSlotRaw]. */
+    internal fun getCellRaw(id: Int): Any {
         val node = nodes[id] as? Node.Cell ?: throw DisposedNodeException(id, "cell")
-        currentFrame()?.let { registerDependency(id, it) }
         return node.value as Any
     }
+
+    /** The untracked read surface over this context (lazily-rs `Compute::untracked`). */
+    override fun untracked(): ComputeOps = Untracked(this)
+
+    /** The owning context is itself, for construction ops over the [ComputeOps] surface. */
+    override val computeContext: Context get() = this
+
+    /**
+     * Validate that a [Compute] view minted for [nodeId] at frame [gen] is still
+     * live — its recompute frame has not returned and the node has not been
+     * disposed. The runtime half of non-escapability: a stored-and-replayed view
+     * (which the JVM cannot forbid at compile time) throws here rather than
+     * registering an edge against the wrong or a disposed node.
+     */
+    internal fun assertComputeValid(nodeId: Int, gen: Long) {
+        check(liveGenerations.isNotEmpty() && gen in liveGenerations) {
+            "lazily: a Compute view was used outside its recompute (escaped or stale); " +
+                "tracked reads must go through the view handed to the closure while it runs"
+        }
+        check(nodes[nodeId] != null) {
+            "lazily: the recomputing node $nodeId was disposed mid-recompute"
+        }
+    }
+
+    /** Value-threaded edge registration used by [Compute] (`#lzcellkernel`). */
+    internal fun registerDependencyInternal(dependencyId: Int, dependentId: Int) =
+        registerDependency(dependencyId, dependentId)
 
     // -- Write -------------------------------------------------------------
 
@@ -620,8 +682,6 @@ class Context {
         return id
     }
 
-    private fun currentFrame(): Int? = trackingStack.lastOrNull()
-
     // Edge containers: see EdgeList.kt. SmallEdgeList inlines the 0-2 edge case
     // (#lzktsmalledgelist), scans for dedup while the degree is small, and
     // promotes to a hash index above EDGE_INDEX_THRESHOLD (#lzspecedgeindex) so
@@ -698,11 +758,18 @@ class Context {
         for (dep in node.dependencies) removeDependentEdge(dep, id)
         node.dependencies.clear()
         val compute = node.compute
-        trackingStack.addLast(id)
+        // Value-thread the recomputing node id into the closure via a per-recompute
+        // [Compute] view (#lzcellkernel): reads *through it* attribute their edge to
+        // `id`. The execution stack + generation are for the reentrancy skip and the
+        // escape guard only — never for edge attribution.
+        val gen = ++computeGenCounter
+        executingStack.addLast(id)
+        liveGenerations.addLast(gen)
         val result: Any? = try {
-            compute()
+            Compute(this, id, gen).compute()
         } finally {
-            trackingStack.removeLast()
+            liveGenerations.removeLast()
+            executingStack.removeLast()
         }
         val unchanged = node.hasValue &&
             (node.equalsFn?.invoke(node.value, result) ?: (node.value == result))
@@ -726,7 +793,7 @@ class Context {
             // the fresh value directly — re-invalidating it would redundantly
             // re-run it (glitch-free guarantee). This matters when a demand-driven
             // reader Slot recomputes inside the very Effect reading it.
-            if (d in trackingStack) continue
+            if (d in executingStack) continue
             stack.addLast(d); forceStack.addLast(true)
         }
         runFrontier(stack, forceStack)
@@ -816,11 +883,15 @@ class Context {
         node.forceRun = false
         val run = node.run
         cleanup?.invoke()
-        trackingStack.addLast(id)
+        // Effects track through their own [Compute] view, exactly like computeds.
+        val gen = ++computeGenCounter
+        executingStack.addLast(id)
+        liveGenerations.addLast(gen)
         val nextCleanup = try {
-            run()
+            Compute(this, id, gen).run()
         } finally {
-            trackingStack.removeLast()
+            liveGenerations.removeLast()
+            executingStack.removeLast()
         }
         val current = nodes[id] as? Node.Effect
         if (current != null) current.cleanup = nextCleanup
@@ -922,7 +993,7 @@ class TeardownScope internal constructor(
     inline fun <reified T : Any> cell(value: T): Source<T> = source(value)
 
     /** A guarded [Computed] owned by this scope. */
-    inline fun <reified T : Any> computed(noinline compute: Context.() -> T): Computed<T> =
+    inline fun <reified T : Any> computed(noinline compute: Compute.() -> T): Computed<T> =
         adopt(ctx.computed(compute))
 
     /**
@@ -931,23 +1002,23 @@ class TeardownScope internal constructor(
      * downstream, `false` suppresses. `changed` MUST be pure in `(old, new)`.
      */
     inline fun <reified T : Any> computedRippleWhen(
-        noinline compute: Context.() -> T,
+        noinline compute: Compute.() -> T,
         noinline changed: (old: T, new: T) -> Boolean,
     ): Computed<T> = adopt(ctx.computedRippleWhen(compute, changed))
 
     /** @suppress Renamed to [computed]. */
     @Deprecated("Renamed to computed (#lzcellkernel).", ReplaceWith("computed(compute)"))
-    inline fun <reified T : Any> slot(noinline compute: Context.() -> T): Computed<T> =
+    inline fun <reified T : Any> slot(noinline compute: Compute.() -> T): Computed<T> =
         computed(compute)
 
     /** An effect owned by this scope. */
-    fun effect(run: Context.() -> (() -> Unit)?): Effect = adopt(ctx.effect(run))
+    fun effect(run: Compute.() -> (() -> Unit)?): Effect = adopt(ctx.effect(run))
 
     /**
      * An eager [Computed] owned by this scope — the eager construction. Owns the
      * computed; disposing it tears down the puller too (via the eager bit).
      */
-    inline fun <reified T : Any> eagerComputed(noinline compute: Context.() -> T): Computed<T> =
+    inline fun <reified T : Any> eagerComputed(noinline compute: Compute.() -> T): Computed<T> =
         adopt(ctx.computed(compute).eager(ctx))
 
     /**

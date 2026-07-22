@@ -23,12 +23,12 @@ class ComputedRippleWhenTest {
         // Derived value carries a `bucket` proxy; propagate only when the bucket
         // changes, ignoring the raw payload.
         val derived = ctx.computedRippleWhen(
-            { val v = ctx.get(input); v to (v / 10) }, // (payload, bucket)
+            { val v = get(input); v to (v / 10) }, // (payload, bucket)
             { old, new -> old.second != new.second }, // propagate when bucket changed
         )
 
         var recomputes = 0
-        val observer = ctx.computed { recomputes++; ctx.get(derived).first }
+        val observer = ctx.computed { recomputes++; get(derived).first }
 
         assertEquals(0L, ctx.get(observer))
         val base = recomputes
@@ -53,12 +53,12 @@ class ComputedRippleWhenTest {
         // value, so the predicate is a pure function of (old, new): propagate
         // only when the count crosses a size-3 window boundary.
         val sampled = ctx.computedRippleWhen(
-            { ctx.get(input) },
+            { get(input) },
             { old, new -> new / 3 != old / 3 },
         )
 
         var seen = 0
-        val observer = ctx.computed { seen++; ctx.get(sampled) }
+        val observer = ctx.computed { seen++; get(sampled) }
 
         assertEquals(0L, ctx.get(observer))
         val base = seen
@@ -81,16 +81,16 @@ class ComputedRippleWhenTest {
         val ctx = Context()
         val input = ctx.source(0L)
 
-        val viaComputed = ctx.computed { minOf(ctx.get(input), 1L) }
+        val viaComputed = ctx.computed { minOf(get(input), 1L) }
         val viaWhen = ctx.computedRippleWhen(
-            { minOf(ctx.get(input), 1L) },
+            { minOf(get(input), 1L) },
             { o, n -> o != n },
         )
 
         var a = 0
         var b = 0
-        val obsA = ctx.computed { a++; ctx.get(viaComputed) }
-        val obsB = ctx.computed { b++; ctx.get(viaWhen) }
+        val obsA = ctx.computed { a++; get(viaComputed) }
+        val obsB = ctx.computed { b++; get(viaWhen) }
         assertEquals(0L, ctx.get(obsA))
         assertEquals(0L, ctx.get(obsB))
         val baseA = a
@@ -118,12 +118,12 @@ class ComputedRippleWhenTest {
         // ripple-when { _, _ -> true } installs an always-propagate guard: even
         // an equal recompute propagates (the pass-through identity).
         val passthrough = ctx.computedRippleWhen(
-            { ctx.get(input); 0L }, // depend on input, but always yield the same value
+            { get(input); 0L }, // depend on input, but always yield the same value
             { _, _ -> true },
         )
 
         var recomputes = 0
-        val observer = ctx.computed { recomputes++; ctx.get(passthrough) }
+        val observer = ctx.computed { recomputes++; get(passthrough) }
 
         assertEquals(0L, ctx.get(observer))
         val base = recomputes

@@ -38,7 +38,7 @@ class CellKernelTest {
         val ctx = Context()
         val n = ctx.source(2)
         var computes = 0
-        val doubled = ctx.computed { computes++; ctx.get(n) * 2 }
+        val doubled = ctx.computed { computes++; get(n) * 2 }
         assertEquals(4, ctx.get(doubled))
         assertEquals(4, ctx.get(doubled)) // cached — no recompute
         assertEquals(1, computes)
@@ -53,9 +53,9 @@ class CellKernelTest {
         // version, so a dependent computed does not re-run (all cells guarded).
         val ctx = Context()
         val n = ctx.source(1)
-        val parity = ctx.computed { ctx.get(n) % 2 } // 1 -> 1 when n goes 1 -> 3
+        val parity = ctx.computed { get(n) % 2 } // 1 -> 1 when n goes 1 -> 3
         var downstream = 0
-        val watcher = ctx.computed { downstream++; ctx.get(parity) }
+        val watcher = ctx.computed { downstream++; get(parity) }
         assertEquals(1, ctx.get(watcher))
         assertEquals(1, downstream)
         n.set(ctx, 3) // parity recomputes to 1 (unchanged) ⇒ watcher must not re-run
@@ -68,7 +68,7 @@ class CellKernelTest {
         val ctx = Context()
         val n = ctx.source(1)
         var computes = 0
-        val f = ctx.computed { computes++; ctx.get(n) + 100 }.eager(ctx)
+        val f = ctx.computed { computes++; get(n) + 100 }.eager(ctx)
         assertTrue(f.isEager(ctx))
         assertEquals(1, computes, "an eager computed materializes at creation, without a read")
         assertEquals(1, ctx.dependentCount(f), "the puller is a dependent of the computed")
@@ -91,7 +91,7 @@ class CellKernelTest {
     fun eager_is_idempotent_and_returns_the_same_handle() {
         val ctx = Context()
         val n = ctx.source(0)
-        val f = ctx.computed { ctx.get(n) }.eager(ctx)
+        val f = ctx.computed { get(n) }.eager(ctx)
         assertEquals(1, ctx.dependentCount(f))
         val same = f.eager(ctx)
         assertEquals(f, same, "eager returns the same (mutated) handle")
@@ -102,7 +102,7 @@ class CellKernelTest {
     fun disposing_an_eager_computed_tears_down_its_puller() {
         val ctx = Context()
         val n = ctx.source(0)
-        val f = ctx.computed { ctx.get(n) }.eager(ctx)
+        val f = ctx.computed { get(n) }.eager(ctx)
         assertEquals(1, ctx.dependentCount(n), "the computed reads the source")
         f.dispose(ctx)
         assertTrue(ctx.isDisposed(f))

@@ -24,11 +24,14 @@ fun interface SemFold<V, D> {
 }
 
 /** Read a slot via the non-reified internal accessor (returns [Any]). */
-private fun Context.slotValue(id: Int): Any = getSlotAny(id)
+// Declared on [ComputeOps] so a read inside an [allocSemSlot] body (Compute
+// receiver) tracks against the recomputing memo slot; a top-level
+// `ctx.slotValue(...)` (Context receiver) is an untracked snapshot (#lzcellkernel).
+private fun ComputeOps.slotValue(id: Int): Any = getSlotAny(id)
 
 /** Allocate a memo slot over [compute] without a reified type parameter. */
-private fun Context.allocSemSlot(compute: Context.() -> Any?): Computed<Any> =
-    Computed(slotAny { compute() })
+private fun Context.allocSemSlot(compute: Compute.() -> Any?): Computed<Any> =
+    Computed(slotAny(compute))
 
 /**
  * A memoized semantic derivation over a [CellTree]: one `memo` slot per node,
@@ -103,13 +106,18 @@ class SemTree<K : Any, D : Any> private constructor(
                 childSlots[c] = s
             }
             val slot = ctx.allocSemSlot {
-                val v = tree.get(nodeId) // subscribe to this node's value cell
-                // Subscribe to child order/membership and fold children in current order.
+                // Value-threaded tracked reads (#lzcellkernel): every read below
+                // goes through the [Compute] receiver, so the memo slot subscribes
+                // to this node's value cell, its child order slot, and each child
+                // memo slot — attributed to the memo slot being recomputed, not an
+                // ambient frame.
+                @Suppress("UNCHECKED_CAST")
+                val v = getCellAny(tree.value(nodeId).id) as V // subscribe to this node's value cell
                 val orderSlot = tree.children(nodeId).keys()
-                val ids = ctx.slotValue(orderSlot.id) as List<*>
+                val ids = slotValue(orderSlot.id) as List<*>
                 @Suppress("UNCHECKED_CAST")
                 val ds = ArrayList<Any?>(ids.size)
-                for (id in ids) childSlots[id]?.let { ds.add(ctx.slotValue(it)) }
+                for (id in ids) childSlots[id]?.let { ds.add(slotValue(it)) }
                 fold.fold(v, ds as List<D>) as Any
             }
             return slot.id

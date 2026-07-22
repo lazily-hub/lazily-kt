@@ -45,7 +45,7 @@ private fun buildGraph(n: Int): Graph {
     for (i in 0 until n) {
         val a = inputs[i]
         val b = inputs[i.coerceAtLeast(1) - 1]
-        formulas += ctx.computed { ctx.get(a) + ctx.get(b) }
+        formulas += ctx.computed { get(a) + get(b) }
     }
     return Graph(ctx, inputs, formulas)
 }

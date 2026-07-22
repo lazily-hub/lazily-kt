@@ -82,7 +82,7 @@ private fun runRung(width: Int): RungResult {
 
     val buildStart = System.nanoTime()
     for (i in 0 until width) {
-        subs += ctx.computed { ctx.get(topic) + i }
+        subs += ctx.computed { get(topic) + i }
     }
     // Force the edges to actually register: a lazy slot registers its
     // dependency on first compute, not at construction.
@@ -129,7 +129,7 @@ private fun warmup() {
         val ctx = Context()
         val topic = ctx.source(0L)
         val subs = ArrayList<Computed<Long>>(256)
-        for (i in 0 until 256) subs += ctx.computed { ctx.get(topic) + i }
+        for (i in 0 until 256) subs += ctx.computed { get(topic) + i }
         for (s in subs) sink += ctx.get(s)
         topic.set(ctx, 1L)
         for (s in subs) sink += ctx.get(s)

@@ -32,14 +32,18 @@ sealed class InsertAt<out K> {
     data class After<K>(val anchor: K) : InsertAt<K>()
 }
 
-/** Read the value of a cell handle via the non-reified internal accessor. */
-private fun Context.cellValue(id: Int): Any = getCellAny(id)
+// Read the value of a cell handle via the non-reified internal accessor.
+// Declared on [ComputeOps] so it obeys the surface's tracking discipline: a
+// read inside an [allocSlot] body (Compute receiver) tracks against the
+// recomputing node; a top-level `ctx.cellValue(...)` (Context receiver) does not
+// (#lzcellkernel).
+private fun ComputeOps.cellValue(id: Int): Any = getCellAny(id)
 
 /** Allocate a cell holding [value] without a reified type parameter. */
 private fun Context.allocCell(): Source<Any> = Source(cellAny(UNSET))
 
 /** Allocate a memo/non-memo slot over [compute] without a reified type parameter. */
-private fun Context.allocSlot(compute: Context.() -> Any?): Computed<Any> =
+private fun Context.allocSlot(compute: Compute.() -> Any?): Computed<Any> =
     Computed(slotAny(compute))
 
 private object UnsetSentinel

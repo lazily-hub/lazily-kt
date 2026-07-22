@@ -90,7 +90,7 @@ class StateMachineKtTest {
     fun state_composes_reactively() {
         val ctx = Context()
         val m = StateMachine(ctx, 0) { s, step: Int -> s + step }
-        val doubled = ctx.computed { m.state * 2 }
+        val doubled = ctx.computed { get(m.stateCell()) * 2 }
         assertEquals(0, ctx.get(doubled))
         m.send(5)
         assertEquals(10, ctx.get(doubled))
