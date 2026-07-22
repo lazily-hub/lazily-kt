@@ -3,6 +3,7 @@ package io.github.lazily
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /**
@@ -22,6 +23,8 @@ import kotlin.test.assertTrue
  * ```
  */
 class CellKernelTest {
+    private data class Box(val value: Int)
+
     @Test
     fun source_cell_reads_and_writes() {
         val ctx = Context()
@@ -45,6 +48,33 @@ class CellKernelTest {
         n.set(ctx, 3)
         assertEquals(6, ctx.get(doubled))
         assertEquals(2, computes)
+    }
+
+    @Test
+    fun shared_reference_read_parity_covers_source_and_computed() {
+        // #lzrsgetarc: Kotlin's ordinary get is naturally a shared-reference
+        // read. Pin the three lazily-formal parity properties with identity,
+        // refresh, and one exact tracked edge for each Cell kind.
+        val ctx = Context()
+        val initial = Box(1)
+        val source = ctx.source(initial)
+        val computed = ctx.computed { get(source) }
+        val sourceReader = ctx.computed { get(source).value }
+        val computedReader = ctx.computed { get(computed).value }
+
+        assertSame(initial, ctx.get(source))
+        assertSame(initial, ctx.get(computed))
+        assertEquals(1, ctx.get(sourceReader))
+        assertEquals(1, ctx.get(computedReader))
+        assertEquals(1, ctx.dependencyCount(sourceReader))
+        assertEquals(1, ctx.dependencyCount(computedReader))
+
+        val replacement = Box(2)
+        source.set(ctx, replacement)
+        assertSame(replacement, ctx.get(source))
+        assertSame(replacement, ctx.get(computed))
+        assertEquals(2, ctx.get(sourceReader))
+        assertEquals(2, ctx.get(computedReader))
     }
 
     @Test

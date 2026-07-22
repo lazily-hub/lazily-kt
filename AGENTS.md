@@ -29,8 +29,15 @@ and coroutine-backed async (`AsyncContext`).
   types **`Source<T>`** (written from outside) and **`Computed<T>`** (computed
   from upstream) — plus **`Effect`** (a side-effecting sink, outside the `Cell`
   hierarchy). Constructors: `source(v)`, `computed(f)`, `computed(f).eager(ctx)`.
-  - Pull-based, glitch-free refresh: a computed that reads other computeds always
-    observes values consistent with the current inputs.
+- Pull-based, glitch-free refresh: a computed that reads other computeds always
+observes values consistent with the current inputs.
+- **Unified shared reads (`#lzrsgetarc`).** Kotlin object values are references,
+so the single `Context.get` / tracked `ComputeOps.get` surface is naturally the
+shared-reference read for both `Source` and `Computed`: it returns the same
+current object, refreshes computeds identically, and registers the same tracked
+edge, with no clone-bearing alternate API. This realizes the
+`Reactive.readShared_eq_readCell`, `Reactive.trackedSharedRead_eq_trackedRead`,
+and `Reactive.trackedSharedRead_registers_edge` formal pins.
   - **All cells are guarded — there is no unguarded mode.** A source write is
     `==`-guarded (an equal value is a no-op); every `Computed` is `==`-guarded so
     an equal recompute suppresses downstream (matching TC39 `Signal.Computed`).
