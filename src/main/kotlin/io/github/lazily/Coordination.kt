@@ -63,7 +63,7 @@ class LeaseCore<P : Any> {
 /** Reactive lease: projects the holder onto a `Cell`. */
 class LeaseCell<P : Any>(private val ctx: Context) {
     private val core = LeaseCore<P>()
-    val holderCell: Source<Any> = ctx.cell<Any>(CoordEmpty)
+    val holderCell: Source<Any> = ctx.source<Any>(CoordEmpty)
 
     private fun refresh(now: Long) = holderCell.set(ctx, core.holder(now) ?: CoordEmpty)
 
@@ -84,7 +84,7 @@ enum class LeaderRole { Leader, Follower, Candidate }
 /** Reactive leadership over a lease from node `me`'s perspective. */
 class LeaderCell<P : Any>(private val ctx: Context, private val me: P) {
     private val core = LeaseCore<P>()
-    val currentLeaderCell: Source<Any> = ctx.cell<Any>(CoordEmpty)
+    val currentLeaderCell: Source<Any> = ctx.source<Any>(CoordEmpty)
 
     private fun refresh(now: Long) = currentLeaderCell.set(ctx, core.holder(now) ?: CoordEmpty)
 

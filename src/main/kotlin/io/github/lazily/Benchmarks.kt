@@ -153,7 +153,7 @@ private fun setupContextMemoChain(depth: Int): MemoChainFixture {
 private fun setupThreadSafeMemoChain(depth: Int): MemoChainFixture {
     val ctx = ThreadSafeContext()
     val root = ctx.source(0L)
-    var tail: ThreadSafeComputed<Long> = ctx.memo { ctx.get(root) % 2L }
+    var tail: ThreadSafeComputed<Long> = ctx.computed { ctx.get(root) % 2L }
     repeat(depth) {
         val prev = tail
         tail = ctx.computed { ctx.get(prev) + 1L }

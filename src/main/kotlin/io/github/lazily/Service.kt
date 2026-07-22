@@ -82,7 +82,7 @@ class DiscoveryCore<P : Any> {
 /** Reactive service discovery. */
 class DiscoveryCell<P : Any>(private val ctx: Context) {
     private val core = DiscoveryCore<P>()
-    val discoveryCell: Source<Any> = ctx.cell<Any>(emptyMap<String, String>())
+    val discoveryCell: Source<Any> = ctx.source<Any>(emptyMap<String, String>())
 
     private fun refresh() = discoveryCell.set(ctx, core.discovery())
 
@@ -136,7 +136,7 @@ class ServiceRegistryCore {
 /** Reactive durable service registry. */
 class ServiceRegistry(private val ctx: Context) {
     private val core = ServiceRegistryCore()
-    val projectionCell: Source<Any> = ctx.cell<Any>(emptyMap<String, String>())
+    val projectionCell: Source<Any> = ctx.source<Any>(emptyMap<String, String>())
 
     private fun refresh() = projectionCell.set(ctx, core.projection())
 

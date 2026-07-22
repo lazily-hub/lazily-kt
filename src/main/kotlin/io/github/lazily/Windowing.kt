@@ -113,7 +113,7 @@ class SessionCore<T : Any>(private val gap: Long, private val merge: (T, T) -> T
 
 /** Shared reactive-cell projection: last emitted aggregate on a `Cell`. */
 private class WindowOutput<T : Any>(val ctx: Context) {
-    val cell: Source<Any> = ctx.cell<Any>(WindowEmpty)
+    val cell: Source<Any> = ctx.source<Any>(WindowEmpty)
     fun emit(e: T?): T? {
         if (e != null) cell.set(ctx, e)
         return e

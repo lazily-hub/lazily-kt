@@ -196,7 +196,7 @@ class ReactiveContextTest {
         val ctx = Context()
         // A slot that reads itself: capture its own id post-creation.
         val selfId = intArrayOf(0)
-        val self = ctx.slot<Int> { ctx.get(Computed(selfId[0])) }
+        val self = ctx.computed<Int> { ctx.get(Computed(selfId[0])) }
         selfId[0] = self.id
         try {
             ctx.get(self)

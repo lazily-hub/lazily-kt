@@ -144,7 +144,7 @@ class MembershipCore<P : Comparable<P>>(private val config: MembershipConfig) {
  *  onto a `Cell` so the [peerSet] invalidates only on a set change. */
 class MembershipCell<P : Comparable<P>>(private val ctx: Context, config: MembershipConfig) {
     private val core = MembershipCore<P>(config)
-    val peerSetCell: Source<Any> = ctx.cell<Any>(emptySet<P>())
+    val peerSetCell: Source<Any> = ctx.source<Any>(emptySet<P>())
 
     private fun refresh() = peerSetCell.set(ctx, core.aliveSet())
 

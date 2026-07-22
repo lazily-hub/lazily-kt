@@ -76,32 +76,33 @@ and JSON Schemas in `lazily-spec` and the Lean models in `lazily-formal`.
 lazily-kt mirrors lazily-rs `Context` semantics across all three context layers
 — single-threaded base, lock-backed thread-safe, and coroutine-backed async:
 
-- **Slot** — a lazily-computed, memoized derived value. Tracks its dependencies
+- **Computed** — a lazily-computed, memoized derived value. Tracks its dependencies
   automatically, computes on first read, caches, and recomputes only when read
   after an upstream change.
-- **Cell** — a mutable source value that invalidates dependent Slots/Signals
+- **Source** — a mutable value that invalidates dependent Computeds/Signals
   when it changes.
 - **Effect** — a side-effecting observer that reruns whenever a tracked
   dependency invalidates; a cleanup closure runs before each rerun and on
   dispose.
 
-The core primitives are **Cell** / **Slot** / **Effect**. **`Signal` is a
-derived construct, not a core primitive** — `Signal ≡ Slot.eager`, a memo Slot
-plus a puller Effect that recomputes the instant a dependency changes, so its
+The core primitives are **Source** / **Computed** / **Effect**. **`Signal` is a
+derived construct, not a core primitive** — `Signal ≡ Computed.eager`, a guarded
+Computed plus a puller Effect that recomputes the instant a dependency changes, so its
 value is materialized by the time `set` / `batch` returns (no intermediate
 unset value).
 
 Values are **lazy by default**; reach for the derived `Signal` when you need
-eager push semantics. Handles (`SlotHandle` / `CellHandle` / `SignalHandle` /
-`EffectHandle`) are lightweight ids over a shared node table, like lazily-rs.
+eager push semantics. `SlotHandle` and `CellHandle` remain compatibility aliases;
+`Computed`, `Source`, `SignalHandle`, and `EffectHandle` are the canonical
+lightweight ids over the shared node table.
 
 ### Why it behaves the way it does
 
-- **Pull-based, glitch-free refresh** — a slot that reads other slots always
+- **Pull-based, glitch-free refresh** — a Computed that reads other nodes always
   observes values consistent with the current inputs.
 - **`==` guard on `set`** — setting an equal value is a no-op (no
   downstream cascade).
-- **`memo` adds a `==` guard** — an equal recompute suppresses downstream
+- **`computed` has a `==` guard** — an equal recompute suppresses downstream
   invalidation.
 - **`batch` coalesces** invalidations into one effect flush.
 - **Dynamic dependencies** — the tracking stack auto-discovers edges on each

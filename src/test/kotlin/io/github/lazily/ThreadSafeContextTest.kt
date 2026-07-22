@@ -80,7 +80,7 @@ class ThreadSafeContextTest {
     fun memo_guard_suppresses_downstream_on_equal_recompute() {
         val ctx = ThreadSafeContext()
         val trigger = ctx.source(1)
-        val constant = ctx.memo { ctx.get(trigger); 7 }
+        val constant = ctx.computed { ctx.get(trigger); 7 }
         var leafRuns = 0
         val leaf = ctx.computed { leafRuns++; ctx.get(constant) + 1 }
         assertEquals(8, ctx.get(leaf))
