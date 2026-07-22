@@ -14,26 +14,26 @@ class ThreadSafeContextTest {
     @Test
     fun cell_get_and_set() {
         val ctx = ThreadSafeContext()
-        val a = ctx.cell(10)
-        val b = ctx.cell(20)
-        assertEquals(10, ctx.getCell(a))
-        assertEquals(20, ctx.getCell(b))
-        ctx.setCell(a, 99)
-        assertEquals(99, ctx.getCell(a))
+        val a = ctx.source(10)
+        val b = ctx.source(20)
+        assertEquals(10, ctx.get(a))
+        assertEquals(20, ctx.get(b))
+        ctx.set(a, 99)
+        assertEquals(99, ctx.get(a))
     }
 
     @Test
     fun cell_partial_eq_guard_suppresses_noop_set() {
         val ctx = ThreadSafeContext()
-        val src = ctx.cell(1)
+        val src = ctx.source(1)
         var runs = 0
-        val derived = ctx.computed { runs++; ctx.getCell(src) * 2 }
+        val derived = ctx.computed { runs++; ctx.get(src) * 2 }
         assertEquals(2, ctx.get(derived))
         assertEquals(1, runs)
-        ctx.setCell(src, 1) // equal: no invalidation
+        ctx.set(src, 1) // equal: no invalidation
         assertEquals(2, ctx.get(derived))
         assertEquals(1, runs)
-        ctx.setCell(src, 5) // real change
+        ctx.set(src, 5) // real change
         assertEquals(10, ctx.get(derived))
         assertEquals(2, runs)
     }
@@ -54,24 +54,24 @@ class ThreadSafeContextTest {
     @Test
     fun slot_tracks_cell_dependency_and_invalidates() {
         val ctx = ThreadSafeContext()
-        val a = ctx.cell(2)
-        val b = ctx.cell(3)
-        val sum = ctx.computed { ctx.getCell(a) + ctx.getCell(b) }
+        val a = ctx.source(2)
+        val b = ctx.source(3)
+        val sum = ctx.computed { ctx.get(a) + ctx.get(b) }
         assertEquals(5, ctx.get(sum))
-        ctx.setCell(a, 10)
+        ctx.set(a, 10)
         assertEquals(13, ctx.get(sum))
-        ctx.setCell(b, 20)
+        ctx.set(b, 20)
         assertEquals(30, ctx.get(sum))
     }
 
     @Test
     fun slot_chained_and_glitch_free() {
         val ctx = ThreadSafeContext()
-        val src = ctx.cell(1)
-        val mid = ctx.computed { ctx.getCell(src) + 1 }
+        val src = ctx.source(1)
+        val mid = ctx.computed { ctx.get(src) + 1 }
         val leaf = ctx.computed { ctx.get(mid) * 10 }
         assertEquals(20, ctx.get(leaf))
-        ctx.setCell(src, 4)
+        ctx.set(src, 4)
         assertEquals(50, ctx.get(leaf))
         assertEquals(5, ctx.get(mid))
     }
@@ -79,13 +79,13 @@ class ThreadSafeContextTest {
     @Test
     fun memo_guard_suppresses_downstream_on_equal_recompute() {
         val ctx = ThreadSafeContext()
-        val trigger = ctx.cell(1)
-        val constant = ctx.memo { ctx.getCell(trigger); 7 }
+        val trigger = ctx.source(1)
+        val constant = ctx.memo { ctx.get(trigger); 7 }
         var leafRuns = 0
         val leaf = ctx.computed { leafRuns++; ctx.get(constant) + 1 }
         assertEquals(8, ctx.get(leaf))
         assertEquals(1, leafRuns)
-        ctx.setCell(trigger, 2) // constant recomputes to 7 (equal) → leaf must NOT recompute
+        ctx.set(trigger, 2) // constant recomputes to 7 (equal) → leaf must NOT recompute
         assertEquals(8, ctx.get(leaf))
         assertEquals(1, leafRuns)
     }
@@ -95,7 +95,7 @@ class ThreadSafeContextTest {
         val ctx = ThreadSafeContext()
         // Build an indirect cycle a -> b -> a via a mutable holder (value-class
         // handles can't be `lateinit`).
-        val holder = ArrayDeque<ThreadSafeSlotHandle<Int>>()
+        val holder = ArrayDeque<ThreadSafeComputed<Int>>()
         val a = ctx.computed { holder.firstOrNull()?.let { ctx.get(it) } ?: 0 }
         val b = ctx.computed { ctx.get(a) }
         holder.addLast(b)
@@ -110,40 +110,40 @@ class ThreadSafeContextTest {
     @Test
     fun signal_is_eager_and_materialized() {
         val ctx = ThreadSafeContext()
-        val src = ctx.cell(2)
-        val sig = ctx.signal { ctx.getCell(src) * 3 }
+        val src = ctx.source(2)
+        val sig = ctx.signal { ctx.get(src) * 3 }
         assertEquals(6, ctx.getSignal(sig)) // materialized at creation
-        ctx.setCell(src, 4)
-        assertEquals(12, ctx.getSignal(sig)) // re-materialized before setCell returns
+        ctx.set(src, 4)
+        assertEquals(12, ctx.getSignal(sig)) // re-materialized before set returns
     }
 
     @Test
     fun effect_fires_synchronously_within_set_cell() {
         val ctx = ThreadSafeContext()
-        val src = ctx.cell(1)
+        val src = ctx.source(1)
         val seen = mutableListOf<Int>()
-        val eff = ctx.effect { seen.add(ctx.getCell(src)); null }
+        val eff = ctx.effect { seen.add(ctx.get(src)); null }
         assertTrue(ctx.isEffectActive(eff))
         assertEquals(listOf(1), seen)
-        ctx.setCell(src, 2)
-        // Eager flush: observer fired synchronously inside setCell.
+        ctx.set(src, 2)
+        // Eager flush: observer fired synchronously inside set.
         assertEquals(listOf(1, 2), seen)
     }
 
     @Test
     fun batch_coalesces_into_one_flush() {
         val ctx = ThreadSafeContext()
-        val a = ctx.cell(1)
-        val b = ctx.cell(10)
+        val a = ctx.source(1)
+        val b = ctx.source(10)
         var runs = 0
         var lastSum = 0
-        ctx.effect { lastSum = ctx.getCell(a) + ctx.getCell(b); runs++; null }
+        ctx.effect { lastSum = ctx.get(a) + ctx.get(b); runs++; null }
         assertEquals(1, runs)
         assertEquals(11, lastSum)
         ctx.batch {
-            ctx.setCell(a, 2)
-            ctx.setCell(a, 3)
-            ctx.setCell(b, 20)
+            ctx.set(a, 2)
+            ctx.set(a, 3)
+            ctx.set(b, 20)
         }
         // Coalesced: exactly one rerun observing the final consistent inputs.
         assertEquals(2, runs)
@@ -153,31 +153,31 @@ class ThreadSafeContextTest {
     @Test
     fun dispose_effect_drops_observer_and_runs_cleanup() {
         val ctx = ThreadSafeContext()
-        val src = ctx.cell(0)
+        val src = ctx.source(0)
         var cleanups = 0
-        val eff = ctx.effect { ctx.getCell(src); { cleanups++ } }
-        ctx.setCell(src, 1) // rerun → previous cleanup runs
+        val eff = ctx.effect { ctx.get(src); { cleanups++ } }
+        ctx.set(src, 1) // rerun → previous cleanup runs
         assertEquals(1, cleanups)
         ctx.disposeEffect(eff)
         assertFalse(ctx.isEffectActive(eff))
         // Disposed cleanup ran; no further reruns.
         val cleanupsBefore = cleanups
-        ctx.setCell(src, 2)
+        ctx.set(src, 2)
         assertEquals(cleanupsBefore, cleanups)
     }
 
     @Test
     fun dispose_signal_reverts_to_lazy() {
         val ctx = ThreadSafeContext()
-        val src = ctx.cell(1)
+        val src = ctx.source(1)
         var computeRuns = 0
-        val sig = ctx.signal { computeRuns++; ctx.getCell(src) + 1 }
+        val sig = ctx.signal { computeRuns++; ctx.get(src) + 1 }
         assertEquals(2, ctx.getSignal(sig))
         assertEquals(1, computeRuns)
         assertTrue(ctx.isSignalActive(sig))
         sig.dispose(ctx)
         assertFalse(ctx.isSignalActive(sig))
-        ctx.setCell(src, 5)
+        ctx.set(src, 5)
         // No eager rerun after dispose (computeRuns unchanged)…
         assertEquals(1, computeRuns)
         // …but a read still returns the recomputed (lazy) value.
@@ -190,8 +190,8 @@ class ThreadSafeContextTest {
     @Test
     fun handles_are_clonable_across_threads() {
         val ctx = ThreadSafeContext()
-        val src = ctx.cell(0)
-        val derived = ctx.computed { ctx.getCell(src) * 2 }
+        val src = ctx.source(0)
+        val derived = ctx.computed { ctx.get(src) * 2 }
 
         // A handle minted on the main thread, read on a worker — clonable by value.
         val srcCopy = src
@@ -204,10 +204,10 @@ class ThreadSafeContextTest {
         try {
             val future = pool.submit<Int> {
                 published.await()
-                ctx.getCell(srcCopy) // cross-thread read through a cloned handle
+                ctx.get(srcCopy) // cross-thread read through a cloned handle
                 ctx.get(derivedCopy)
             }
-            ctx.setCell(src, 21)
+            ctx.set(src, 21)
             published.countDown()
             // Worker observes the happens-before-published value.
             assertEquals(42, future.get(5, TimeUnit.SECONDS))
@@ -219,7 +219,7 @@ class ThreadSafeContextTest {
     @Test
     fun atomic_batch_rmw_converges_under_concurrency() {
         val ctx = ThreadSafeContext()
-        val counter = ctx.cell(0)
+        val counter = ctx.source(0)
         val nThreads = 8
         val perThread = 500
         val pool = Executors.newFixedThreadPool(nThreads)
@@ -235,8 +235,8 @@ class ThreadSafeContextTest {
                         // threads: the graph lock is held for the whole block, so
                         // no increment is lost.
                         ctx.batch {
-                            val cur = ctx.getCell(counter)
-                            ctx.setCell(counter, cur + 1)
+                            val cur = ctx.get(counter)
+                            ctx.set(counter, cur + 1)
                         }
                     }
                     done.countDown()
@@ -246,37 +246,37 @@ class ThreadSafeContextTest {
         } finally {
             pool.shutdown()
         }
-        assertEquals(nThreads * perThread, ctx.getCell(counter))
+        assertEquals(nThreads * perThread, ctx.get(counter))
     }
 
     @Test
     fun concurrent_independent_writes_never_corrupt_state() {
         val ctx = ThreadSafeContext()
-        val a = ctx.cell(0)
-        val b = ctx.cell(0)
-        val sum = ctx.signal { ctx.getCell(a) + ctx.getCell(b) }
+        val a = ctx.source(0)
+        val b = ctx.source(0)
+        val sum = ctx.signal { ctx.get(a) + ctx.get(b) }
         val pool = Executors.newFixedThreadPool(8)
         val done = CountDownLatch(2000)
         try {
-            repeat(1000) { pool.submit { ctx.setCell(a, it); done.countDown() } }
-            repeat(1000) { pool.submit { ctx.setCell(b, it); done.countDown() } }
+            repeat(1000) { pool.submit { ctx.set(a, it); done.countDown() } }
+            repeat(1000) { pool.submit { ctx.set(b, it); done.countDown() } }
             assertTrue(done.await(30, TimeUnit.SECONDS))
         } finally {
             pool.shutdown()
         }
-        // The signal is eagerly re-materialized within each setCell under the
+        // The signal is eagerly re-materialized within each set under the
         // lock, so it always reflects a consistent (a + b) pair — no torn read.
-        assertEquals(ctx.getCell(a) + ctx.getCell(b), ctx.getSignal(sum))
+        assertEquals(ctx.get(a) + ctx.get(b), ctx.getSignal(sum))
     }
 
     @Test
     fun eager_observer_fires_on_the_invalidating_thread_synchronously() {
         val ctx = ThreadSafeContext()
-        val src = ctx.cell("init")
+        val src = ctx.source("init")
         val observed = AtomicReference("init")
         val fireCount = AtomicInteger(0)
         ctx.effect {
-            observed.set(ctx.getCell(src))
+            observed.set(ctx.get(src))
             fireCount.incrementAndGet()
             null
         }
@@ -287,7 +287,7 @@ class ThreadSafeContextTest {
         try {
             repeat(16) {
                 pool.submit {
-                    ctx.setCell(src, "v$it") // observer fires synchronously, under the lock, on this thread
+                    ctx.set(src, "v$it") // observer fires synchronously, under the lock, on this thread
                     done.countDown()
                 }
             }

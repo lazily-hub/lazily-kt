@@ -27,12 +27,12 @@ class AsyncCellMap<K : Any, V : Any> : ReactiveMap<K, V> {
     override val entryKind: EntryKind get() = EntryKind.Cell
 
     private val lock = ReentrantLock()
-    private val materialized = LinkedHashMap<K, AsyncContext.AsyncCellHandle<V>>()
+    private val materialized = LinkedHashMap<K, AsyncContext.AsyncSource<V>>()
 
     /** Return the async value cell for [key], minting it with [default] on first access. */
-    fun entry(ctx: AsyncContext, key: K, default: (K) -> V): AsyncContext.AsyncCellHandle<V> {
+    fun entry(ctx: AsyncContext, key: K, default: (K) -> V): AsyncContext.AsyncSource<V> {
         lock.withLock { materialized[key]?.let { return it } }
-        val handle = ctx.cell(default(key))
+        val handle = ctx.source(default(key))
         return lock.withLock {
             materialized[key]?.let { return@withLock it }
             materialized[key] = handle
@@ -49,23 +49,23 @@ class AsyncCellMap<K : Any, V : Any> : ReactiveMap<K, V> {
     fun set(ctx: AsyncContext, key: K, value: V) {
         val existing = lock.withLock { materialized[key] }
         if (existing != null) {
-            ctx.setCell(existing, value)
+            ctx.set(existing, value)
             return
         }
         entry(ctx, key) { value }
     }
 
     /** The existing async value-cell handle for [key], or `null`. Non-reactive. */
-    fun handle(key: K): AsyncContext.AsyncCellHandle<V>? = lock.withLock { materialized[key] }
+    fun handle(key: K): AsyncContext.AsyncSource<V>? = lock.withLock { materialized[key] }
 
     /** Observe [key]'s value (input cells are always resolved); throws if [key] is absent. */
     fun observe(ctx: AsyncContext, key: K): V {
         val handle = handle(key) ?: error("AsyncCellMap has no entry for key $key")
-        return ctx.getCell(handle)
+        return ctx.get(handle)
     }
 
     /** Read the value at [key] if present; `null` if absent. */
-    fun get(ctx: AsyncContext, key: K): V? = handle(key)?.let { ctx.getCell(it) }
+    fun get(ctx: AsyncContext, key: K): V? = handle(key)?.let { ctx.get(it) }
 
     override fun isPresent(key: K): Boolean = lock.withLock { materialized.containsKey(key) }
 
@@ -85,9 +85,9 @@ class AsyncSlotMap<K : Any, V : Any> : ReactiveMap<K, V> {
     override val entryKind: EntryKind get() = EntryKind.Slot
 
     private val lock = ReentrantLock()
-    private val materialized = LinkedHashMap<K, AsyncContext.AsyncSlotHandle<V>>()
+    private val materialized = LinkedHashMap<K, AsyncContext.AsyncComputed<V>>()
 
-    private fun mint(ctx: AsyncContext, key: K, factory: (K) -> V): AsyncContext.AsyncSlotHandle<V> {
+    private fun mint(ctx: AsyncContext, key: K, factory: (K) -> V): AsyncContext.AsyncComputed<V> {
         lock.withLock { materialized[key]?.let { return it } }
         val handle = ctx.computedAsync { factory(key) }
         return lock.withLock {
@@ -102,7 +102,7 @@ class AsyncSlotMap<K : Any, V : Any> : ReactiveMap<K, V> {
      * [factory]) and return its handle. Drive it to a value with [observeAsync] or
      * [AsyncContext.getAsync].
      */
-    fun getOrInsertWith(ctx: AsyncContext, key: K, factory: (K) -> V): AsyncContext.AsyncSlotHandle<V> =
+    fun getOrInsertWith(ctx: AsyncContext, key: K, factory: (K) -> V): AsyncContext.AsyncComputed<V> =
         mint(ctx, key, factory)
 
     /** Eager materialization: pre-mint a derived slot for every key in [keys] via [factory]. */
@@ -111,7 +111,7 @@ class AsyncSlotMap<K : Any, V : Any> : ReactiveMap<K, V> {
     }
 
     /** The existing derived-slot handle for [key], or `null`. Non-reactive. */
-    fun handle(key: K): AsyncContext.AsyncSlotHandle<V>? = lock.withLock { materialized[key] }
+    fun handle(key: K): AsyncContext.AsyncComputed<V>? = lock.withLock { materialized[key] }
 
     /**
      * Non-blocking read: the resolved value for [key], or `null` if absent or still

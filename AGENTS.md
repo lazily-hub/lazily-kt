@@ -153,7 +153,7 @@ and coroutine-backed async (`AsyncContext`).
 - `ThreadSafeContext.kt` — lock-backed thread-safe reactive graph (counterpart
   of `lazily-rs::ThreadSafeContext`, the spec's `thread_safe = host` layer): a
   single `ReentrantLock` serializes every graph mutation/read so observers fire
-  synchronously within the invalidating `setCell`/`batch` preserving glitch-free
+  synchronously within the invalidating `set`/`batch` preserving glitch-free
   pull-based ordering (JVM monitor happens-before = Rust `Send + Sync`);
   clonable value-class handles; per-thread (`ThreadLocal`) dependency tracking;
   reentrant callbacks; atomic cross-thread `batch`. `ThreadSafeStateMachine.kt`
@@ -226,7 +226,7 @@ and coroutine-backed async (`AsyncContext`).
   (`#lzqueue`). Reader-kind invalidation (head/len/is_empty/is_full/closed);
   bounded reactive backpressure via `is_full`; closure lifecycle (drain /
   Closed-distinct-from-Empty / idempotent+terminal). The shell / storage split
-  keeps the reactive shell storage-agnostic; the `==` guard on `setCell`
+  keeps the reactive shell storage-agnostic; the `==` guard on `set`
   implements reader-kind independence for free. Conformance fixtures in
   `conformance/collections/` (`queuecell_*.json`, loaded from the sibling
   `lazily-spec` submodule) are replayed by `QueueCellConformanceTest`.

@@ -35,7 +35,7 @@ class WindowingConformanceTest {
         step["expected"]!!.jsonObject["invalidates"]!!.jsonObject["output"]!!.jsonPrimitive.boolean
 
     private fun observe(ctx: Context, cell: Source<Any>): Computed<Any> {
-        val obs = ctx.computed { getCell(cell) }
+        val obs = ctx.computed { get(cell) }
         ctx.get(obs)
         return obs
     }

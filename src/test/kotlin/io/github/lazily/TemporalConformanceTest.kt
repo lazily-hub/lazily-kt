@@ -45,7 +45,7 @@ class TemporalConformanceTest {
         val ctx = Context()
         val fireAt = fx["initial"]!!.jsonObject["fire_at"]!!.jsonPrimitive.long
         val timer = TimerCell(ctx, fireAt)
-        val observed = ctx.computed { getCell(timer.firedCell) }
+        val observed = ctx.computed { get(timer.firedCell) }
         ctx.get(observed)
 
         for (element in steps(fx)) {
@@ -72,7 +72,7 @@ class TemporalConformanceTest {
         val ctx = Context()
         val period = fx["initial"]!!.jsonObject["period"]!!.jsonPrimitive.long
         val iv = IntervalCell(ctx, period)
-        val observed = ctx.computed { getCell(iv.countCell) }
+        val observed = ctx.computed { get(iv.countCell) }
         ctx.get(observed)
 
         for (element in steps(fx)) {
@@ -96,7 +96,7 @@ class TemporalConformanceTest {
         val cycle = init["cycle"]!!.jsonPrimitive.long
         val offsets = init["offsets"]!!.jsonArray.map { it.jsonPrimitive.long }
         val cron = CronCell(ctx, cycle, offsets)
-        val observed = ctx.computed { getCell(cron.countCell) }
+        val observed = ctx.computed { get(cron.countCell) }
         ctx.get(observed)
 
         for (element in steps(fx)) {
@@ -120,7 +120,7 @@ class TemporalConformanceTest {
         val value = init["value"]!!.jsonPrimitive.content
         val deadline = init["deadline"]!!.jsonPrimitive.long
         val d = DeadlineCell(ctx, value, deadline)
-        val observed = ctx.computed { getCell(d.expiredCell) }
+        val observed = ctx.computed { get(d.expiredCell) }
         ctx.get(observed)
 
         for (element in steps(fx)) {

@@ -25,13 +25,13 @@ class AsyncBatchCoalesceRaceTest {
             val ctx = AsyncContext()
             val count = AtomicInteger(0)
             try {
-                val a = ctx.cell(1)
-                val b = ctx.cell(2)
+                val a = ctx.source(1)
+                val b = ctx.source(2)
                 val sig = ctx.signalAsync {
                     count.incrementAndGet()
-                    val av = getCell(a)
+                    val av = get(a)
                     yield()
-                    val bv = getCell(b)
+                    val bv = get(b)
                     av + bv
                 }
                 ctx.settle()
@@ -39,8 +39,8 @@ class AsyncBatchCoalesceRaceTest {
 
                 // Batch with two writes -> exactly one additional compute.
                 ctx.batch {
-                    it.setCell(a, 10)
-                    it.setCell(b, 20)
+                    it.set(a, 10)
+                    it.set(b, 20)
                 }
                 ctx.settle()
                 assertEquals(30, ctx.getAsync(sig.slot))
@@ -48,9 +48,9 @@ class AsyncBatchCoalesceRaceTest {
 
                 // Batch with three writes (incl. repeat) -> still one more compute.
                 ctx.batch {
-                    it.setCell(a, 100)
-                    it.setCell(b, 200)
-                    it.setCell(a, 101)
+                    it.set(a, 100)
+                    it.set(b, 200)
+                    it.set(a, 101)
                 }
                 ctx.settle()
                 assertEquals(301, ctx.getAsync(sig.slot))

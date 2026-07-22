@@ -35,7 +35,7 @@ class PresenceConformanceTest {
             .entries.associate { (k, v) -> k.toLong() to v.jsonPrimitive.content }
 
     private inline fun <reified T : Any> observe(ctx: Context, cell: Source<T>): Computed<Any> {
-        val obs = ctx.computed { getCell(cell) as Any }
+        val obs = ctx.computed { get(cell) as Any }
         ctx.get(obs)
         return obs
     }

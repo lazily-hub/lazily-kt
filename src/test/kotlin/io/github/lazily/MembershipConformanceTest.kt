@@ -39,7 +39,7 @@ class MembershipConformanceTest {
         )
         val ctx = Context()
         val m = MembershipCell<Long>(ctx, config)
-        val observed = ctx.computed { getCell(m.peerSetCell) }
+        val observed = ctx.computed { get(m.peerSetCell) }
         ctx.get(observed)
 
         for (element in fx["steps"]!!.jsonArray) {

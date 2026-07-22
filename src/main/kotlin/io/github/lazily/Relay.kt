@@ -101,11 +101,11 @@ class RelayCell<T : Any>(
     private val pending: Source<Long> = ctx.source(0L)
 
     /** Demand-driven reader: current window depth (`Count`). */
-    val depth: Computed<Long> = ctx.computed { getCell(pending) }
+    val depth: Computed<Long> = ctx.computed { get(pending) }
 
     /** Demand-driven reader: depth ≥ `highWater`. */
     val isFull: Computed<Boolean> =
-        ctx.computed { getCell(pending) >= getCell(policy.highWater) }
+        ctx.computed { get(pending) >= get(policy.highWater) }
 
     /** Demand-driven reader: the window is empty (nothing to drain). */
     val isEmpty: Computed<Boolean> = ctx.computed { getCellAny(headId) === RelayEmpty }

@@ -197,10 +197,10 @@ class EdgeIndexTest {
     fun `wide fan-out works in the thread-safe context`() {
         val ctx = ThreadSafeContext()
         val width = EDGE_INDEX_THRESHOLD * 4
-        val topic = ctx.cell(0)
-        val subs = (0 until width).map { i -> ctx.computed { getCell(topic) + i } }
+        val topic = ctx.source(0)
+        val subs = (0 until width).map { i -> ctx.computed { get(topic) + i } }
         for (i in 0 until width) assertEquals(i, ctx.get(subs[i]))
-        ctx.setCell(topic, 100)
+        ctx.set(topic, 100)
         for (i in 0 until width) assertEquals(100 + i, ctx.get(subs[i]))
     }
 
@@ -280,13 +280,13 @@ class EdgeIndexTest {
     @Test
     fun `thread-safe context deschedules a queued effect on dispose`() {
         val ctx = ThreadSafeContext()
-        val c = ctx.cell(0)
+        val c = ctx.source(0)
         var victimRuns = 0
         var disposerRan = false
-        val victim = ctx.effect { getCell(c); victimRuns++; null }
-        ctx.effect { getCell(c); disposerRan = true; ctx.disposeEffect(victim); null }
+        val victim = ctx.effect { get(c); victimRuns++; null }
+        ctx.effect { get(c); disposerRan = true; ctx.disposeEffect(victim); null }
         assertEquals(1, victimRuns)
-        ctx.setCell(c, 1)
+        ctx.set(c, 1)
         assertTrue(disposerRan, "disposer must have run")
         assertEquals(1, victimRuns, "victim was disposed while queued and must not rerun")
     }
@@ -403,13 +403,13 @@ class EdgeIndexTest {
         // Semantic 2 on the lock-backed engine. Same shape; the gate is a
         // separate field on a separate class and would be just as easy to omit.
         val ctx = ThreadSafeContext()
-        val src = ctx.cell(1)
-        val mid = ctx.computed { getCell(src) + 1 }
+        val src = ctx.source(1)
+        val mid = ctx.computed { get(src) + 1 }
 
         var runs = 0
         ctx.effect {
             runs++
-            getCell(src)
+            get(src)
             try {
                 get(mid)
             } catch (_: DisposedNodeException) {
@@ -422,12 +422,12 @@ class EdgeIndexTest {
         ctx.disposeSlot(mid)
         assertEquals(1, runs, "the effect reached by the disposal walk must not rerun")
 
-        val unrelated = ctx.cell(0)
-        ctx.effect { getCell(unrelated); null }
-        ctx.setCell(unrelated, 1)
+        val unrelated = ctx.source(0)
+        ctx.effect { get(unrelated); null }
+        ctx.set(unrelated, 1)
         assertEquals(1, runs, "a publish the effect does not observe must not flush it")
 
-        ctx.setCell(src, 2)
+        ctx.set(src, 2)
         assertEquals(2, runs, "a real write still reaches it")
     }
 
@@ -593,13 +593,13 @@ class EdgeIndexTest {
         // the spurious rerun surfaces detached in time from its cause.
         runBlocking {
             AsyncContext().use { ctx ->
-                val src = ctx.cell(1)
-                val mid = ctx.computedAsync { getCell(src) + 1 }
+                val src = ctx.source(1)
+                val mid = ctx.computedAsync { get(src) + 1 }
 
                 var runs = 0
                 ctx.effectAsync {
                     runs++
-                    getCell(src)
+                    get(src)
                     try {
                         getAsync(mid)
                     } catch (_: DisposedNodeException) {
@@ -616,7 +616,7 @@ class EdgeIndexTest {
                 assertEquals(1, runs, "the effect reached by the disposal walk must not rerun")
                 assertEquals(1, ctx.dependentCount(src), "mid's upstream edge must be detached")
 
-                ctx.setCell(src, 2)
+                ctx.set(src, 2)
                 ctx.settle()
                 assertEquals(2, runs, "a real write still reaches it")
             }
@@ -630,9 +630,9 @@ class EdgeIndexTest {
         // dependent set without bound under async subscribe/unsubscribe churn.
         runBlocking {
             AsyncContext().use { ctx ->
-                val topic = ctx.cell(0)
+                val topic = ctx.source(0)
                 val subs = (0 until 8)
-                    .map { ctx.effectAsync { getCell(topic); null } }
+                    .map { ctx.effectAsync { get(topic); null } }
                     .toMutableList()
                 ctx.settle()
                 assertEquals(8, ctx.dependentCount(topic))
@@ -640,7 +640,7 @@ class EdgeIndexTest {
                 for (c in 0 until 64) {
                     val at = c % 8
                     ctx.disposeEffect(subs[at])
-                    subs[at] = ctx.effectAsync { getCell(topic); null }
+                    subs[at] = ctx.effectAsync { get(topic); null }
                 }
                 ctx.settle()
                 assertEquals(

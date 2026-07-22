@@ -5,7 +5,7 @@ package io.github.lazily
  * thread-safe native Kotlin counterpart to lazily-rs `ThreadSafeStateMachine`.
  *
  * This is the [StateMachine] equivalent for the `thread_safe` reactive layer:
- * the state lives in a [ThreadSafeCellHandle] so any slot, signal, or effect
+ * the state lives in a [ThreadSafeSource] so any slot, signal, or effect
  * that reads [state] on any thread is automatically invalidated when the
  * machine transitions. The transition function is pure: `(state, event) ->
  * next?`. Returning `null` rejects the event (guard); returning a value
@@ -77,7 +77,7 @@ class ThreadSafeStateMachine<S : Any, E>(
     fun stateIs(target: S): ThreadSafeSignalHandle<Boolean> {
         val ids = ctx.signalAny { state == target }
         return ThreadSafeSignalHandle(
-            ThreadSafeSlotHandle(ids.slot),
+            ThreadSafeComputed(ids.slot),
             ThreadSafeEffectHandle(ids.effect),
         )
     }

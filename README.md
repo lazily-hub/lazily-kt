@@ -88,7 +88,7 @@ lazily-kt mirrors lazily-rs `Context` semantics across all three context layers
 The core primitives are **Cell** / **Slot** / **Effect**. **`Signal` is a
 derived construct, not a core primitive** — `Signal ≡ Slot.eager`, a memo Slot
 plus a puller Effect that recomputes the instant a dependency changes, so its
-value is materialized by the time `setCell` / `batch` returns (no intermediate
+value is materialized by the time `set` / `batch` returns (no intermediate
 unset value).
 
 Values are **lazy by default**; reach for the derived `Signal` when you need
@@ -99,7 +99,7 @@ eager push semantics. Handles (`SlotHandle` / `CellHandle` / `SignalHandle` /
 
 - **Pull-based, glitch-free refresh** — a slot that reads other slots always
   observes values consistent with the current inputs.
-- **`==` guard on `setCell`** — setting an equal value is a no-op (no
+- **`==` guard on `set`** — setting an equal value is a no-op (no
   downstream cascade).
 - **`memo` adds a `==` guard** — an equal recompute suppresses downstream
   invalidation.
@@ -113,20 +113,20 @@ eager push semantics. Handles (`SlotHandle` / `CellHandle` / `SignalHandle` /
 import io.github.lazily.Context
 
 val ctx = Context()
-val a = ctx.cell(2)
-val b = ctx.cell(3)
+val a = ctx.source(2)
+val b = ctx.source(3)
 
 // Lazy: computes on first read, caches, recomputes only when a or b changes.
-val sum = ctx.slot { ctx.getCell(a) + ctx.getCell(b) }
+val sum = ctx.slot { ctx.get(a) + ctx.get(b) }
 ctx.get(sum) // 5
 
-ctx.setCell(a, 10)
+ctx.set(a, 10)
 ctx.get(sum) // 13
 
 // Eager: recomputes immediately when a dependency changes.
-val parity = ctx.signal { if (ctx.getCell(a) % 2 == 0) "even" else "odd" }
+val parity = ctx.signal { if (ctx.get(a) % 2 == 0) "even" else "odd" }
 ctx.getSignal(parity) // "even"
-ctx.setCell(a, 11)
+ctx.set(a, 11)
 ctx.getSignal(parity) // "odd" — already updated before the read
 ```
 
@@ -134,11 +134,11 @@ A side-effecting observer with cleanup:
 
 ```kotlin
 val handle = ctx.effect {
-    val v = ctx.getCell(a)
+    val v = ctx.get(a)
     // returned closure is the cleanup: runs before the next rerun and on dispose
     { println("a was $v") }
 }
-ctx.setCell(a, 42)   // reruns the effect (previous cleanup ran first)
+ctx.set(a, 42)   // reruns the effect (previous cleanup ran first)
 ctx.disposeEffect(handle)
 ```
 
@@ -146,8 +146,8 @@ Coalesce multiple writes into one flush:
 
 ```kotlin
 ctx.batch {
-    setCell(a, 1)
-    setCell(b, 2)
+    set(a, 1)
+    set(b, 2)
 } // dependent effects fire once
 ```
 
@@ -245,7 +245,7 @@ heap-backed (a `ByteArray`); a future transport may back it with a memory-mapped
 computations — the Kotlin counterpart of `lazily-rs::AsyncContext` and the
 [`lazily-spec`][spec] Async Reactive Context contract. It is **compute, not
 protocol**: only resolved slot values cross IPC/FFI as ordinary cell payloads.
-Cells are the synchronous input layer (`cell` / `getCell` / `setCell`);
+Cells are the synchronous input layer (`cell` / `get` / `set`);
 `computedAsync` / `memoAsync` slots and `effectAsync` effects are async. It
 implements the full contract: the `Empty` / `Computing` / `Resolved` / `Error`
 slot state machine with revision-based stale-completion discard, in-flight
@@ -259,10 +259,10 @@ effect) counterpart of the synchronous `Signal`.
 
 ```kotlin
 val ctx = AsyncContext()
-val a = ctx.cell(2)
-val sum = ctx.computedAsync { getCell(a) + 3 }
+val a = ctx.source(2)
+val sum = ctx.computedAsync { get(a) + 3 }
 ctx.getAsync(sum)             // suspends, computes, caches -> 5
-ctx.setCell(a, 10)
+ctx.set(a, 10)
 ctx.getAsync(sum)             // dependency invalidated -> 13
 ```
 
@@ -341,10 +341,10 @@ shared heap, so lazily-kt declares `thread_safe = host` (not `none`).
 
 It satisfies the spec contract: a single `ReentrantLock` serializes every graph
 mutation and read, so observers fire **synchronously within the invalidating
-`setCell`/`batch`**, preserving glitch-free pull-based ordering. The JVM memory
+`set`/`batch`**, preserving glitch-free pull-based ordering. The JVM memory
 model's monitor happens-before guarantee is the counterpart of Rust's
-`Send + Sync` obligation. Handles (`ThreadSafeSlotHandle` /
-`ThreadSafeCellHandle` / `ThreadSafeEffectHandle` / `ThreadSafeSignalHandle`)
+`Send + Sync` obligation. Handles (`ThreadSafeComputed` /
+`ThreadSafeSource` / `ThreadSafeEffectHandle` / `ThreadSafeSignalHandle`)
 are value classes — clonable by value — so a handle minted on one thread may be
 read on another through the shared context. A `ThreadLocal` tracking stack
 mirrors lazily-rs's `thread_local!` tracking, so two threads computing
@@ -355,12 +355,12 @@ lock, so a batch is atomic across threads.
 
 ```kotlin
 val ctx = ThreadSafeContext()
-val src = ctx.cell(1)
-val doubled = ctx.signal { ctx.getCell(src) * 2 }  // eager, materialized
+val src = ctx.source(1)
+val doubled = ctx.signal { ctx.get(src) * 2 }  // eager, materialized
 val eff = ctx.effect { println("now ${ctx.get(doubled)}"); null }
 
 // From any thread: clonable handle, synchronous observer.
-ctx.setCell(src, 21)   // observer fires synchronously before this returns
+ctx.set(src, 21)   // observer fires synchronously before this returns
 ```
 
 `ThreadSafeStateMachine` mirrors `StateMachine` over a `ThreadSafeContext` — the
@@ -445,7 +445,7 @@ a deterministic order. There is no separate `MPSCQueueCell` type.
 The reactive shell owns the reader-kind version cells (`head` / `len` /
 `is_empty` / `is_full` / `closed`) and invalidates **by reader kind**: a push to
 a non-empty queue does NOT invalidate the `head` reader (head unchanged); a pop
-does. This reader-kind independence falls out of the `==` guard on `setCell` —
+does. This reader-kind independence falls out of the `==` guard on `set` —
 after each op the shell re-derives each reader-kind cell from storage and writes
 it back, and a cell whose value did not change is not invalidated. The storage
 backend is pluggable via `QueueStorage`; the default `VecDequeStorage` is

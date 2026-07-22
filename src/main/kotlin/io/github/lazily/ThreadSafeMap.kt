@@ -23,7 +23,7 @@ import kotlin.concurrent.withLock
 
 /**
  * A thread-safe keyed **input-cell** collection: the `Send + Sync` [CellMap]
- * specialization. Entries are settable [ThreadSafeCellHandle]s; [entry] mints a
+ * specialization. Entries are settable [ThreadSafeSource]s; [entry] mints a
  * value cell on first access (input cells are always materialized) and [set]
  * updates it.
  */
@@ -31,16 +31,16 @@ class ThreadSafeCellMap<K : Any, V : Any> : ReactiveMap<K, V> {
     override val entryKind: EntryKind get() = EntryKind.Cell
 
     private val lock = ReentrantLock()
-    private val materialized = LinkedHashMap<K, ThreadSafeCellHandle<V>>()
+    private val materialized = LinkedHashMap<K, ThreadSafeSource<V>>()
 
     /**
      * Return the value cell for [key], minting it with [default] on first access.
      * Subsequent calls return the cached handle. Safe to call concurrently: the
      * first writer wins a race so the key keeps a stable handle (cell-identity).
      */
-    fun entry(ctx: ThreadSafeContext, key: K, default: (K) -> V): ThreadSafeCellHandle<V> {
+    fun entry(ctx: ThreadSafeContext, key: K, default: (K) -> V): ThreadSafeSource<V> {
         lock.withLock { materialized[key]?.let { return it } }
-        val handle = ThreadSafeCellHandle<V>(ctx.cellAny(default(key)))
+        val handle = ThreadSafeSource<V>(ctx.cellAny(default(key)))
         return lock.withLock {
             materialized[key]?.let { return@withLock it }
             materialized[key] = handle
@@ -60,14 +60,14 @@ class ThreadSafeCellMap<K : Any, V : Any> : ReactiveMap<K, V> {
     fun set(ctx: ThreadSafeContext, key: K, value: V) {
         val existing = lock.withLock { materialized[key] }
         if (existing != null) {
-            ctx.setCell(existing, value)
+            ctx.set(existing, value)
             return
         }
         entry(ctx, key) { value }
     }
 
     /** The existing value-cell handle for [key], or `null`. Non-reactive. */
-    fun handle(key: K): ThreadSafeCellHandle<V>? = lock.withLock { materialized[key] }
+    fun handle(key: K): ThreadSafeSource<V>? = lock.withLock { materialized[key] }
 
     /** Observe [key]'s value (subscribes the reader); throws if [key] is absent. */
     fun observe(ctx: ThreadSafeContext, key: K): V {
@@ -100,13 +100,13 @@ class ThreadSafeSlotMap<K : Any, V : Any> : ReactiveMap<K, V> {
     override val entryKind: EntryKind get() = EntryKind.Slot
 
     private val lock = ReentrantLock()
-    private val materialized = LinkedHashMap<K, ThreadSafeSlotHandle<V>>()
+    private val materialized = LinkedHashMap<K, ThreadSafeComputed<V>>()
 
-    private fun mint(ctx: ThreadSafeContext, key: K, factory: (K) -> V): ThreadSafeSlotHandle<V> {
+    private fun mint(ctx: ThreadSafeContext, key: K, factory: (K) -> V): ThreadSafeComputed<V> {
         // Fast path: already allocated. Release the map lock before touching `ctx`
         // so a context operation can never re-enter this lock.
         lock.withLock { materialized[key]?.let { return it } }
-        val handle = ThreadSafeSlotHandle<V>(ctx.slotAny(memo = false) { factory(key) })
+        val handle = ThreadSafeComputed<V>(ctx.slotAny(memo = false) { factory(key) })
         return lock.withLock {
             // Lost a race: first writer wins so the key keeps a stable handle; our
             // freshly-allocated node is orphaned in `ctx` (never observed).
@@ -128,7 +128,7 @@ class ThreadSafeSlotMap<K : Any, V : Any> : ReactiveMap<K, V> {
     }
 
     /** The existing derived-slot handle for [key], or `null`. Non-reactive. */
-    fun handle(key: K): ThreadSafeSlotHandle<V>? = lock.withLock { materialized[key] }
+    fun handle(key: K): ThreadSafeComputed<V>? = lock.withLock { materialized[key] }
 
     /** Read the value at [key] if present (does not mint); `null` if absent. */
     fun get(ctx: ThreadSafeContext, key: K): V? {

@@ -33,7 +33,7 @@ package io.github.lazily
 // the head reader sees the next element (or `null`), not a stale value.
 //
 // This reader-kind independence is implemented for free by the existing
-// `==` guard on [Context.setCell]: after each op the shell re-derives each
+// `==` guard on [Context.set]: after each op the shell re-derives each
 // reader-kind cell from the storage and writes it back, and a cell whose value
 // did not change is not invalidated.
 
@@ -294,7 +294,7 @@ class QueueCell<T : Any, S : QueueStorage<T>>(
      * Re-derive the reader-kind cells from storage and write them back, in one
      * atomic invalidation pass (a [Context.batch] groups the writes so an
      * observer never sees a partial state — e.g. `len` bumped but `is_full` not
-     * yet flipped). The `==` guard on `setCell` suppresses invalidation for any
+     * yet flipped). The `==` guard on `set` suppresses invalidation for any
      * cell whose value did not change — this is the reader-kind independence
      * law. `closed` is intentionally NOT touched here: it only changes via
      * [close].

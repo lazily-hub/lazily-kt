@@ -123,7 +123,7 @@ class ReactiveContextTest {
         // Eager: computed at creation.
         assertEquals(1, sigRuns)
         assertEquals(6, ctx.get(sig))
-        // Eager recompute on set, by the time setCell returns.
+        // Eager recompute on set, by the time set returns.
         src.set(ctx, 5)
         assertEquals(2, sigRuns)
         assertEquals(15, ctx.get(sig))

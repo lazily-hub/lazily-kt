@@ -9,23 +9,29 @@ import kotlin.concurrent.withLock
  * Lightweight typed reference to a lazy memoized slot in a [ThreadSafeContext].
  *
  * Clonable by value (a `value class` over an id), mirroring lazily-rs
- * `ThreadSafeSlotHandle<T>: Copy`.
+ * `ThreadSafeComputed<T>: Copy`.
  */
 @JvmInline
-value class ThreadSafeSlotHandle<T : Any> @PublishedApi internal constructor(val id: Int) :
+value class ThreadSafeComputed<T : Any> @PublishedApi internal constructor(val id: Int) :
     ThreadSafeGraphNode {
     override val nodeId: Int get() = id
 }
 
 /**
  * Lightweight typed reference to a mutable source cell in a [ThreadSafeContext].
- * Clonable by value, mirroring lazily-rs `ThreadSafeCellHandle<T>: Copy`.
+ * Clonable by value, mirroring lazily-rs `ThreadSafeSource<T>: Copy`.
  */
 @JvmInline
-value class ThreadSafeCellHandle<T : Any> @PublishedApi internal constructor(val id: Int) :
+value class ThreadSafeSource<T : Any> @PublishedApi internal constructor(val id: Int) :
     ThreadSafeGraphNode {
     override val nodeId: Int get() = id
 }
+
+@Deprecated("Use ThreadSafeComputed", ReplaceWith("ThreadSafeComputed<T>"))
+typealias ThreadSafeSlotHandle<T> = ThreadSafeComputed<T>
+
+@Deprecated("Use ThreadSafeSource", ReplaceWith("ThreadSafeSource<T>"))
+typealias ThreadSafeCellHandle<T> = ThreadSafeSource<T>
 
 /**
  * Reference to a registered side-effecting observer in a [ThreadSafeContext].
@@ -44,7 +50,7 @@ value class ThreadSafeEffectHandle @PublishedApi internal constructor(val id: In
  * freely shareable across threads through the owning context.
  */
 class ThreadSafeSignalHandle<T : Any> @PublishedApi internal constructor(
-    @PublishedApi internal val slot: ThreadSafeSlotHandle<T>,
+    @PublishedApi internal val slot: ThreadSafeComputed<T>,
     @PublishedApi internal val effect: ThreadSafeEffectHandle,
 ) {
     /** Dispose this signal's eager puller; the backing value stays readable (reverts to lazy). */
@@ -72,11 +78,11 @@ private const val INITIAL_NODE_CAPACITY = 16
  *
  * - **Lock-backed** — a single [ReentrantLock] serializes every graph mutation
  *   and read, so observers fire **synchronously within the invalidating
- *   `setCell`/`batch`**, preserving glitch-free pull-based ordering. The JVM
+*   `set`/`batch`**, preserving glitch-free pull-based ordering. The JVM
  *   memory model's monitor happens-before guarantee is the counterpart of
  *   Rust's `Send + Sync` obligation: every value and callback published under
  *   the lock is safely visible to any thread that observes it under the lock.
- * - **Clonable handles** — [ThreadSafeSlotHandle] / [ThreadSafeCellHandle] /
+ * - **Clonable handles** — [ThreadSafeComputed] / [ThreadSafeSource] /
  *   [ThreadSafeEffectHandle] / [ThreadSafeSignalHandle] are value classes
  *   (copyable by value), so a handle minted on one thread may be read on
  *   another through the shared context.
@@ -86,10 +92,10 @@ private const val INITIAL_NODE_CAPACITY = 16
  *   (and the graph lock serializes recomputation regardless).
  *
  * `ReentrantLock` is reentrant, so a compute/effect callback that re-enters the
- * same context from the same thread (e.g. a slot reading another slot) does not
- * self-deadlock. As in [Context], `setCell` is `==`-guarded (equal value is a
+* same context from the same thread (e.g. a computed reading another computed) does not
+* self-deadlock. As in [Context], `set` is `==`-guarded (equal value is a
  * no-op), `memo` adds the same guard to a recompute, a `Signal` is materialized
- * by the time the invalidating `setCell`/`batch` returns, and `batch` coalesces
+* by the time the invalidating `set`/`batch` returns, and `batch` coalesces
  * invalidations into one effect flush.
  */
 class ThreadSafeContext {
@@ -146,9 +152,12 @@ class ThreadSafeContext {
 
     // -- Creation ----------------------------------------------------------
 
-    /** A mutable source cell with an initial value. `setCell` invalidates dependents on `==` change. */
-    inline fun <reified T : Any> cell(value: T): ThreadSafeCellHandle<T> =
-        ThreadSafeCellHandle(cellAny(value))
+    /** A mutable source with an initial value. `set` invalidates dependents on `==` change. */
+    inline fun <reified T : Any> source(value: T): ThreadSafeSource<T> =
+        ThreadSafeSource(cellAny(value))
+
+    @Deprecated("Renamed to source (#lzcellkernel).", ReplaceWith("source(value)"))
+    inline fun <reified T : Any> cell(value: T): ThreadSafeSource<T> = source(value)
 
     @PublishedApi
     internal fun cellAny(value: Any): Int = locked {
@@ -157,17 +166,19 @@ class ThreadSafeContext {
         id
     }
 
-    /** A lazy derived slot (no memo guard): recomputes on read when deps invalidate. */
-    inline fun <reified T : Any> computed(noinline compute: ThreadSafeContext.() -> T): ThreadSafeSlotHandle<T> =
-        ThreadSafeSlotHandle(slotAny(memo = false) { compute() })
+    /** A lazy guarded computed: equal recomputation suppresses downstream invalidation. */
+    inline fun <reified T : Any> computed(noinline compute: ThreadSafeContext.() -> T): ThreadSafeComputed<T> =
+        ThreadSafeComputed(slotAny(memo = true) { compute() })
 
-    /** Alias of [computed] for symmetry with lazily-rs/py/zig. */
-    inline fun <reified T : Any> slot(noinline compute: ThreadSafeContext.() -> T): ThreadSafeSlotHandle<T> =
+    /** Deprecated compatibility spelling for guarded [computed]. */
+    @Deprecated("Renamed to computed (#lzcellkernel).", ReplaceWith("computed(compute)"))
+    inline fun <reified T : Any> slot(noinline compute: ThreadSafeContext.() -> T): ThreadSafeComputed<T> =
         computed(compute)
 
-    /** A lazy derived slot with a `==` memo guard: an equal recompute suppresses downstream. */
-    inline fun <reified T : Any> memo(noinline compute: ThreadSafeContext.() -> T): ThreadSafeSlotHandle<T> =
-        ThreadSafeSlotHandle(slotAny(memo = true) { compute() })
+    /** Deprecated compatibility spelling for guarded [computed]. */
+    @Deprecated("Use computed; every computed is guarded (#lzcellkernel).", ReplaceWith("computed(compute)"))
+    inline fun <reified T : Any> memo(noinline compute: ThreadSafeContext.() -> T): ThreadSafeComputed<T> =
+        computed(compute)
 
     @PublishedApi
     internal fun slotAny(memo: Boolean, compute: ThreadSafeContext.() -> Any?): Int = locked {
@@ -179,11 +190,11 @@ class ThreadSafeContext {
     /**
      * An **eager** derived value: a memo slot plus a puller effect. The value is
      * materialized at creation and re-materialized by the time the invalidating
-     * `setCell`/`batch` returns — observers never see an intermediate unset state.
+     * `set`/`batch` returns — observers never see an intermediate unset state.
      */
     inline fun <reified T : Any> signal(noinline compute: ThreadSafeContext.() -> T): ThreadSafeSignalHandle<T> {
         val ids = signalAny { compute() }
-        return ThreadSafeSignalHandle(ThreadSafeSlotHandle(ids.slot), ThreadSafeEffectHandle(ids.effect))
+        return ThreadSafeSignalHandle(ThreadSafeComputed(ids.slot), ThreadSafeEffectHandle(ids.effect))
     }
 
     @PublishedApi
@@ -215,16 +226,21 @@ class ThreadSafeContext {
 
     // -- Read --------------------------------------------------------------
 
-    /** Read a slot, computing/refreshing if necessary; auto-subscribes the reading node. */
-    inline fun <reified T : Any> get(handle: ThreadSafeSlotHandle<T>): T {
+    /** Read a computed, computing/refreshing if necessary; auto-subscribes the reading node. */
+    inline fun <reified T : Any> get(handle: ThreadSafeComputed<T>): T {
         @Suppress("UNCHECKED_CAST")
         return getSlotAny(handle.id) as T
     }
 
-    /** Read a cell; auto-subscribes the reading node. */
-    inline fun <reified T : Any> getCell(handle: ThreadSafeCellHandle<T>): T {
+    /** Read a source; auto-subscribes the reading node. */
+    inline fun <reified T : Any> get(handle: ThreadSafeSource<T>): T {
         @Suppress("UNCHECKED_CAST")
         return getCellAny(handle.id) as T
+    }
+
+    @Deprecated("Reads are unified — use get (#lzcellkernel).", ReplaceWith("get(handle)"))
+    inline fun <reified T : Any> getCell(handle: ThreadSafeSource<T>): T {
+        return get(handle)
     }
 
     /** Read a signal's current (always-materialized) value; auto-subscribes. */
@@ -251,8 +267,11 @@ class ThreadSafeContext {
 
     // -- Write -------------------------------------------------------------
 
-    /** Set a cell's value. A no-op (no invalidation) when the new value `==` the old. */
-    fun <T : Any> setCell(handle: ThreadSafeCellHandle<T>, value: T) = setCellAny(handle.id, value)
+    /** Set a source's value. A no-op when the new value `==` the old. */
+    fun <T : Any> set(handle: ThreadSafeSource<T>, value: T) = setCellAny(handle.id, value)
+
+    @Deprecated("Writes are unified — use set (#lzcellkernel).", ReplaceWith("set(handle, value)"))
+    fun <T : Any> setCell(handle: ThreadSafeSource<T>, value: T) = set(handle, value)
 
     @PublishedApi
     internal fun setCellAny(id: Int, value: Any) = locked {
@@ -330,8 +349,8 @@ class ThreadSafeContext {
         if (id < 0 || id >= nodes.size) return null
         val n = nodes[id] ?: return null
         return when (node) {
-            is ThreadSafeCellHandle<*> -> n as? Node.Cell
-            is ThreadSafeSlotHandle<*> -> n as? Node.Slot
+            is ThreadSafeSource<*> -> n as? Node.Cell
+            is ThreadSafeComputed<*> -> n as? Node.Slot
             is ThreadSafeEffectHandle -> n as? Node.Effect
         }
     }
@@ -364,10 +383,10 @@ class ThreadSafeContext {
     }
 
     /** Tear down a derived slot. See [disposeNode]. */
-    fun disposeSlot(handle: ThreadSafeSlotHandle<*>) = disposeNode(handle)
+    fun disposeSlot(handle: ThreadSafeComputed<*>) = disposeNode(handle)
 
     /** Tear down a source cell. See [disposeNode]. */
-    fun disposeCell(handle: ThreadSafeCellHandle<*>) = disposeNode(handle)
+    fun disposeCell(handle: ThreadSafeSource<*>) = disposeNode(handle)
 
     /** Tear down both halves of a signal, puller first. See `Context.disposeSignalNode`. */
     fun disposeSignalNode(handle: ThreadSafeSignalHandle<*>) {
@@ -437,7 +456,7 @@ class ThreadSafeContext {
     fun isSignalActive(handle: ThreadSafeSignalHandle<*>): Boolean = isEffectActive(handle.effect)
 
     /** Whether a slot currently has a fresh cached value (testing). */
-    fun isSet(handle: ThreadSafeSlotHandle<*>): Boolean = locked {
+    fun isSet(handle: ThreadSafeComputed<*>): Boolean = locked {
         val node = nodes[handle.id] as? Node.Slot ?: return@locked false
         node.hasValue && !node.dirty
     }
@@ -699,23 +718,28 @@ class ThreadSafeTeardownScope internal constructor(
         return node
     }
 
-    /** A source cell owned by this scope. */
-    inline fun <reified T : Any> cell(value: T): ThreadSafeCellHandle<T> = adopt(ctx.cell(value))
+    /** A source owned by this scope. */
+    inline fun <reified T : Any> source(value: T): ThreadSafeSource<T> = adopt(ctx.source(value))
+
+    @Deprecated("Renamed to source (#lzcellkernel).", ReplaceWith("source(value)"))
+    inline fun <reified T : Any> cell(value: T): ThreadSafeSource<T> = source(value)
 
     /** A lazy derived slot owned by this scope. */
     inline fun <reified T : Any> computed(
         noinline compute: ThreadSafeContext.() -> T,
-    ): ThreadSafeSlotHandle<T> = adopt(ctx.computed(compute))
+    ): ThreadSafeComputed<T> = adopt(ctx.computed(compute))
 
-    /** Alias of [computed]. */
+    /** Deprecated compatibility alias of [computed]. */
+    @Deprecated("Renamed to computed (#lzcellkernel).", ReplaceWith("computed(compute)"))
     inline fun <reified T : Any> slot(
         noinline compute: ThreadSafeContext.() -> T,
-    ): ThreadSafeSlotHandle<T> = computed(compute)
+    ): ThreadSafeComputed<T> = computed(compute)
 
-    /** A memoized derived slot owned by this scope. */
+    /** Deprecated compatibility alias of guarded [computed]. */
+    @Deprecated("Use computed; every computed is guarded (#lzcellkernel).", ReplaceWith("computed(compute)"))
     inline fun <reified T : Any> memo(
         noinline compute: ThreadSafeContext.() -> T,
-    ): ThreadSafeSlotHandle<T> = adopt(ctx.memo(compute))
+    ): ThreadSafeComputed<T> = computed(compute)
 
     /** An effect owned by this scope. */
     fun effect(run: ThreadSafeContext.() -> (() -> Unit)?): ThreadSafeEffectHandle =

@@ -129,7 +129,7 @@ private fun runArm(width: Int, topics: Int, filler: Int): ArmSample {
     for (i in 0 until width) {
         val t = topicIds[i / perTopic]
         handles += ctx.effect {
-            auditSink += getCell(t)
+            auditSink += get(t)
             null
         }
     }

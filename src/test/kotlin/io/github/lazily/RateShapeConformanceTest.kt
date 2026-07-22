@@ -49,7 +49,7 @@ class RateShapeConformanceTest {
         readOutput: () -> String?,
         drive: (JsonObject) -> String?,
     ) {
-        val observed = ctx.computed { getCell(outputCell) }
+        val observed = ctx.computed { get(outputCell) }
         ctx.get(observed)
         for (element in steps(fx)) {
             val step = element.jsonObject

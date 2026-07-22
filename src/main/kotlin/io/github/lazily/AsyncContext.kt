@@ -101,14 +101,20 @@ class AsyncContext(
     // -- Handles ----------------------------------------------------------
 
     /** A mutable input cell — the synchronous input layer. */
-    inner class AsyncCellHandle<T> internal constructor(internal val id: Int) : AsyncGraphNode {
+    open inner class AsyncSource<T> internal constructor(internal val id: Int) : AsyncGraphNode {
         override val nodeId: Int get() = id
     }
 
     /** A computed/memoized async slot. */
-    inner class AsyncSlotHandle<T> internal constructor(internal val id: Int) : AsyncGraphNode {
+    open inner class AsyncComputed<T> internal constructor(internal val id: Int) : AsyncGraphNode {
         override val nodeId: Int get() = id
     }
+
+    @Deprecated("Use AsyncSource", ReplaceWith("AsyncSource<T>"))
+    inner class AsyncCellHandle<T> internal constructor(id: Int) : AsyncSource<T>(id)
+
+    @Deprecated("Use AsyncComputed", ReplaceWith("AsyncComputed<T>"))
+    inner class AsyncSlotHandle<T> internal constructor(id: Int) : AsyncComputed<T>(id)
 
     /** An async effect handle. */
     inner class AsyncEffectHandle internal constructor(internal val id: Int) : AsyncGraphNode {
@@ -117,7 +123,7 @@ class AsyncContext(
 
     /** An eager async derived value (memo slot + puller effect). */
     inner class AsyncSignalHandle<T> internal constructor(
-        internal val slot: AsyncSlotHandle<T>,
+        internal val slot: AsyncComputed<T>,
         internal val effect: AsyncEffectHandle,
     ) {
         /** Snapshot the value if resolved, else null. */
@@ -217,17 +223,20 @@ class AsyncContext(
 
     // -- Cells (synchronous input layer) ----------------------------------
 
-    fun <T : Any> cell(value: T): AsyncCellHandle<T> {
+    fun <T : Any> source(value: T): AsyncSource<T> {
         val id = locked {
             val id = allocId()
             nodes[id] = AsyncNode.Cell(value, LinkedHashSet())
             id
         }
-        return AsyncCellHandle(id)
+        return AsyncSource(id)
     }
 
+    @Deprecated("Renamed to source (#lzcellkernel).", ReplaceWith("source(value)"))
+    fun <T : Any> cell(value: T): AsyncSource<T> = source(value)
+
     @Suppress("UNCHECKED_CAST")
-    fun <T : Any> getCell(handle: AsyncCellHandle<T>): T {
+    fun <T : Any> get(handle: AsyncSource<T>): T {
         locked {
             val node = nodes[handle.id] as? AsyncNode.Cell
                 ?: throw DisposedNodeException(handle.id, "cell")
@@ -235,7 +244,10 @@ class AsyncContext(
         }
     }
 
-    fun <T : Any> setCell(handle: AsyncCellHandle<T>, value: T) {
+    @Deprecated("Reads are unified — use get (#lzcellkernel).", ReplaceWith("get(handle)"))
+    fun <T : Any> getCell(handle: AsyncSource<T>): T = get(handle)
+
+    fun <T : Any> set(handle: AsyncSource<T>, value: T) {
         val dependents: List<Int> = locked {
             val node = nodes[handle.id] as? AsyncNode.Cell
                 ?: throw DisposedNodeException(handle.id, "cell")
@@ -252,6 +264,9 @@ class AsyncContext(
         flushEffects()
     }
 
+    @Deprecated("Writes are unified — use set (#lzcellkernel).", ReplaceWith("set(handle, value)"))
+    fun <T : Any> setCell(handle: AsyncSource<T>, value: T) = set(handle, value)
+
     // -- Async slots ------------------------------------------------------
 
     /**
@@ -260,7 +275,7 @@ class AsyncContext(
      */
     fun <T : Any> computedAsync(
         compute: suspend AsyncComputeContext.() -> T,
-    ): AsyncSlotHandle<T> = slotAsyncWithEquals(compute, equals = null)
+    ): AsyncComputed<T> = slotAsyncWithEquals(compute, equals = null)
 
     /**
      * Create an async memoized slot. Like [computedAsync] but an equal
@@ -269,12 +284,12 @@ class AsyncContext(
     fun <T : Any> memoAsync(
         equals: (Any?, Any?) -> Boolean = { a, b -> a == b },
         compute: suspend AsyncComputeContext.() -> T,
-    ): AsyncSlotHandle<T> = slotAsyncWithEquals(compute, equals)
+    ): AsyncComputed<T> = slotAsyncWithEquals(compute, equals)
 
     private fun <T : Any> slotAsyncWithEquals(
         compute: suspend AsyncComputeContext.() -> T,
         equals: ((Any?, Any?) -> Boolean)?,
-    ): AsyncSlotHandle<T> {
+    ): AsyncComputed<T> {
         val id = locked {
             val id = allocId()
             nodes[id] = AsyncNode.Slot(
@@ -290,12 +305,12 @@ class AsyncContext(
             )
             id
         }
-        return AsyncSlotHandle(id)
+        return AsyncComputed(id)
     }
 
     /** Synchronous cached read; the value if `Resolved`, else null. */
     @Suppress("UNCHECKED_CAST")
-    fun <T : Any> get(handle: AsyncSlotHandle<T>): T? = doGet(handle.id) as T?
+    fun <T : Any> get(handle: AsyncComputed<T>): T? = doGet(handle.id) as T?
 
     private fun doGet(slotId: Int): Any? = locked {
         val slot = nodes[slotId] as? AsyncNode.Slot ?: return null
@@ -309,7 +324,7 @@ class AsyncContext(
      * in-flight result instead of spawning duplicate futures.
      */
     @Suppress("UNCHECKED_CAST")
-    suspend fun <T : Any> getAsync(handle: AsyncSlotHandle<T>): T = doGetAsync(handle.id) as T
+    suspend fun <T : Any> getAsync(handle: AsyncComputed<T>): T = doGetAsync(handle.id) as T
 
     private suspend fun doGetAsync(slotId: Int): Any? {
         while (true) {
@@ -461,8 +476,8 @@ class AsyncContext(
         if (id < 0 || id >= nodes.size) return null
         val n = nodes[id] ?: return null
         return when (node) {
-            is AsyncCellHandle<*> -> n as? AsyncNode.Cell
-            is AsyncSlotHandle<*> -> n as? AsyncNode.Slot
+            is AsyncSource<*> -> n as? AsyncNode.Cell
+            is AsyncComputed<*> -> n as? AsyncNode.Slot
             is AsyncEffectHandle -> n as? AsyncNode.Effect
         }
     }
@@ -509,10 +524,10 @@ class AsyncContext(
     }
 
     /** Tear down an async slot. See [disposeNode]. */
-    suspend fun disposeSlot(handle: AsyncSlotHandle<*>) = disposeNode(handle)
+    suspend fun disposeSlot(handle: AsyncComputed<*>) = disposeNode(handle)
 
     /** Tear down a source cell. See [disposeNode]. */
-    suspend fun disposeCell(handle: AsyncCellHandle<*>) = disposeNode(handle)
+    suspend fun disposeCell(handle: AsyncSource<*>) = disposeNode(handle)
 
     /** Tear down both halves of a signal, puller first. */
     suspend fun disposeSignalNode(handle: AsyncSignalHandle<*>) {
@@ -808,7 +823,7 @@ class AsyncContext(
 
     /** Snapshot of a slot's state machine, for tests/diagnostics. */
     enum class SlotStateView { Empty, Computing, Resolved, Error, None }
-    fun slotState(handle: AsyncSlotHandle<*>): SlotStateView = locked {
+    fun slotState(handle: AsyncComputed<*>): SlotStateView = locked {
         val slot = nodes[handle.id] as? AsyncNode.Slot
             ?: return SlotStateView.None
         when (slot.state) {
@@ -830,14 +845,17 @@ class AsyncComputeContext internal constructor(
     private val nodeId: Int,
     private val dependencies: MutableSet<Int>,
 ) {
-    /** Read a cell synchronously, recording it as a dependency. */
-    fun <T : Any> getCell(handle: AsyncContext.AsyncCellHandle<T>): T {
+    /** Read a source synchronously, recording it as a dependency. */
+    fun <T : Any> get(handle: AsyncContext.AsyncSource<T>): T {
         dependencies.add(handle.id)
-        return ctx.getCell(handle)
+        return ctx.get(handle)
     }
 
+    @Deprecated("Reads are unified — use get (#lzcellkernel).", ReplaceWith("get(handle)"))
+    fun <T : Any> getCell(handle: AsyncContext.AsyncSource<T>): T = get(handle)
+
     /** Await a slot value, recording it as a dependency before awaiting. */
-    suspend fun <T : Any> getAsync(handle: AsyncContext.AsyncSlotHandle<T>): T {
+    suspend fun <T : Any> getAsync(handle: AsyncContext.AsyncComputed<T>): T {
         dependencies.add(handle.id)
         return ctx.getAsync(handle)
     }
@@ -938,19 +956,22 @@ class AsyncTeardownScope internal constructor(
         return node
     }
 
-    /** A source cell owned by this scope. */
-    fun <T : Any> cell(value: T): AsyncContext.AsyncCellHandle<T> = adopt(ctx.cell(value))
+    /** A source owned by this scope. */
+    fun <T : Any> source(value: T): AsyncContext.AsyncSource<T> = adopt(ctx.source(value))
+
+    @Deprecated("Renamed to source (#lzcellkernel).", ReplaceWith("source(value)"))
+    fun <T : Any> cell(value: T): AsyncContext.AsyncSource<T> = source(value)
 
     /** An async computed slot owned by this scope. */
     fun <T : Any> computedAsync(
         compute: suspend AsyncComputeContext.() -> T,
-    ): AsyncContext.AsyncSlotHandle<T> = adopt(ctx.computedAsync(compute))
+    ): AsyncContext.AsyncComputed<T> = adopt(ctx.computedAsync(compute))
 
     /** An async memoized slot owned by this scope. */
     fun <T : Any> memoAsync(
         equals: (Any?, Any?) -> Boolean = { a, b -> a == b },
         compute: suspend AsyncComputeContext.() -> T,
-    ): AsyncContext.AsyncSlotHandle<T> = adopt(ctx.memoAsync(equals, compute))
+    ): AsyncContext.AsyncComputed<T> = adopt(ctx.memoAsync(equals, compute))
 
     /** An async effect owned by this scope. */
     fun effectAsync(

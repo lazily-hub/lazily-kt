@@ -79,9 +79,9 @@ Wall-clock per-op. Mirrors the lazily-rs `benches/context.rs` groups.
 | `set_cell_invalidation/high_fan_out/512` | 73.8 ns | Invalidate one cell with 512 lazy dependents (no eager recompute — invalidation is lazy). |
 | `memo_equality_suppression/context` | 49.8 ns | A 32-deep memo chain whose recompute is unchanged — the `==` guard suppresses the downstream cascade. |
 | `memo_equality_suppression/thread_safe_context` | 37.4 ns | Same, lock-backed. |
-| `effect_flushing/context` | 41.1 ns | One `setCell` → one effect rerun + flush. |
+| `effect_flushing/context` | 41.1 ns | One `set` → one effect rerun + flush. |
 | `effect_flushing/thread_safe_context` | 39.3 ns | Same, lock-backed. |
-| `batch_storms/context/64` | 280.0 ns | Batch of 64 `setCell` → one coalesced flush. |
+| `batch_storms/context/64` | 280.0 ns | Batch of 64 `set` → one coalesced flush. |
 | `batch_storms/thread_safe_context/64` | 1.136 us | Same, lock-backed. |
 
 ### Typed cache reads (steady state)

@@ -317,7 +317,7 @@ class ReactiveGraphConformanceTest {
          */
         fun read(id: String): Int
 
-        fun setCell(id: String, value: Int)
+        fun set(id: String, value: Int)
         fun disposeId(id: String)
         fun kindOf(id: String): Kind
         fun isEffectActive(id: String): Boolean
@@ -407,7 +407,7 @@ class ReactiveGraphConformanceTest {
             (signals[id] ?: error("no signal '$id'")).lazy(ctx)
 
         override fun batchWrites(writes: List<Pair<String, Int>>) {
-            ctx.batch { for ((id, v) in writes) setCell(id, v) }
+            ctx.batch { for ((id, v) in writes) set(id, v) }
         }
 
         override fun defineEffect(id: String, reads: List<String>, scope: String?) {
@@ -430,7 +430,7 @@ class ReactiveGraphConformanceTest {
         override fun read(id: String): Int = readNode(ctx, id)
 
         @Suppress("UNCHECKED_CAST")
-        override fun setCell(id: String, value: Int) {
+        override fun set(id: String, value: Int) {
             val cell = nodes[id] as? Source<*> ?: error("set_cell on non-cell '$id'")
             (cell as Source<Int>).set(ctx, value)
         }
@@ -475,13 +475,13 @@ class ReactiveGraphConformanceTest {
 
         @Suppress("UNCHECKED_CAST")
         private fun readNode(id: String): Int = when (val n = nodes[id]) {
-            is ThreadSafeCellHandle<*> -> ctx.getCell(n as ThreadSafeCellHandle<Int>)
-            is ThreadSafeSlotHandle<*> -> ctx.get(n as ThreadSafeSlotHandle<Int>)
+            is ThreadSafeSource<*> -> ctx.get(n as ThreadSafeSource<Int>)
+            is ThreadSafeComputed<*> -> ctx.get(n as ThreadSafeComputed<Int>)
             else -> error("unknown or unreadable node '$id'")
         }
 
         override fun defineCell(id: String, value: Int, scope: String?) {
-            nodes[id] = scopes[scope]?.cell(value) ?: ctx.cell(value)
+            nodes[id] = scopes[scope]?.source(value) ?: ctx.source(value)
         }
 
         override fun defineComputed(id: String, reads: List<String>, offset: Int, scope: String?) {
@@ -510,7 +510,7 @@ class ReactiveGraphConformanceTest {
             ctx.disposeSignal(signals[id] ?: error("no signal '$id'"))
 
         override fun batchWrites(writes: List<Pair<String, Int>>) {
-            ctx.batch { for ((id, v) in writes) setCell(id, v) }
+            ctx.batch { for ((id, v) in writes) set(id, v) }
         }
 
         override fun defineEffect(id: String, reads: List<String>, scope: String?) {
@@ -529,16 +529,16 @@ class ReactiveGraphConformanceTest {
         override fun read(id: String): Int = readNode(id)
 
         @Suppress("UNCHECKED_CAST")
-        override fun setCell(id: String, value: Int) {
-            val cell = nodes[id] as? ThreadSafeCellHandle<*>
+        override fun set(id: String, value: Int) {
+            val cell = nodes[id] as? ThreadSafeSource<*>
                 ?: error("set_cell on non-cell '$id'")
-            ctx.setCell(cell as ThreadSafeCellHandle<Int>, value)
+            ctx.set(cell as ThreadSafeSource<Int>, value)
         }
 
         override fun disposeId(id: String) = ctx.disposeNode(nodes[id] ?: error("unknown '$id'"))
 
         override fun kindOf(id: String): Kind = when (nodes[id]) {
-            is ThreadSafeCellHandle<*> -> Kind.CELL
+            is ThreadSafeSource<*> -> Kind.CELL
             is ThreadSafeEffectHandle -> Kind.EFFECT
             else -> Kind.SLOT
         }
@@ -596,24 +596,24 @@ class ReactiveGraphConformanceTest {
         @Suppress("UNCHECKED_CAST")
         private suspend fun AsyncComputeContext.readNode(id: String): Int =
             when (val n = nodes[id]) {
-                is AsyncContext.AsyncCellHandle<*> ->
-                    getCell(n as AsyncContext.AsyncCellHandle<Int>)
-                is AsyncContext.AsyncSlotHandle<*> ->
-                    getAsync(n as AsyncContext.AsyncSlotHandle<Int>)
+                is AsyncContext.AsyncSource<*> ->
+                    get(n as AsyncContext.AsyncSource<Int>)
+                is AsyncContext.AsyncComputed<*> ->
+                    getAsync(n as AsyncContext.AsyncComputed<Int>)
                 else -> error("unknown or unreadable node '$id'")
             }
 
         @Suppress("UNCHECKED_CAST")
         private suspend fun readTop(id: String): Int = when (val n = nodes[id]) {
-            is AsyncContext.AsyncCellHandle<*> ->
-                ctx.getCell(n as AsyncContext.AsyncCellHandle<Int>)
-            is AsyncContext.AsyncSlotHandle<*> ->
-                ctx.getAsync(n as AsyncContext.AsyncSlotHandle<Int>)
+            is AsyncContext.AsyncSource<*> ->
+                ctx.get(n as AsyncContext.AsyncSource<Int>)
+            is AsyncContext.AsyncComputed<*> ->
+                ctx.getAsync(n as AsyncContext.AsyncComputed<Int>)
             else -> error("unknown or unreadable node '$id'")
         }
 
         override fun defineCell(id: String, value: Int, scope: String?) {
-            nodes[id] = scopes[scope]?.cell(value) ?: ctx.cell(value)
+            nodes[id] = scopes[scope]?.source(value) ?: ctx.source(value)
         }
 
         override fun defineComputed(id: String, reads: List<String>, offset: Int, scope: String?) {
@@ -646,7 +646,7 @@ class ReactiveGraphConformanceTest {
         }
 
         override fun batchWrites(writes: List<Pair<String, Int>>) {
-            ctx.batch { for ((id, v) in writes) setCell(id, v) }
+            ctx.batch { for ((id, v) in writes) set(id, v) }
         }
 
         override fun defineEffect(id: String, reads: List<String>, scope: String?) {
@@ -665,10 +665,10 @@ class ReactiveGraphConformanceTest {
         override fun read(id: String): Int = runBlocking { readTop(id) }
 
         @Suppress("UNCHECKED_CAST")
-        override fun setCell(id: String, value: Int) {
-            val cell = nodes[id] as? AsyncContext.AsyncCellHandle<*>
+        override fun set(id: String, value: Int) {
+            val cell = nodes[id] as? AsyncContext.AsyncSource<*>
                 ?: error("set_cell on non-cell '$id'")
-            ctx.setCell(cell as AsyncContext.AsyncCellHandle<Int>, value)
+            ctx.set(cell as AsyncContext.AsyncSource<Int>, value)
         }
 
         override fun disposeId(id: String) = runBlocking {
@@ -676,7 +676,7 @@ class ReactiveGraphConformanceTest {
         }
 
         override fun kindOf(id: String): Kind = when (nodes[id]) {
-            is AsyncContext.AsyncCellHandle<*> -> Kind.CELL
+            is AsyncContext.AsyncSource<*> -> Kind.CELL
             is AsyncContext.AsyncEffectHandle -> Kind.EFFECT
             else -> Kind.SLOT
         }
@@ -851,7 +851,7 @@ class ReactiveGraphConformanceTest {
                     opValue = readOrError(model, op["id"]!!.jsonPrimitive.content)
                     opError = opValue == READ_AFTER_DISPOSE
                 }
-                "set_cell" -> model.setCell(
+                "set_cell" -> model.set(
                     op["id"]!!.jsonPrimitive.content,
                     op["value"]!!.jsonPrimitive.int,
                 )
@@ -1013,7 +1013,7 @@ class ReactiveGraphConformanceTest {
         val publishOp = publish?.get("op")?.jsonObject
         if (publish != null && publishOp != null) {
             val before = model.runLog.size
-            model.setCell(
+            model.set(
                 publishOp["id"]!!.jsonPrimitive.content,
                 publishOp["value"]!!.jsonPrimitive.int,
             )

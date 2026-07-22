@@ -347,8 +347,11 @@ class Context : ComputeOps {
     // -- Write -------------------------------------------------------------
 
     /** @suppress Writes are kind-restricted extensions — use `sourceCell.set(ctx, value)` (Cell.kt). */
-    @Deprecated("Use `sourceCell.set(ctx, value)` — writes live on the source kind (#lzcellkernel).", ReplaceWith("handle.set(this, value)"))
-    fun <T : Any> setCell(handle: Source<T>, value: T) = setCellAny(handle.id, value)
+    /** Write a [Source]; a no-op when the new value is equal to the old value. */
+    fun <T : Any> set(handle: Source<T>, value: T) = setCellAny(handle.id, value)
+
+    @Deprecated("Writes are unified — use `set` (#lzcellkernel).", ReplaceWith("set(handle, value)"))
+    fun <T : Any> setCell(handle: Source<T>, value: T) = set(handle, value)
 
     @PublishedApi
     internal fun setCellAny(id: Int, value: Any) {
