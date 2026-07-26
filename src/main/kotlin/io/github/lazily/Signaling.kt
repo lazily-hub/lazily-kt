@@ -20,6 +20,13 @@ private fun JsonObject.peerField(name: String): PeerId =
 private fun JsonObject.strField(name: String): String =
     (this[name] ?: error("missing required field: $name")).jsonPrimitive.content
 
+private fun JsonObject.requireOnly(vararg allowed: String) {
+    val allowedKeys = allowed.toSet()
+    require(keys.all(allowedKeys::contains)) {
+        "unexpected signaling field(s): ${keys - allowedKeys}"
+    }
+}
+
 /**
  * A message the client sends to the signaling server. `type` tags are
  * kebab-case; client-directed frames carry `to` (never `from`). Mirrors
@@ -87,15 +94,33 @@ sealed interface ClientMessage {
         fun fromJson(element: JsonElement): ClientMessage {
             val obj = element.jsonObject
             return when (val type = obj.strField("type")) {
-                "join" -> Join(
-                    peer = obj.peerField("peer"),
-                    capabilities = obj["capabilities"]?.jsonArray?.map { it.jsonPrimitive.content },
-                )
-                "offer" -> Offer(to = obj.peerField("to"), sdp = obj.strField("sdp"))
-                "answer" -> Answer(to = obj.peerField("to"), sdp = obj.strField("sdp"))
-                "ice" -> Ice(to = obj.peerField("to"), candidate = obj.strField("candidate"))
-                "relay" -> Relay(to = obj.peerField("to"), payload = obj["payload"] ?: error("missing payload"))
-                "leave" -> Leave
+                "join" -> {
+                    obj.requireOnly("type", "peer", "capabilities")
+                    Join(
+                        peer = obj.peerField("peer"),
+                        capabilities = obj["capabilities"]?.jsonArray?.map { it.jsonPrimitive.content },
+                    )
+                }
+                "offer" -> {
+                    obj.requireOnly("type", "to", "sdp")
+                    Offer(to = obj.peerField("to"), sdp = obj.strField("sdp"))
+                }
+                "answer" -> {
+                    obj.requireOnly("type", "to", "sdp")
+                    Answer(to = obj.peerField("to"), sdp = obj.strField("sdp"))
+                }
+                "ice" -> {
+                    obj.requireOnly("type", "to", "candidate")
+                    Ice(to = obj.peerField("to"), candidate = obj.strField("candidate"))
+                }
+                "relay" -> {
+                    obj.requireOnly("type", "to", "payload")
+                    Relay(to = obj.peerField("to"), payload = obj["payload"] ?: error("missing payload"))
+                }
+                "leave" -> {
+                    obj.requireOnly("type")
+                    Leave
+                }
                 else -> error("unknown ClientMessage type: $type")
             }
         }
@@ -117,6 +142,10 @@ sealed interface ServerMessage {
 
     /** Sent on join: this peer's id and the current roster (excluding self). */
     data class Welcome(val peer: PeerId, val peers: List<PeerId>) : ServerMessage {
+        init {
+            require(peer !in peers) { "welcome roster must exclude the joining peer" }
+        }
+
         override fun toJson(): JsonObject = buildJsonObject {
             put("type", "welcome")
             put("peer", peer)
@@ -189,17 +218,41 @@ sealed interface ServerMessage {
         fun fromJson(element: JsonElement): ServerMessage {
             val obj = element.jsonObject
             return when (val type = obj.strField("type")) {
-                "welcome" -> Welcome(
-                    peer = obj.peerField("peer"),
-                    peers = obj["peers"]!!.jsonArray.map { it.jsonPrimitive.long },
-                )
-                "peer-joined" -> PeerJoined(peer = obj.peerField("peer"))
-                "peer-left" -> PeerLeft(peer = obj.peerField("peer"))
-                "offer" -> Offer(from = obj.peerField("from"), sdp = obj.strField("sdp"))
-                "answer" -> Answer(from = obj.peerField("from"), sdp = obj.strField("sdp"))
-                "ice" -> Ice(from = obj.peerField("from"), candidate = obj.strField("candidate"))
-                "relay" -> Relay(from = obj.peerField("from"), payload = obj["payload"] ?: error("missing payload"))
-                "error" -> Error(code = obj.strField("code"), message = obj.strField("message"))
+                "welcome" -> {
+                    obj.requireOnly("type", "peer", "peers")
+                    Welcome(
+                        peer = obj.peerField("peer"),
+                        peers = obj["peers"]!!.jsonArray.map { it.jsonPrimitive.long },
+                    )
+                }
+                "peer-joined" -> {
+                    obj.requireOnly("type", "peer")
+                    PeerJoined(peer = obj.peerField("peer"))
+                }
+                "peer-left" -> {
+                    obj.requireOnly("type", "peer")
+                    PeerLeft(peer = obj.peerField("peer"))
+                }
+                "offer" -> {
+                    obj.requireOnly("type", "from", "sdp")
+                    Offer(from = obj.peerField("from"), sdp = obj.strField("sdp"))
+                }
+                "answer" -> {
+                    obj.requireOnly("type", "from", "sdp")
+                    Answer(from = obj.peerField("from"), sdp = obj.strField("sdp"))
+                }
+                "ice" -> {
+                    obj.requireOnly("type", "from", "candidate")
+                    Ice(from = obj.peerField("from"), candidate = obj.strField("candidate"))
+                }
+                "relay" -> {
+                    obj.requireOnly("type", "from", "payload")
+                    Relay(from = obj.peerField("from"), payload = obj["payload"] ?: error("missing payload"))
+                }
+                "error" -> {
+                    obj.requireOnly("type", "code", "message")
+                    Error(code = obj.strField("code"), message = obj.strField("message"))
+                }
                 else -> error("unknown ServerMessage type: $type")
             }
         }

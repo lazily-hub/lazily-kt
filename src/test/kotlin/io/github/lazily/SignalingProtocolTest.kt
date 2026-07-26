@@ -10,6 +10,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFails
 import kotlin.test.assertTrue
 
 class SignalingProtocolTest {
@@ -42,6 +43,32 @@ class SignalingProtocolTest {
                 else -> error("unknown direction: $direction ($label)")
             }
             assertEquals(wire, reencoded, "wire round-trip mismatch for $label")
+        }
+    }
+
+    @Test
+    fun `signaling negative fixtures are rejected`() {
+        val frames = loadFixture("signaling/frames.json")
+        for (rejectEl in frames.getValue("rejects").jsonArray) {
+            val reject = rejectEl.jsonObject
+            val direction = reject.getValue("direction").jsonPrimitive.content
+            val wire = reject.getValue("wire")
+            assertFails(reject.getValue("label").jsonPrimitive.content) {
+                when (direction) {
+                    "client" -> ClientMessage.fromJson(wire)
+                    "server" -> ServerMessage.fromJson(wire)
+                    else -> error("unknown direction: $direction")
+                }
+            }
+        }
+
+        val session = loadFixture("signaling/anti_spoof_session.json")
+        for (rejectEl in session.getValue("rejects").jsonArray) {
+            val reject = rejectEl.jsonObject
+            val wire = reject.getValue("input").jsonObject.getValue("recv")
+            assertFails(reject.getValue("label").jsonPrimitive.content) {
+                ClientMessage.fromJson(wire)
+            }
         }
     }
 
