@@ -28,7 +28,7 @@ canonical matrix with per-cell notes and platform carve-outs lives in
 | Async reactive context | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Flat state machine | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Harel state charts | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Keyed reactive maps (`ReactiveMap`: `SourceMap` / `ComputedMap`) + `CellTree` + reconcile | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Keyed reactive maps (`ReactiveMap`: `SourceMap` / `ComputedMap`) + `SourceTree` + reconcile | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Memoized semantic tree (`SemTree`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Stable-id alignment (manufactured identity) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Reactive queue (`QueueCell` SPSC/MPSC + `QueueStorage` adapter) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
@@ -304,7 +304,7 @@ lazily-kt replays the shared [`lazily-spec`][spec] conformance fixtures:
   tracking) — the spec's `thread_safe = host` row — is covered by
   `ThreadSafeContextTest`, including multi-thread convergence, cross-thread
   handle reads, and a thread-safe `ThreadSafeStateMachine`.
-- The keyed cell collections layer (`SourceMap` / `ComputedMap` / `CellTree` /
+- The keyed cell collections layer (`SourceMap` / `ComputedMap` / `SourceTree` /
   keyed reconciliation) replays the shared `conformance/collections/` fixtures
   (`CollectionsConformanceTest`) — value / set-membership / order reactivity
   independence, stable handles, and atomic move.
@@ -388,7 +388,7 @@ mergeable sequence and text surfaces — the native counterparts of the
   delivery order. Includes causally-stable tombstone GC. It also implements the
   `CrdtTree` document contract: identity-preserving merge, version-vector delta,
   empty-frontier snapshot, and materialized value share one state model.
-- **`SemTree`** — a memoized semantic derivation over a `CellTree` (`#lzsemtree`).
+- **`SemTree`** — a memoized semantic derivation over a `SourceTree` (`#lzsemtree`).
   One memo slot per node folds `(node value, child derived values)`; editing one
   node recomputes only its **ancestor chain** (a sibling subtree stays cached),
   and the memo guard stops propagation when the folded result is unchanged.
@@ -409,7 +409,7 @@ not acquire an Android dependency.
 
 ## Keyed cell collections
 
-`SourceMap` / `ComputedMap` and `CellTree` are the native
+`SourceMap` / `ComputedMap` and `SourceTree` are the native
 implementation of the [`lazily-spec`][spec] keyed cell collections layer
 ([Cell Model § Keyed cell collections](https://github.com/lazily-hub/lazily-spec/blob/main/cell-model.md#keyed-cell-collections)) — a **composition of cells**, not a new cell kind. Each entry is an ordinary cell; a dedicated membership cell tracks the key set; a dedicated order cell tracks the ordered key list. The three reactive planes are independent by construction:
 
@@ -430,7 +430,7 @@ map.keysNow()                // [a, c, d, b]
 `reconcile(prior, target)` diffs two keyed sequences **by stable key**, emitting
 the minimal move-minimized `{insert, remove, move, update}` op set (longest-
 increasing-subsequence over prior indices preserved); applying it to a live
-`SourceMap` keeps stable entries' value cells un-invalidated. `CellTree` composes
+`SourceMap` keeps stable entries' value cells un-invalidated. `SourceTree` composes
 the same guarantees node-by-node for an ordered keyed tree.
 
 ## Reactive queue
@@ -568,7 +568,7 @@ models lazily-kt is bound to:
   shares.
 - `test-lazily-formal` — `lazily-formal`: the full Harel state chart, the
   reactive-graph kernel (Slot/Cell/Signal/Effect), the keyed collection
-  (SourceMap/ComputedMap), the ordered tree (CellTree), keyed reconciliation (LIS),
+  (SourceMap/ComputedMap), the ordered tree (SourceTree), keyed reconciliation (LIS),
   and the async slot state machine — the executable reference behind the
   conformance fixtures lazily-kt replays.
 

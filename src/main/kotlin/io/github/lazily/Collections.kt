@@ -309,7 +309,7 @@ private fun <K> Iterable<K>.toLinkedSet(): Set<K> = linkedSetOf<K>().apply { add
  * The tree is a composition of cells — not a new cell kind — so per-cell merge
  * applies node-by-node.
  */
-class CellTree<K : Any, V : Any>(private val ctx: Context) {
+class SourceTree<K : Any, V : Any>(private val ctx: Context) {
     private val values: MutableMap<K, Source<Any>> = LinkedHashMap()
     private val children: MutableMap<K, SourceMap<K, K>> = LinkedHashMap()
     private val parentOf: MutableMap<K, K> = HashMap()
@@ -318,7 +318,7 @@ class CellTree<K : Any, V : Any>(private val ctx: Context) {
     /** The value-cell handle for [node] (stable for the node's lifetime). */
     @Suppress("UNCHECKED_CAST")
     fun value(node: K): Source<V> =
-        (values[node] ?: error("CellTree has no node $node")) as Source<V>
+        (values[node] ?: error("SourceTree has no node $node")) as Source<V>
 
     /** Read [node]'s value. */
     @Suppress("UNCHECKED_CAST")
@@ -356,7 +356,7 @@ class CellTree<K : Any, V : Any>(private val ctx: Context) {
 
     /** The ordered child-collection handle for [parent] (membership/order readers). */
     fun children(parent: K): SourceMap<K, K> =
-        children[parent] ?: error("CellTree has no node $parent")
+        children[parent] ?: error("SourceTree has no node $parent")
 
     /** Move [child] to absolute [index] within [parent]'s child order (atomic). */
     fun moveChildTo(parent: K, child: K, index: Int) =
@@ -489,3 +489,11 @@ internal fun longestIncreasingSubsequenceIndices(seq: List<Int>): List<Int> {
  */
 @Deprecated("renamed to SourceMap", ReplaceWith("SourceMap<K, V>"))
 typealias CellMap<K, V> = SourceMap<K, V>
+
+/**
+ * Deprecated pre-v2 spelling of [SourceTree]. The v2 cell kernel renamed the node
+ * kinds to `Source` / `Computed` (`#lzcellkernel`), so the keyed-collection names
+ * followed; kept as an alias so existing callers still compile.
+ */
+@Deprecated("renamed to SourceTree", ReplaceWith("SourceTree<K, V>"))
+typealias CellTree<K, V> = SourceTree<K, V>

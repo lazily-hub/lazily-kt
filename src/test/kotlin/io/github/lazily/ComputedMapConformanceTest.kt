@@ -111,9 +111,10 @@ class ComputedMapConformanceTest {
     }
 
     /**
-     * The pre-v2 map names are **deprecated, not removed** — existing callers must
-     * still compile and construct the same types. This test is the compile-time
-     * proof: if a deprecated typealias were deleted, this file stops compiling.
+     * The pre-v2 keyed-collection names are **deprecated, not removed** — existing
+     * callers must still compile and construct the same types. This test is the
+     * compile-time proof: if a deprecated typealias were deleted, this file stops
+     * compiling.
      */
     @Suppress("DEPRECATION")
     @Test
@@ -137,5 +138,12 @@ class ComputedMapConformanceTest {
         assertEquals(EntryKind.Slot, tsSlotMap.entryKind)
         assertEquals(EntryKind.Cell, asyncCellMap.entryKind)
         assertEquals(EntryKind.Slot, asyncSlotMap.entryKind)
+
+        // The ordered keyed tree aliases the renamed class too.
+        val cellTree: CellTree<String, Int> = SourceTree(ctx)
+        cellTree.addRoot("a", 1)
+        cellTree.insertChild("a", "b", 2)
+        assertEquals(2, cellTree.get("b"))
+        assertEquals(listOf("b"), cellTree.children("a").keysNow())
     }
 }

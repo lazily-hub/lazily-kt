@@ -440,7 +440,7 @@ class CollectionsCrdtConformanceTest {
             val fold = semFold(foldName)
 
             val ctx = Context()
-            val tree = CellTree<String, Int>(ctx)
+            val tree = SourceTree<String, Int>(ctx)
             buildTree(ctx, tree, "root", s.getValue("tree").jsonObject, null)
             val sums = SemTree.build(ctx, tree, "root", fold)
 
@@ -510,10 +510,10 @@ class CollectionsCrdtConformanceTest {
         else -> error("unknown semtree fold: $name")
     }
 
-    /** Build a [CellTree] node from a fixture tree object, attaching it under [parent] (or as a root). */
+    /** Build a [SourceTree] node from a fixture tree object, attaching it under [parent] (or as a root). */
     private fun buildTree(
         ctx: Context,
-        tree: CellTree<String, Int>,
+        tree: SourceTree<String, Int>,
         id: String,
         obj: JsonObject,
         parent: String?,

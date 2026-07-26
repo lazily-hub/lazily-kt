@@ -10,7 +10,7 @@ import kotlin.test.assertTrue
  * Unit tests for the keyed cell collections layer
  * (`lazily-spec/cell-model.md` § Keyed cell collections): the value /
  * set-membership / order reactivity independence, stable handles, atomic move,
- * `CellTree` per-level reactivity, and move-minimized keyed reconciliation.
+ * `SourceTree` per-level reactivity, and move-minimized keyed reconciliation.
  *
  * The canonical fixture replay lives in [CollectionsConformanceTest].
  */
@@ -112,7 +112,7 @@ class CollectionsTest {
     @Test
     fun `cell tree per-level reactivity and atomic child move`() {
         val ctx = Context()
-        val tree = CellTree<String, Int>(ctx)
+        val tree = SourceTree<String, Int>(ctx)
         tree.addRoot("root", 0)
         tree.insertChild("root", "a", 1)
         tree.insertChild("root", "b", 2)

@@ -196,7 +196,7 @@ and `Reactive.trackedSharedRead_registers_edge` formal pins.
   projections from the Rust binary; it is independent of the reactive core. A
   state chart or other compute runs natively — never via this FFI channel.
 - `Collections.kt` — native keyed cell collections layer (`SourceMap` input-cell
-  specialization, `CellTree` ordered keyed tree, move-minimized LIS `reconcile`):
+  specialization, `SourceTree` ordered keyed tree, move-minimized LIS `reconcile`):
   a composition of cells (not a new cell kind) with independent value /
   set-membership / order reactivity, stable handles, and atomic move.
   Conformance fixtures in `conformance/collections/` (loaded from the sibling
@@ -225,7 +225,7 @@ and `Reactive.trackedSharedRead_registers_edge` formal pins.
   (OpIds preserved), pinned by the `textcrdt_delta_sync.json` fixture. It
   implements the `CrdtTree` lossless-document contract (`CrdtTree.kt`), replayed
   with the canonical `conformance/crdt-tree/algebra.json` fixture.
-- `SemTree.kt` — memoized semantic tree over a `CellTree` (`#lzsemtree`): one
+- `SemTree.kt` — memoized semantic tree over a `SourceTree` (`#lzsemtree`): one
   memo slot per node; an edit recomputes only the ancestor chain and the memo
   guard stops propagation when the fold is unchanged.
 - `StableId.kt` — manufactured identity for markdown text (`#lzstableid`):

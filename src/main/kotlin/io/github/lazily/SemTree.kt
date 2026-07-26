@@ -1,9 +1,9 @@
 package io.github.lazily
 
-// -- Memoized semantic tree over a CellTree (#lzsemtree) --------------------
+// -- Memoized semantic tree over a SourceTree (#lzsemtree) --------------------
 //
 // Native Kotlin port of `lazily-rs::sem_tree`. The syntactic document tree
-// ([CellTree]) holds *input* cells; the **semantic** tree (e.g. "unresolved
+// ([SourceTree]) holds *input* cells; the **semantic** tree (e.g. "unresolved
 // prompts", "drainable heads", "section summaries") is a layer of **memoized
 // slots** derived from it. [SemTree] builds one memoized slot per node that
 // folds `(node value, child derived values) -> D`.
@@ -34,7 +34,7 @@ private fun Context.allocSemSlot(compute: Compute.() -> Any?): Computed<Any> =
     Computed(slotAny(compute))
 
 /**
- * A memoized semantic derivation over a [CellTree]: one `memo` slot per node,
+ * A memoized semantic derivation over a [SourceTree]: one `memo` slot per node,
  * each folding `(node value, child derived values) -> D`.
  *
  * @param K node-id type
@@ -72,7 +72,7 @@ class SemTree<K : Any, D : Any> private constructor(
         @Suppress("UNCHECKED_CAST")
         fun <K : Any, V : Any, D : Any> build(
             ctx: Context,
-            tree: CellTree<K, V>,
+            tree: SourceTree<K, V>,
             rootId: K,
             fold: SemFold<V, D>,
         ): SemTree<K, D> {
@@ -93,7 +93,7 @@ class SemTree<K : Any, D : Any> private constructor(
          */
         private fun <K : Any, V : Any, D : Any> derive(
             ctx: Context,
-            tree: CellTree<K, V>,
+            tree: SourceTree<K, V>,
             nodeId: K,
             fold: SemFold<V, D>,
             nodes: MutableMap<K, Int>,
