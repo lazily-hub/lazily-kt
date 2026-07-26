@@ -23,6 +23,24 @@ tasks.test {
     useJUnitPlatform()
 }
 
+tasks.register<JavaExec>("interopPeer") {
+    group = "verification"
+    description = "Run the Lazily cross-binding NDJSON test peer."
+    mainClass.set("io.github.lazily.InteropPeerKt")
+    classpath = sourceSets.main.get().runtimeClasspath
+    standardInput = System.`in`
+    standardOutput = System.out
+    errorOutput = System.err
+}
+
+tasks.register<JavaExec>("interopPeerCheck") {
+    group = "verification"
+    description = "Run the interop peer production-surface self-check."
+    mainClass.set("io.github.lazily.InteropPeerKt")
+    classpath = sourceSets.main.get().runtimeClasspath
+    args("--self-check")
+}
+
 // Reactive-core microbenchmark (parity with lazily-rs benches/context.rs).
 // Run via `./gradlew benchmark` or `make benchmark`.
 tasks.register<JavaExec>("benchmark") {

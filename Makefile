@@ -7,12 +7,13 @@ LEAN_FORMAL_DIR ?= ../lazily-formal
 .PHONY: \
 	check \
 	test \
+	test-interop-peer \
 	benchmark \
 	benchmark-scale \
 	test-lean-formal \
 	test-lazily-formal
 
-check: test test-lean-formal test-lazily-formal
+check: test test-interop-peer test-lean-formal test-lazily-formal
 
 # Conformance fixtures are read only from the canonical ../lazily-spec sibling
 # (#lzspecconf) — there is no bundled fallback, because a fallback is exactly
@@ -22,6 +23,9 @@ test:
 	test -d "$(SPEC_CONFORMANCE_DIR)" || { echo "missing $(SPEC_CONFORMANCE_DIR); clone lazily-spec as a sibling or set LAZILY_SPEC_DIR"; exit 1; }
 	./gradlew test
 	./scripts/check-conformance-coverage.sh
+
+test-interop-peer:
+	./gradlew interopPeerCheck
 
 # Reactive-core microbenchmark (parity with lazily-rs benches/context.rs):
 # cached reads, cold first get, fan-out, invalidation, memo suppression, effect
