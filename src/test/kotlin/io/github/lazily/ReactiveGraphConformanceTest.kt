@@ -82,6 +82,16 @@ import kotlin.test.fail
  * `scripts/check-conformance-coverage.sh` sees `reactive-graph/` in the
  * manifest and fails CI if this suite ever stops running.
  */
+/**
+ * The failure a `fail_next`-armed compute body throws.
+ *
+ * A runner-owned sentinel, not a library error: the contract under test is that
+ * the library does not CACHE it, so what it is matters less than that the same
+ * body throws it once per armed run and the node still re-runs afterwards.
+ */
+private class ComputeFailedException(id: String) :
+    RuntimeException("reactive-graph: compute_failed (fail_next) for $id")
+
 class ReactiveGraphConformanceTest {
     private val json = Json
 
@@ -100,6 +110,7 @@ class ReactiveGraphConformanceTest {
             "disposal_does_not_run_surviving_effects.json",
             "dispose_detaches_edges_both_directions.json",
             "dispose_signal_reverts_to_lazy.json",
+        "failed_compute_is_never_cached.json",
             // #lzmergefeed (lazily-spec, Step 3): the accumulate/fold write
             // surface. Five exercise the `merge_cell` op this runner does not
             // model (skipped as unsupported ops); the sixth uses only supported
@@ -149,6 +160,10 @@ class ReactiveGraphConformanceTest {
             "dispose_stale_handle",
             "effect",
             "end_scope",
+            // Arms the next N computes of an existing node to throw, so a
+            // fixture can assert on `computes_of` that a failed compute is
+            // never cached.
+            "fail_next",
             "fanout",
             "read",
             "set_cell",
@@ -234,6 +249,9 @@ class ReactiveGraphConformanceTest {
 
         /** Sentinel for a read that raised `read_after_dispose`. */
         const val READ_AFTER_DISPOSE = "read_after_dispose"
+
+        /** Sentinel for a read whose compute body was armed to fail. */
+        const val COMPUTE_FAILED = "compute_failed"
     }
 
     /** The kind of a node, as the corpus distinguishes them. */
@@ -275,11 +293,41 @@ class ReactiveGraphConformanceTest {
          */
         val computeCounts: MutableMap<String, Int>
 
-        /** Called from inside a wrapped compute body, once per invocation. */
-        fun countCompute(id: String) {
+        /**
+         * How many upcoming compute bodies must fail, per node id (`fail_next`).
+         *
+         * Synchronized alongside [computeCounts] for the same reason: the async
+         * model's computes run on the context's dispatcher, not the test thread.
+         */
+        val armedFailures: MutableMap<String, Int>
+
+        /** Arm the next [count] computes of [id] to throw. */
+        fun failNext(id: String, count: Int) {
             synchronized(computeCounts) {
-                computeCounts[id] = (computeCounts[id] ?: 0) + 1
+                armedFailures[id] = (armedFailures[id] ?: 0) + if (count > 0) count else 1
             }
+        }
+
+        /**
+         * Called from inside a wrapped compute body, once per invocation.
+         *
+         * Throws [ComputeFailedException] when this run is armed by `fail_next`.
+         * The count is taken FIRST, so an armed run is counted exactly like a
+         * successful one — which is what lets a fixture assert the retry on
+         * `computes_of` rather than on the error a caching binding also raises.
+         */
+        fun countCompute(id: String) {
+            val armed = synchronized(computeCounts) {
+                computeCounts[id] = (computeCounts[id] ?: 0) + 1
+                val n = armedFailures[id] ?: 0
+                if (n > 0) {
+                    armedFailures[id] = n - 1
+                    true
+                } else {
+                    false
+                }
+            }
+            if (armed) throw ComputeFailedException(id)
         }
 
         /** Zero for a node that has never computed — never absent, never null. */
@@ -348,6 +396,7 @@ class ReactiveGraphConformanceTest {
         override val runLog = mutableListOf<String>()
         override val cleanupLog = mutableListOf<String>()
         override val computeCounts = HashMap<String, Int>()
+        override val armedFailures = HashMap<String, Int>()
 
         private val ctx = Context()
         private val nodes = HashMap<String, GraphNode>()
@@ -465,6 +514,7 @@ class ReactiveGraphConformanceTest {
         override val runLog = mutableListOf<String>()
         override val cleanupLog = mutableListOf<String>()
         override val computeCounts = HashMap<String, Int>()
+        override val armedFailures = HashMap<String, Int>()
 
         private val ctx = ThreadSafeContext()
         private val nodes = HashMap<String, ThreadSafeGraphNode>()
@@ -575,6 +625,7 @@ class ReactiveGraphConformanceTest {
         // test thread. Every access goes through Model.countCompute /
         // Model.computesOf, which synchronize on it.
         override val computeCounts = HashMap<String, Int>()
+        override val armedFailures = HashMap<String, Int>()
 
         private val ctx = AsyncContext()
         // Concurrent, NOT a plain HashMap: async compute/effect bodies resolve
@@ -753,6 +804,11 @@ class ReactiveGraphConformanceTest {
         model.read(id)
     } catch (_: DisposedNodeException) {
         READ_AFTER_DISPOSE
+    } catch (_: ComputeFailedException) {
+        // Both are "this read failed", but they are different contracts:
+        // disposal is permanent, a `fail_next` compute failure is recoverable —
+        // the next read re-runs the body. Neither latches the id here.
+        COMPUTE_FAILED
     }
 
     /**
@@ -849,8 +905,12 @@ class ReactiveGraphConformanceTest {
                 )
                 "read" -> {
                     opValue = readOrError(model, op["id"]!!.jsonPrimitive.content)
-                    opError = opValue == READ_AFTER_DISPOSE
+                    opError = opValue == READ_AFTER_DISPOSE || opValue == COMPUTE_FAILED
                 }
+                "fail_next" -> model.failNext(
+                    op["id"]!!.jsonPrimitive.content,
+                    op["count"]?.jsonPrimitive?.int ?: 1,
+                )
                 "set_cell" -> model.set(
                     op["id"]!!.jsonPrimitive.content,
                     op["value"]!!.jsonPrimitive.int,
@@ -936,11 +996,12 @@ class ReactiveGraphConformanceTest {
                         check("dependencies_of.$id", model.dependenciesOf(id), want.jsonObject[id])
                     }
                     "error" -> {
-                        val wantError = when {
-                            want == null || want is JsonNull -> false
-                            (want as JsonPrimitive).content == READ_AFTER_DISPOSE -> true
-                            else -> error("$fixture#$i: unknown expected error $want")
-                        }
+                        // Any non-null error code means "this op must fail";
+                        // null means "must not". The runner does not model error
+                        // identity — the fixtures carry the code so the contract
+                        // is legible, and each binding's own tests pin which
+                        // exception it raises.
+                        val wantError = !(want == null || want is JsonNull)
                         report.checks++
                         if (opError != wantError) {
                             report.failures.add("#$stepIdx:error — got $opError, want $wantError")
