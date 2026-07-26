@@ -34,7 +34,7 @@ typealias ThreadSafeSlotHandle<T> = ThreadSafeComputed<T>
 typealias ThreadSafeCellHandle<T> = ThreadSafeSource<T>
 
 /**
- * Reference to a registered side-effecting observer in a [ThreadSafeContext].
+ * Reference to a registered Effect in a [ThreadSafeContext].
  * Clonable by value. Dispose to stop reruns.
  */
 @JvmInline
