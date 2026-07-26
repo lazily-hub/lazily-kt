@@ -24,7 +24,7 @@ class AsyncMapConformanceTest {
         val ctx = AsyncContext()
         val map = AsyncSourceMap<Int, Boolean>()
         map.materializeAll(ctx, listOf(1, 2, 3)) { true }
-        assertEquals(EntryKind.Cell, map.entryKind)
+        assertEquals(EntryKind.Source, map.entryKind)
         assertEquals(3, map.presentCount)
         assertEquals(true, map.observe(ctx, 2))
         assertEquals(listOf(1, 2, 3), map.presentKeys())
@@ -56,7 +56,7 @@ class AsyncMapConformanceTest {
         val ctx = AsyncContext()
         val map = AsyncSourceMap<String, Int>()
         map.materializeAll(ctx, listOf("a", "b")) { 0 }
-        assertEquals(EntryKind.Cell, map.entryKind)
+        assertEquals(EntryKind.Source, map.entryKind)
         assertEquals(2, map.presentCount)
     }
 

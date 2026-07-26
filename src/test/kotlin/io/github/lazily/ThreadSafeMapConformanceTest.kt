@@ -24,7 +24,7 @@ class ThreadSafeMapConformanceTest {
         val ctx = ThreadSafeContext()
         val map = ThreadSafeComputedMap<Int, Int>()
         map.materializeAll(ctx, listOf(0, 1, 2, 5, 9)) { it * 3 }
-        assertEquals(EntryKind.Slot, map.entryKind)
+        assertEquals(EntryKind.Computed, map.entryKind)
         assertEquals(5, map.presentCount)
         for (k in listOf(0, 1, 2, 5, 9)) assertTrue(map.isPresent(k))
         assertEquals(listOf(0, 1, 2, 5, 9), map.presentKeys())
@@ -48,7 +48,7 @@ class ThreadSafeMapConformanceTest {
         val ctx = ThreadSafeContext()
         val map = ThreadSafeSourceMap<String, Int>()
         map.materializeAll(ctx, listOf("a", "b", "c")) { 0 }
-        assertEquals(EntryKind.Cell, map.entryKind)
+        assertEquals(EntryKind.Source, map.entryKind)
         assertEquals(3, map.presentCount)
     }
 

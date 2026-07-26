@@ -24,7 +24,7 @@ import kotlin.concurrent.withLock
  * access (input cells are always resolved) and [set] updates it.
  */
 class AsyncSourceMap<K : Any, V : Any> : ReactiveMap<K, V> {
-    override val entryKind: EntryKind get() = EntryKind.Cell
+    override val entryKind: EntryKind get() = EntryKind.Source
 
     private val lock = ReentrantLock()
     private val materialized = LinkedHashMap<K, AsyncContext.AsyncSource<V>>()
@@ -82,7 +82,7 @@ class AsyncSourceMap<K : Any, V : Any> : ReactiveMap<K, V> {
  * while pending); drive it with [observeAsync]. No `set`.
  */
 class AsyncComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
-    override val entryKind: EntryKind get() = EntryKind.Slot
+    override val entryKind: EntryKind get() = EntryKind.Computed
 
     private val lock = ReentrantLock()
     private val materialized = LinkedHashMap<K, AsyncContext.AsyncComputed<V>>()

@@ -30,13 +30,47 @@ package io.github.lazily
  * Which kind of reactive node a [ReactiveMap] entry is — the handle-kind axis the
  * map abstracts over (the Rust `MapHandle` trait / `EntryKind`). Mirrors
  * `EntryKind` in `lazily-formal`'s `Materialization` module.
+ *
+ * The entry *names* follow the v2 cell kernel (`Source` / `Computed`); the *wire*
+ * tags do not. [wireName] pins the cross-binding serialized spelling to the
+ * historical `"cell"` / `"slot"`, so the rename cannot leak into fixture or
+ * protocol data through Kotlin's default `.name` encoding.
  */
-enum class EntryKind {
-    /** An **input** cell ([Source]) — always materialized on read. */
-    Cell,
+enum class EntryKind(val wireName: String) {
+    /** An **input** cell ([Source]) — always materialized on read. Wire tag: `"cell"`. */
+    Source("cell"),
 
-    /** A **derived** slot ([Computed]) — materialized eagerly (pre-mint) or lazily on first read. */
-    Slot,
+    /**
+     * A **derived** slot ([Computed]) — materialized eagerly (pre-mint) or lazily
+     * on first read. Wire tag: `"slot"`.
+     */
+    Computed("slot");
+
+    companion object {
+        /**
+         * Deprecated pre-v2 spelling of [Source]. Enum *entries* cannot be
+         * typealiased, so the old spelling survives as a companion property —
+         * `EntryKind.Cell` still resolves and still denotes the same constant.
+         */
+        @Deprecated("renamed to EntryKind.Source", ReplaceWith("EntryKind.Source"))
+        val Cell: EntryKind get() = Source
+
+        /** Deprecated pre-v2 spelling of [Computed]. See [Cell]. */
+        @Deprecated("renamed to EntryKind.Computed", ReplaceWith("EntryKind.Computed"))
+        val Slot: EntryKind get() = Computed
+
+        /**
+         * Parse a serialized entry-kind tag, accepting both the historical
+         * `"cell"` / `"slot"` wire spellings and the v2 `"source"` / `"computed"`
+         * spellings the canonical corpus will flip to. Returns `null` for any
+         * other tag — callers must treat that as an error, never as a default.
+         */
+        fun fromWire(tag: String): EntryKind? = when (tag) {
+            "cell", "source" -> Source
+            "slot", "computed" -> Computed
+            else -> null
+        }
+    }
 }
 
 /**
@@ -46,7 +80,7 @@ enum class EntryKind {
  * [ComputedMap] (derived-slot) specializations and their thread-safe / async flavors.
  */
 interface ReactiveMap<K : Any, V : Any> {
-    /** This map's entry kind ([EntryKind.Cell] for a [SourceMap], [EntryKind.Slot] for a [ComputedMap]). */
+    /** This map's entry kind ([EntryKind.Source] for a [SourceMap], [EntryKind.Computed] for a [ComputedMap]). */
     val entryKind: EntryKind
 
     /** Whether [key] is currently materialized (present in the allocated set). Non-reactive. */
@@ -77,7 +111,7 @@ interface ReactiveMap<K : Any, V : Any> {
  * first-materialization order for [presentKeys].
  */
 class ComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
-    override val entryKind: EntryKind get() = EntryKind.Slot
+    override val entryKind: EntryKind get() = EntryKind.Computed
 
     private val materialized = LinkedHashMap<K, Computed<V>>()
 

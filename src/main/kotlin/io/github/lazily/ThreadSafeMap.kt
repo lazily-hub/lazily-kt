@@ -28,7 +28,7 @@ import kotlin.concurrent.withLock
  * updates it.
  */
 class ThreadSafeSourceMap<K : Any, V : Any> : ReactiveMap<K, V> {
-    override val entryKind: EntryKind get() = EntryKind.Cell
+    override val entryKind: EntryKind get() = EntryKind.Source
 
     private val lock = ReentrantLock()
     private val materialized = LinkedHashMap<K, ThreadSafeSource<V>>()
@@ -97,7 +97,7 @@ class ThreadSafeSourceMap<K : Any, V : Any> : ReactiveMap<K, V> {
  * (a slot's value is derived). Present-set state is guarded by a [ReentrantLock].
  */
 class ThreadSafeComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
-    override val entryKind: EntryKind get() = EntryKind.Slot
+    override val entryKind: EntryKind get() = EntryKind.Computed
 
     private val lock = ReentrantLock()
     private val materialized = LinkedHashMap<K, ThreadSafeComputed<V>>()

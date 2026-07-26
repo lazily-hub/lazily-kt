@@ -21,7 +21,7 @@ class ComputedMapConformanceTest {
         val ctx = Context()
         val map = ComputedMap<Int, Int>()
         map.materializeAll(ctx, listOf(0, 1, 2, 5, 9)) { it * 3 }
-        assertEquals(EntryKind.Slot, map.entryKind)
+        assertEquals(EntryKind.Computed, map.entryKind)
         assertEquals(5, map.presentCount)
         for (k in listOf(0, 1, 2, 5, 9)) assertTrue(map.isPresent(k))
     }
@@ -102,7 +102,7 @@ class ComputedMapConformanceTest {
         val ctx = Context()
         val map = SourceMap<Int, Int>(ctx)
         map.insert(7, 7)
-        assertEquals(EntryKind.Cell, map.entryKind)
+        assertEquals(EntryKind.Source, map.entryKind)
         assertEquals(1, map.presentCount)
         val handle = map.value(7)
         assertEquals(7, ctx.get(handle))
@@ -121,12 +121,12 @@ class ComputedMapConformanceTest {
     fun deprecatedPreV2NamesStillResolve() {
         val ctx = Context()
         val cellMap: CellMap<Int, Int> = SourceMap(ctx, listOf(1 to 10))
-        assertEquals(EntryKind.Cell, cellMap.entryKind)
+        assertEquals(EntryKind.Source, cellMap.entryKind)
         assertEquals(10, cellMap.get(1))
 
         val slotMap: SlotMap<Int, Int> = ComputedMap()
         slotMap.materializeAll(ctx, listOf(1, 2)) { it * 3 }
-        assertEquals(EntryKind.Slot, slotMap.entryKind)
+        assertEquals(EntryKind.Computed, slotMap.entryKind)
         assertEquals(6, slotMap.get(ctx, 2))
 
         // Thread-safe and async flavors alias the renamed classes too.
@@ -134,10 +134,10 @@ class ComputedMapConformanceTest {
         val tsSlotMap: ThreadSafeSlotMap<Int, Int> = ThreadSafeComputedMap()
         val asyncCellMap: AsyncCellMap<Int, Int> = AsyncSourceMap()
         val asyncSlotMap: AsyncSlotMap<Int, Int> = AsyncComputedMap()
-        assertEquals(EntryKind.Cell, tsCellMap.entryKind)
-        assertEquals(EntryKind.Slot, tsSlotMap.entryKind)
-        assertEquals(EntryKind.Cell, asyncCellMap.entryKind)
-        assertEquals(EntryKind.Slot, asyncSlotMap.entryKind)
+        assertEquals(EntryKind.Source, tsCellMap.entryKind)
+        assertEquals(EntryKind.Computed, tsSlotMap.entryKind)
+        assertEquals(EntryKind.Source, asyncCellMap.entryKind)
+        assertEquals(EntryKind.Computed, asyncSlotMap.entryKind)
 
         // The ordered keyed tree aliases the renamed class too.
         val cellTree: CellTree<String, Int> = SourceTree(ctx)
@@ -145,5 +145,35 @@ class ComputedMapConformanceTest {
         cellTree.insertChild("a", "b", 2)
         assertEquals(2, cellTree.get("b"))
         assertEquals(listOf("b"), cellTree.children("a").keysNow())
+
+        // Enum entries cannot be typealiased, so the pre-v2 `EntryKind` spellings
+        // survive as companion properties denoting the same constants.
+        assertEquals(EntryKind.Source, EntryKind.Cell)
+        assertEquals(EntryKind.Computed, EntryKind.Slot)
+    }
+
+    /**
+     * The entry *names* were renamed to `Source` / `Computed`; the *wire* tags were
+     * not. Kotlin serializes an enum by `.name` by default, so a rename would
+     * silently re-spell any serialized `EntryKind` — cross-binding fixture and
+     * protocol data nine runners read. [EntryKind.wireName] is the explicit
+     * mapping that decouples the two, and this is its gate.
+     */
+    @Test
+    fun entryKindWireTagsAreUnchangedByTheRename() {
+        assertEquals("cell", EntryKind.Source.wireName)
+        assertEquals("slot", EntryKind.Computed.wireName)
+
+        // Round-trip: every entry's wire tag parses back to that same entry.
+        for (kind in EntryKind.entries) assertEquals(kind, EntryKind.fromWire(kind.wireName))
+
+        // The v2 spellings the canonical corpus will flip to also parse.
+        assertEquals(EntryKind.Source, EntryKind.fromWire("source"))
+        assertEquals(EntryKind.Computed, EntryKind.fromWire("computed"))
+
+        // Anything else is unparseable — never a silent default.
+        assertNull(EntryKind.fromWire("effect"))
+        assertNull(EntryKind.fromWire("Cell"))
+        assertNull(EntryKind.fromWire(""))
     }
 }

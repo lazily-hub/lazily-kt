@@ -76,9 +76,14 @@ and `Reactive.trackedSharedRead_registers_edge` formal pins.
     `EffectHandle` = `Effect`; constructor aliases `formula`/`slot` → `computed`,
     `.drive`/`.undrive`/`.isDriven` → `.eager`/`.lazy`/`.isEager`. The keyed
     collections followed the same rename: `CellMap` = `SourceMap`, `SlotMap` =
-    `ComputedMap`, plus the `ThreadSafe*`/`Async*` flavors, all kept as deprecated
-    typealiases. `Slot` as a *storage* identifier (`EntryKind.Slot`, the slot state
-    machine) is untouched (§5.0).
+    `ComputedMap`, `CellTree` = `SourceTree`, plus the `ThreadSafe*`/`Async*`
+    flavors, all kept as deprecated typealiases. `EntryKind` followed too —
+    `EntryKind.Cell` = `EntryKind.Source`, `EntryKind.Slot` = `EntryKind.Computed`
+    — but enum *entries* cannot be typealiased, so the old spellings are deprecated
+    companion properties instead. Only the entry names changed: the serialized tags
+    stay `"cell"` / `"slot"`, pinned by `EntryKind.wireName` rather than Kotlin's
+    default `.name` encoding, because nine binding runners read that wire data.
+    `Slot` as a *storage* identifier (the slot state machine) is untouched (§5.0).
   - **Disposal + teardown scopes** (`#lzspecedgeindex`, `Disposal.kt`). Handles
     are copyable ids, not owners, so nothing is reclaimed by dropping one: the
     arena and the reverse edge set hold strong references, and a long-lived

@@ -75,7 +75,7 @@ class MaterializationConformanceTest {
         // eager: pre-mint the whole keyset.
         val eager = ComputedMap<String, Int>()
         eager.materializeAll(ctx, vals.keys) { lookup(it) }
-        assertEquals(EntryKind.Slot, eager.entryKind)
+        assertEquals(EntryKind.Computed, eager.entryKind)
         assertEquals(vals.size, eager.presentCount)
         assertEquals(strArray(expected, "eager_present").toSet(), eager.presentKeys().toSet())
 
@@ -122,7 +122,29 @@ class MaterializationConformanceTest {
     }
 
     @Test
-    fun entryKindOrthogonalToMode() {
+    fun entryKindOrthogonalToMode() = replayEntryKindFixture(::identityTag)
+
+    /**
+     * The same canonical replay, with each entry's `kind` tag rewritten to the v2
+     * spelling on its way into the parser — the corpus emits `"cell"` / `"slot"`
+     * today and will flip to `"source"` / `"computed"`. Substituting the tag at the
+     * parse boundary is the forward-compatibility gate: if the runner only knew the
+     * historical spellings, this replay would fail on an unknown entry kind, and
+     * the flipped corpus would land red.
+     */
+    @Test
+    fun entryKindOrthogonalToModeAcceptsV2KindTags() = replayEntryKindFixture(::v2Tag)
+
+    private fun identityTag(tag: String): String = tag
+
+    private fun v2Tag(tag: String): String = when (tag) {
+        "cell" -> "source"
+        "slot" -> "computed"
+        else -> tag
+    }
+
+    /** [rewriteKindTag] maps the fixture's raw `kind` tag before it is parsed. */
+    private fun replayEntryKindFixture(rewriteKindTag: (String) -> String) {
         val fixture = loadFixture("entry_kind_orthogonal_to_mode.json")
         val expected = fixture.getValue("expected").jsonObject
         assertEquals("eager", expected.getValue("default_mode").jsonPrimitive.content)
@@ -137,12 +159,18 @@ class MaterializationConformanceTest {
         for ((key, entry) in entries) {
             val o = entry.jsonObject
             vals[key] = o.getValue("val").jsonPrimitive.int
-            when (val kind = o.getValue("kind").jsonPrimitive.content) {
-                "cell" -> cellKeys.add(key)
-                "slot" -> slotKeys.add(key)
-                else -> error("unknown entry kind $kind")
+            // The corpus emits the historical `"cell"` / `"slot"` tags today and
+            // will flip to the v2 `"source"` / `"computed"` spellings; both parse
+            // to the same [EntryKind]. Anything else is still a hard error — the
+            // replay must never silently default or skip an entry.
+            val kind = rewriteKindTag(o.getValue("kind").jsonPrimitive.content)
+            when (EntryKind.fromWire(kind)) {
+                EntryKind.Source -> cellKeys.add(key)
+                EntryKind.Computed -> slotKeys.add(key)
+                null -> error("unknown entry kind $kind")
             }
         }
+        assertTrue(cellKeys.isNotEmpty() && slotKeys.isNotEmpty(), "fixture must declare both entry kinds")
         val lookup: (String) -> Int = { vals.getValue(it) }
 
         val ctx = Context()
@@ -152,8 +180,8 @@ class MaterializationConformanceTest {
         for (k in cellKeys) eagerCells.insert(k, lookup(k))
         val eagerSlots = ComputedMap<String, Int>()
         eagerSlots.materializeAll(ctx, slotKeys) { lookup(it) }
-        assertEquals(EntryKind.Cell, eagerCells.entryKind)
-        assertEquals(EntryKind.Slot, eagerSlots.entryKind)
+        assertEquals(EntryKind.Source, eagerCells.entryKind)
+        assertEquals(EntryKind.Computed, eagerSlots.entryKind)
         val eagerPresent = (eagerCells.presentKeys() + eagerSlots.presentKeys()).toSet()
         assertEquals(strArray(expected, "eager_present").toSet(), eagerPresent)
 

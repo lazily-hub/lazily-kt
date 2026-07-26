@@ -71,7 +71,7 @@ class SourceMap<K : Any, V : Any>(
     entries: List<Pair<K, V>> = emptyList(),
 ) : ReactiveMap<K, V> {
     /** [SourceMap] is the input-cell specialization of [ReactiveMap]. */
-    override val entryKind: EntryKind get() = EntryKind.Cell
+    override val entryKind: EntryKind get() = EntryKind.Source
     private val entryCells: MutableMap<K, Source<Any>> = LinkedHashMap()
     private val membershipCell: Source<Any> = ctx.allocCell().also { cell ->
         ctx.setCellAny(cell.id, entries.map { it.first }.toLinkedSet())
