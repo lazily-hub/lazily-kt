@@ -113,7 +113,47 @@ interface ReactiveMap<K : Any, V : Any> {
 class ComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
     override val entryKind: EntryKind get() = EntryKind.Computed
 
-    private val materialized = LinkedHashMap<K, Computed<V>>()
+    /**
+     * Present set + key order + the move algebra, shared with every other
+     * flavor. Graph-agnostic; the reactivity below is this map's own.
+     */
+    private val keyed = KeyedOrder<K, Computed<V>>()
+
+    // Membership and order signals minted on THIS map's graph. They are minted
+    // lazily because the context arrives per call, not at construction — a
+    // shared graph-agnostic core cannot supply reactivity, so each flavor owns
+    // its cells.
+    private var membershipCell: Int = -1
+    private var orderCell: Int = -1
+    private var membershipVersion = 0
+    private var orderVersion = 0
+
+    private fun membershipId(ctx: Context): Int {
+        if (membershipCell < 0) membershipCell = ctx.cellAny(0)
+        return membershipCell
+    }
+
+    private fun orderId(ctx: Context): Int {
+        if (orderCell < 0) orderCell = ctx.cellAny(0)
+        return orderCell
+    }
+
+    private fun bumpOrder(ctx: Context) {
+        orderVersion += 1
+        ctx.setCellAny(orderId(ctx), orderVersion)
+    }
+
+    private fun bumpMembership(ctx: Context) {
+        membershipVersion += 1
+        ctx.setCellAny(membershipId(ctx), membershipVersion)
+        bumpOrder(ctx)
+    }
+
+    private fun applyMove(ctx: Context, outcome: MapMove): Boolean {
+        if (!outcome.applied) return false
+        if (outcome.changed) bumpOrder(ctx)
+        return true
+    }
 
     /**
      * Mint (or return the cached) derived-slot node for [key], caching the handle.
@@ -121,10 +161,10 @@ class ComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
      * value-threaded against the minted slot's recompute (`#lzcellkernel`).
      */
     private fun mint(ctx: Context, key: K, factory: ComputeOps.(K) -> V): Computed<V> {
-        materialized[key]?.let { return it } // warm: already allocated.
-        val handle = Computed<V>(ctx.slotAny { factory(key) })
-        materialized[key] = handle
-        return handle
+        keyed.get(key)?.let { return it } // warm: already allocated.
+        val (stored, mutation) = keyed.insert(key, Computed<V>(ctx.slotAny { factory(key) }))
+        if (mutation.changed) bumpMembership(ctx)
+        return stored
     }
 
     /**
@@ -148,20 +188,90 @@ class ComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
     }
 
     /** The existing derived-slot handle for [key], or `null`. Non-reactive. */
-    fun handle(key: K): Computed<V>? = materialized[key]
+    fun handle(key: K): Computed<V>? = keyed.get(key)
 
     /** Read the value at [key] if present (does not mint); `null` if absent. Reactive on that entry. */
     fun get(ops: ComputeOps, key: K): V? {
-        val handle = materialized[key] ?: return null
+        val handle = keyed.get(key) ?: return null
         @Suppress("UNCHECKED_CAST")
         return ops.getSlotAny(handle.id) as V
     }
 
-    override fun isPresent(key: K): Boolean = materialized.containsKey(key)
+    override fun isPresent(key: K): Boolean = keyed.contains(key)
 
-    override fun presentKeys(): List<K> = materialized.keys.toList()
+    override fun presentKeys(): List<K> = keyed.keys()
 
-    override val presentCount: Int get() = materialized.size
+    override val presentCount: Int get() = keyed.length
+
+    // -- Core surface: ordering, atomic move, reactive membership ---------
+    //
+    // These bind every flavor. The move algebra touches no entry handle and
+    // awaits nothing, so it is neither thread- nor async-coloured. Before this,
+    // ordering existed only on the single-threaded SourceMap — five of six
+    // families, this one included, had none.
+
+    /**
+     * Reactive snapshot of the keys in their current order. Subscribes the
+     * caller to **order** changes (add/remove **and** move/reorder), not to
+     * per-entry value changes.
+     */
+    fun keys(ops: ComputeOps): List<K> {
+        ops.getCellAny(orderId(ops.computeContext))
+        return keyed.keys()
+    }
+
+    /** Reactive entry count. Subscribes the caller to membership changes only. */
+    fun len(ops: ComputeOps): Int {
+        ops.getCellAny(membershipId(ops.computeContext))
+        return keyed.length
+    }
+
+    /** Reactive emptiness check. */
+    fun isEmpty(ops: ComputeOps): Boolean = len(ops) == 0
+
+    /**
+     * Reactive membership test for [key]. Subscribes the caller to membership
+     * changes (add/remove of any key), not to value changes.
+     */
+    fun containsKey(ops: ComputeOps, key: K): Boolean {
+        ops.getCellAny(membershipId(ops.computeContext))
+        return keyed.contains(key)
+    }
+
+    /** Non-reactive count. */
+    val lenUntracked: Int get() = keyed.length
+
+    /** Current 0-based position of [key] in the order, or `null`. Non-reactive. */
+    fun position(key: K): Int? = keyed.position(key)
+
+    /**
+     * Atomically move [key] to [index] (`#lzcellmove`). The entry keeps the
+     * **same** node, its dependents, and its lineage — unlike a remove +
+     * re-mint, which re-allocates and bumps membership twice. Only the order
+     * signal is bumped, so [keys] readers recompute while [len] readers stay
+     * cached. [index] is clamped to `[0, len)`.
+     */
+    fun moveTo(ctx: Context, key: K, index: Int): Boolean =
+        applyMove(ctx, keyed.moveTo(key, index))
+
+    /** Atomically move [key] to just before [anchor] (`#lzcellmove`). */
+    fun moveBefore(ctx: Context, key: K, anchor: K): Boolean =
+        applyMove(ctx, keyed.moveBefore(key, anchor))
+
+    /** Atomically move [key] to just after [anchor] (`#lzcellmove`). */
+    fun moveAfter(ctx: Context, key: K, anchor: K): Boolean =
+        applyMove(ctx, keyed.moveAfter(key, anchor))
+
+    /**
+     * Remove [key]'s entry and bump reactive membership. Returns whether the key
+     * was present.
+     */
+    fun remove(ctx: Context, key: K): Boolean {
+        val (_, mutation) = keyed.remove(key)
+        if (!mutation.changed) return false
+        bumpMembership(ctx)
+        return true
+    }
 }
 
 /**
