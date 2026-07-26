@@ -8,8 +8,8 @@ import kotlin.test.assertTrue
 
 /**
  * Cross-language conformance tests for the thread-safe keyed reactive collections
- * (`#reactivemap`, thread-safe flavor): the [ThreadSafeCellMap] input-cell and
- * [ThreadSafeSlotMap] derived-slot specializations. Proves the `Send + Sync`
+ * (`#reactivemap`, thread-safe flavor): the [ThreadSafeSourceMap] input-cell and
+ * [ThreadSafeComputedMap] derived-slot specializations. Proves the `Send + Sync`
  * flavor obeys the same materialization laws as the single-threaded maps — plus
  * **materialization confluence** (order-independent present set + observed values,
  * proved in `lazily-formal`'s `Materialization` module as
@@ -22,7 +22,7 @@ class ThreadSafeMapConformanceTest {
     @Test
     fun eagerMaterializesAllUpFront() {
         val ctx = ThreadSafeContext()
-        val map = ThreadSafeSlotMap<Int, Int>()
+        val map = ThreadSafeComputedMap<Int, Int>()
         map.materializeAll(ctx, listOf(0, 1, 2, 5, 9)) { it * 3 }
         assertEquals(EntryKind.Slot, map.entryKind)
         assertEquals(5, map.presentCount)
@@ -34,7 +34,7 @@ class ThreadSafeMapConformanceTest {
     @Test
     fun lazyDefersSlotsUntilRead() {
         val ctx = ThreadSafeContext()
-        val map = ThreadSafeSlotMap<Int, Int>()
+        val map = ThreadSafeComputedMap<Int, Int>()
         assertEquals(0, map.presentCount)
         assertFalse(map.isPresent(2))
         assertEquals(20, map.getOrInsertWith(ctx, 2) { it * 10 })
@@ -42,11 +42,11 @@ class ThreadSafeMapConformanceTest {
         assertEquals(1, map.presentCount)
     }
 
-    /** Input cells are always materialized: a CellMap is fully present once built. */
+    /** Input cells are always materialized: a SourceMap is fully present once built. */
     @Test
     fun cellMapMaterializesInputsAtBuild() {
         val ctx = ThreadSafeContext()
-        val map = ThreadSafeCellMap<String, Int>()
+        val map = ThreadSafeSourceMap<String, Int>()
         map.materializeAll(ctx, listOf("a", "b", "c")) { 0 }
         assertEquals(EntryKind.Cell, map.entryKind)
         assertEquals(3, map.presentCount)
@@ -56,10 +56,10 @@ class ThreadSafeMapConformanceTest {
     @Test
     fun eagerAndLazyObserveIdentically() {
         val ctxE = ThreadSafeContext()
-        val eager = ThreadSafeSlotMap<Int, Int>()
+        val eager = ThreadSafeComputedMap<Int, Int>()
         eager.materializeAll(ctxE, listOf(1, 2, 3)) { it * 2 }
         val ctxL = ThreadSafeContext()
-        val lazy = ThreadSafeSlotMap<Int, Int>()
+        val lazy = ThreadSafeComputedMap<Int, Int>()
         for (k in listOf(1, 2, 3)) {
             assertEquals(eager.get(ctxE, k), lazy.getOrInsertWith(ctxL, k) { it * 2 })
         }
@@ -69,7 +69,7 @@ class ThreadSafeMapConformanceTest {
     @Test
     fun presentSetGrowsMonotonically() {
         val ctx = ThreadSafeContext()
-        val map = ThreadSafeSlotMap<Int, Int>()
+        val map = ThreadSafeComputedMap<Int, Int>()
         map.getOrInsertWith(ctx, 5) { it }
         map.getOrInsertWith(ctx, 5) { it } // repeat: no growth
         map.getOrInsertWith(ctx, 9) { it }
@@ -84,9 +84,9 @@ class ThreadSafeMapConformanceTest {
     @Test
     fun materializationIsConfluentAcrossOrder() {
         val ctxA = ThreadSafeContext()
-        val mapA = ThreadSafeSlotMap<Int, Int>()
+        val mapA = ThreadSafeComputedMap<Int, Int>()
         val ctxB = ThreadSafeContext()
-        val mapB = ThreadSafeSlotMap<Int, Int>()
+        val mapB = ThreadSafeComputedMap<Int, Int>()
         for (k in listOf(1, 2, 3, 4)) mapA.getOrInsertWith(ctxA, k) { it * 7 }
         for (k in listOf(4, 3, 2, 1)) mapB.getOrInsertWith(ctxB, k) { it * 7 }
         assertEquals(mapA.presentKeys().toSet(), mapB.presentKeys().toSet())
@@ -100,7 +100,7 @@ class ThreadSafeMapConformanceTest {
     @Test
     fun derivedCountReactsToCellWrites() {
         val ctx = ThreadSafeContext()
-        val liveness = ThreadSafeCellMap<Long, Boolean>()
+        val liveness = ThreadSafeSourceMap<Long, Boolean>()
         liveness.materializeAll(ctx, listOf(10L, 20L, 30L)) { true }
         val liveCount = ctx.computed {
             liveness.presentKeys().count { k -> liveness.observe(this, k) }
@@ -117,7 +117,7 @@ class ThreadSafeMapConformanceTest {
     @Test
     fun sharedAcrossThreads() {
         val ctx = ThreadSafeContext()
-        val map = ThreadSafeCellMap<Int, Boolean>()
+        val map = ThreadSafeSourceMap<Int, Boolean>()
         val threads = (1..8).map { k ->
             thread { assertTrue(ctx.getCellAny(map.entry(ctx, k) { true }.id) as Boolean) }
         }

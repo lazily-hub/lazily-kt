@@ -3,7 +3,7 @@ package io.github.lazily
 // -- Keyed cell collections --------------------------------------------------
 //
 // Native Kotlin implementation of the lazily-spec keyed cell collections layer
-// (`lazily-spec/cell-model.md` § Keyed cell collections). A `CellMap` is a
+// (`lazily-spec/cell-model.md` § Keyed cell collections). A `SourceMap` is a
 // *composition of cells*, not a new cell kind: each entry is an ordinary cell,
 // a dedicated membership cell tracks the key set, and a dedicated order cell
 // tracks the ordered key list. The three reactive planes are independent:
@@ -66,11 +66,11 @@ private val UNSET: Any = UnsetSentinel
  * @param K key type (must be stable by `==`/`hashCode`; typically `String`)
  * @param V entry value type
  */
-class CellMap<K : Any, V : Any>(
+class SourceMap<K : Any, V : Any>(
     private val ctx: Context,
     entries: List<Pair<K, V>> = emptyList(),
 ) : ReactiveMap<K, V> {
-    /** [CellMap] is the input-cell specialization of [ReactiveMap]. */
+    /** [SourceMap] is the input-cell specialization of [ReactiveMap]. */
     override val entryKind: EntryKind get() = EntryKind.Cell
     private val entryCells: MutableMap<K, Source<Any>> = LinkedHashMap()
     private val membershipCell: Source<Any> = ctx.allocCell().also { cell ->
@@ -93,7 +93,7 @@ class CellMap<K : Any, V : Any>(
     /** The stable value-cell handle for [key]; throws if [key] is absent. */
     @Suppress("UNCHECKED_CAST")
     fun value(key: K): Source<V> =
-        (entryCells[key] ?: error("CellMap has no entry for key $key")) as Source<V>
+        (entryCells[key] ?: error("SourceMap has no entry for key $key")) as Source<V>
 
     /** Read the current value of [key]; auto-subscribes the reading node. */
     @Suppress("UNCHECKED_CAST")
@@ -122,7 +122,7 @@ class CellMap<K : Any, V : Any>(
 
     // -- ReactiveMap present-set surface ----------------------------------
     //
-    // A CellMap materializes an input cell per member key, so the "present"
+    // A SourceMap materializes an input cell per member key, so the "present"
     // set is exactly the current membership / order (input cells are always
     // materialized).
 
@@ -244,7 +244,7 @@ class CellMap<K : Any, V : Any>(
     }
 
     override fun toString(): String =
-        "CellMap(order=${keysNow()})"
+        "SourceMap(order=${keysNow()})"
 }
 
 @Suppress("UNCHECKED_CAST", "NOTHING_TO_INLINE")
@@ -311,9 +311,9 @@ private fun <K> Iterable<K>.toLinkedSet(): Set<K> = linkedSetOf<K>().apply { add
  */
 class CellTree<K : Any, V : Any>(private val ctx: Context) {
     private val values: MutableMap<K, Source<Any>> = LinkedHashMap()
-    private val children: MutableMap<K, CellMap<K, K>> = LinkedHashMap()
+    private val children: MutableMap<K, SourceMap<K, K>> = LinkedHashMap()
     private val parentOf: MutableMap<K, K> = HashMap()
-    private val roots: CellMap<K, K> = CellMap(ctx)
+    private val roots: SourceMap<K, K> = SourceMap(ctx)
 
     /** The value-cell handle for [node] (stable for the node's lifetime). */
     @Suppress("UNCHECKED_CAST")
@@ -336,7 +336,7 @@ class CellTree<K : Any, V : Any>(private val ctx: Context) {
         val handle = ctx.allocCell()
         ctx.setCellAny(handle.id, v)
         values[node] = handle
-        children[node] = CellMap(ctx)
+        children[node] = SourceMap(ctx)
         roots.insert(node, node, InsertAt.End)
         return true
     }
@@ -348,14 +348,14 @@ class CellTree<K : Any, V : Any>(private val ctx: Context) {
         val handle = ctx.allocCell()
         ctx.setCellAny(handle.id, v)
         values[child] = handle
-        children[child] = CellMap(ctx)
+        children[child] = SourceMap(ctx)
         parentOf[child] = parent
         children.getValue(parent).insert(child, child, InsertAt.End)
         return true
     }
 
     /** The ordered child-collection handle for [parent] (membership/order readers). */
-    fun children(parent: K): CellMap<K, K> =
+    fun children(parent: K): SourceMap<K, K> =
         children[parent] ?: error("CellTree has no node $parent")
 
     /** Move [child] to absolute [index] within [parent]'s child order (atomic). */
@@ -481,3 +481,11 @@ internal fun longestIncreasingSubsequenceIndices(seq: List<Int>): List<Int> {
     }
     return out.reversed()
 }
+
+/**
+ * Deprecated pre-v2 spelling of [SourceMap]. The v2 cell kernel renamed the node
+ * kinds to `Source` / `Computed` (`#lzcellkernel`), so the keyed-collection names
+ * followed; kept as an alias so existing callers still compile.
+ */
+@Deprecated("renamed to SourceMap", ReplaceWith("SourceMap<K, V>"))
+typealias CellMap<K, V> = SourceMap<K, V>

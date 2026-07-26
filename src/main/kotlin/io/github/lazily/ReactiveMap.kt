@@ -2,28 +2,28 @@ package io.github.lazily
 
 /**
  * The unified keyed reactive collection layer ([ReactiveMap]) and its
- * [SlotMap] derived-slot specialization (`#reactivemap`).
+ * [ComputedMap] derived-slot specialization (`#reactivemap`).
  *
  * `lazily-spec/cell-model.md` § "Keyed cell collections" unifies keyed
  * collections on ONE generic primitive — the Rust `ReactiveMap<K, V, H>` over a
  * `MapHandle` trait (`Source` input cells / `Computed` derived slots) — with
  * two specializations:
  *
- * - **[CellMap]** (input cells) — the settable, membership/order/move collection
+ * - **[SourceMap]** (input cells) — the settable, membership/order/move collection
  *   in `Collections.kt`; adds cell-only `setValue`/`insert` and eager
  *   value-minting.
- * - **[SlotMap]** (derived slots) — [getOrInsertWith] mints a slot on first
+ * - **[ComputedMap]** (derived slots) — [getOrInsertWith] mints a slot on first
  *   access (**lazy materialization**); [materializeAll] pre-mints the keyset
- *   (**eager**). A slot's value is derived, so `SlotMap` has **no `set`**. There
+ *   (**eager**). A slot's value is derived, so `ComputedMap` has **no `set`**. There
  *   is **no eager/lazy mode flag** — eager is a pre-mint loop, lazy is
  *   mint-on-access.
  *
  * Kotlin cannot carry the `H` handle-kind type parameter the way Rust does, so
- * the two specializations are concrete classes ([CellMap] / [SlotMap]) that share
+ * the two specializations are concrete classes ([SourceMap] / [ComputedMap]) that share
  * the [ReactiveMap] present-set surface and the [EntryKind] handle-kind axis
  * rather than a single generic over `H`. The concurrency flavors follow the same
- * split: [ThreadSafeCellMap] / [ThreadSafeSlotMap] and [AsyncCellMap] /
- * [AsyncSlotMap].
+ * split: [ThreadSafeSourceMap] / [ThreadSafeComputedMap] and [AsyncSourceMap] /
+ * [AsyncComputedMap].
  */
 
 /**
@@ -42,11 +42,11 @@ enum class EntryKind {
 /**
  * The shared surface of a keyed reactive collection generic over the entry handle
  * kind (the Rust `ReactiveMap<K, V, H>`): the present-set / membership view plus
- * the [entryKind] handle-kind tag. Implemented by the [CellMap] (input-cell) and
- * [SlotMap] (derived-slot) specializations and their thread-safe / async flavors.
+ * the [entryKind] handle-kind tag. Implemented by the [SourceMap] (input-cell) and
+ * [ComputedMap] (derived-slot) specializations and their thread-safe / async flavors.
  */
 interface ReactiveMap<K : Any, V : Any> {
-    /** This map's entry kind ([EntryKind.Cell] for a [CellMap], [EntryKind.Slot] for a [SlotMap]). */
+    /** This map's entry kind ([EntryKind.Cell] for a [SourceMap], [EntryKind.Slot] for a [ComputedMap]). */
     val entryKind: EntryKind
 
     /** Whether [key] is currently materialized (present in the allocated set). Non-reactive. */
@@ -64,19 +64,19 @@ interface ReactiveMap<K : Any, V : Any> {
  * specialization over the [Computed] handle kind. Every entry is a derived
  * slot; [getOrInsertWith] mints one on first access (**lazy materialization**)
  * and [materializeAll] pre-mints the keyset (**eager**). A slot's value is
- * derived, so `SlotMap` has **no `set`**.
+ * derived, so `ComputedMap` has **no `set`**.
  *
  * There is no eager/lazy mode flag — eager materialization is the pre-mint loop
  * [materializeAll], lazy is mint-on-access [getOrInsertWith]. Both build the
  * *same* node for a key; strategy changes only *when* the node is allocated,
  * never the observed value (observational transparency). Mirrors lazily-rs
- * `SlotMap<K, V> = ReactiveMap<K, V, Computed<V>>`.
+ * `ComputedMap<K, V> = ReactiveMap<K, V, Computed<V>>`.
  *
  * Operations run against the owning [Context], like the rest of `lazily`; the
  * present set only grows (deferral, not de-allocation). [LinkedHashMap] preserves
  * first-materialization order for [presentKeys].
  */
-class SlotMap<K : Any, V : Any> : ReactiveMap<K, V> {
+class ComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
     override val entryKind: EntryKind get() = EntryKind.Slot
 
     private val materialized = LinkedHashMap<K, Computed<V>>()
@@ -129,3 +129,11 @@ class SlotMap<K : Any, V : Any> : ReactiveMap<K, V> {
 
     override val presentCount: Int get() = materialized.size
 }
+
+/**
+ * Deprecated pre-v2 spelling of [ComputedMap]. The v2 cell kernel renamed the node
+ * kinds to `Source` / `Computed` (`#lzcellkernel`), so the keyed-collection names
+ * followed; kept as an alias so existing callers still compile.
+ */
+@Deprecated("renamed to ComputedMap", ReplaceWith("ComputedMap<K, V>"))
+typealias SlotMap<K, V> = ComputedMap<K, V>

@@ -406,7 +406,7 @@ class QueueCell<T : Any, S : QueueStorage<T>>(
  * Snapshot the buffered elements of a [VecDequeStorage]-backed queue in FIFO
  * order. Non-reactive — for debugging, snapshot/serde, and conformance-fixture
  * verification. There is no reactive random-access `queue[N]` reader;
- * per-position reactivity is the domain of `CellMap`, not `QueueCell`.
+ * per-position reactivity is the domain of `SourceMap`, not `QueueCell`.
  */
 fun <T : Any> QueueCell<T, VecDequeStorage<T>>.elements(): List<T> = storage.elements()
 

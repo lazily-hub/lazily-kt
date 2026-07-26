@@ -5,13 +5,13 @@ import kotlin.concurrent.withLock
 
 /**
  * The thread-safe keyed reactive collections (`#reactivemap`, thread-safe flavor)
- * — the `Send + Sync` analog of [CellMap] / [SlotMap]. Where the single-threaded
+ * — the `Send + Sync` analog of [SourceMap] / [ComputedMap]. Where the single-threaded
  * maps allocate on a [Context], these allocate on a [ThreadSafeContext] and guard
  * their own present-set state behind a [ReentrantLock], so a keyed map can live in
  * a shareable owner reached from more than one thread. Mirrors lazily-rs
- * `ThreadSafeCellMap` / `ThreadSafeSlotMap` (feature `thread-safe`).
+ * `ThreadSafeSourceMap` / `ThreadSafeComputedMap` (feature `thread-safe`).
  *
- * The [ThreadSafeSlotMap] specialization also obeys **materialization confluence**
+ * The [ThreadSafeComputedMap] specialization also obeys **materialization confluence**
  * (proved in `lazily-formal`'s `Materialization` module as
  * `materialize_present_comm` / `materialize_observe_comm`): the present set and
  * every observed value are independent of the order in which concurrent threads
@@ -22,12 +22,12 @@ import kotlin.concurrent.withLock
  */
 
 /**
- * A thread-safe keyed **input-cell** collection: the `Send + Sync` [CellMap]
+ * A thread-safe keyed **input-cell** collection: the `Send + Sync` [SourceMap]
  * specialization. Entries are settable [ThreadSafeSource]s; [entry] mints a
  * value cell on first access (input cells are always materialized) and [set]
  * updates it.
  */
-class ThreadSafeCellMap<K : Any, V : Any> : ReactiveMap<K, V> {
+class ThreadSafeSourceMap<K : Any, V : Any> : ReactiveMap<K, V> {
     override val entryKind: EntryKind get() = EntryKind.Cell
 
     private val lock = ReentrantLock()
@@ -71,7 +71,7 @@ class ThreadSafeCellMap<K : Any, V : Any> : ReactiveMap<K, V> {
 
     /** Observe [key]'s value (subscribes the reader); throws if [key] is absent. */
     fun observe(ctx: ThreadSafeContext, key: K): V {
-        val handle = handle(key) ?: error("ThreadSafeCellMap has no entry for key $key")
+        val handle = handle(key) ?: error("ThreadSafeSourceMap has no entry for key $key")
         @Suppress("UNCHECKED_CAST")
         return ctx.getCellAny(handle.id) as V
     }
@@ -91,12 +91,12 @@ class ThreadSafeCellMap<K : Any, V : Any> : ReactiveMap<K, V> {
 }
 
 /**
- * A thread-safe keyed **derived-slot** collection: the `Send + Sync` [SlotMap]
+ * A thread-safe keyed **derived-slot** collection: the `Send + Sync` [ComputedMap]
  * specialization. [getOrInsertWith] mints a derived slot on first access (**lazy
  * materialization**); [materializeAll] pre-mints the keyset (**eager**). No `set`
  * (a slot's value is derived). Present-set state is guarded by a [ReentrantLock].
  */
-class ThreadSafeSlotMap<K : Any, V : Any> : ReactiveMap<K, V> {
+class ThreadSafeComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
     override val entryKind: EntryKind get() = EntryKind.Slot
 
     private val lock = ReentrantLock()
@@ -143,3 +143,11 @@ class ThreadSafeSlotMap<K : Any, V : Any> : ReactiveMap<K, V> {
 
     override val presentCount: Int get() = lock.withLock { materialized.size }
 }
+
+/** Deprecated pre-v2 spelling of [ThreadSafeSourceMap] (`#lzcellkernel`). */
+@Deprecated("renamed to ThreadSafeSourceMap", ReplaceWith("ThreadSafeSourceMap<K, V>"))
+typealias ThreadSafeCellMap<K, V> = ThreadSafeSourceMap<K, V>
+
+/** Deprecated pre-v2 spelling of [ThreadSafeComputedMap] (`#lzcellkernel`). */
+@Deprecated("renamed to ThreadSafeComputedMap", ReplaceWith("ThreadSafeComputedMap<K, V>"))
+typealias ThreadSafeSlotMap<K, V> = ThreadSafeComputedMap<K, V>

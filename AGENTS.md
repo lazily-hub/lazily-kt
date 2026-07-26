@@ -74,8 +74,11 @@ and `Reactive.trackedSharedRead_registers_edge` formal pins.
     readers; it carries no write surface. Deprecated aliases: `SourceCell` =
     `Source`, `FormulaCell` = `Computed`, `CellHandle`/`SlotHandle`,
     `EffectHandle` = `Effect`; constructor aliases `formula`/`slot` → `computed`,
-    `.drive`/`.undrive`/`.isDriven` → `.eager`/`.lazy`/`.isEager`. `Slot` as a
-    *storage* identifier (`SlotMap`, slot state machine) is untouched (§5.0).
+    `.drive`/`.undrive`/`.isDriven` → `.eager`/`.lazy`/`.isEager`. The keyed
+    collections followed the same rename: `CellMap` = `SourceMap`, `SlotMap` =
+    `ComputedMap`, plus the `ThreadSafe*`/`Async*` flavors, all kept as deprecated
+    typealiases. `Slot` as a *storage* identifier (`EntryKind.Slot`, the slot state
+    machine) is untouched (§5.0).
   - **Disposal + teardown scopes** (`#lzspecedgeindex`, `Disposal.kt`). Handles
     are copyable ids, not owners, so nothing is reclaimed by dropping one: the
     arena and the reverse edge set hold strong references, and a long-lived
@@ -167,22 +170,22 @@ and `Reactive.trackedSharedRead_registers_edge` formal pins.
   mirrors `StateMachine` over it (flat FSM safe from any sharing thread).
 - `ReactiveMap.kt` — the unified keyed reactive collection layer (`#reactivemap`,
   counterpart of `lazily-rs::ReactiveMap<K, V, H>`): the `ReactiveMap` present-set
-  interface + `EntryKind` handle-kind axis, plus the `SlotMap` derived-slot
-  specialization. `SlotMap.getOrInsertWith` mints a slot on first access (lazy
-  materialization); `SlotMap.materializeAll` pre-mints the keyset (eager). No
+  interface + `EntryKind` handle-kind axis, plus the `ComputedMap` derived-slot
+  specialization. `ComputedMap.getOrInsertWith` mints a slot on first access (lazy
+  materialization); `ComputedMap.materializeAll` pre-mints the keyset (eager). No
   eager/lazy mode flag. Laws: eager/lazy contract, observational transparency,
   present-set monotonicity (proved in `lazily-formal` `Materialization`).
 - `ThreadSafeMap.kt` — the `Send + Sync` flavor (`#reactivemap`, counterpart of
-  `lazily-rs::ThreadSafeCellMap`/`ThreadSafeSlotMap`): `ThreadSafeCellMap`
-  (input cells) and `ThreadSafeSlotMap` (derived slots) over `ThreadSafeContext`
+  `lazily-rs::ThreadSafeSourceMap`/`ThreadSafeComputedMap`): `ThreadSafeSourceMap`
+  (input cells) and `ThreadSafeComputedMap` (derived slots) over `ThreadSafeContext`
   with a `ReentrantLock`-guarded present set, so a keyed map can live in a
   cross-thread owner. Adds **materialization confluence** (order-independent
   present set + observed values; `materialize_present_comm`/
   `materialize_observe_comm`). Replayed by `ThreadSafeMapConformanceTest`.
 - `AsyncMap.kt` — the `AsyncContext` flavor (`#reactivemap`, counterpart of
-  `lazily-rs::AsyncCellMap`/`AsyncSlotMap`): `AsyncCellMap` (input cells) and
-  `AsyncSlotMap` (derived slots). Derived slots resolve asynchronously so
-  `AsyncSlotMap.observe` returns a nullable `V?` (`null` while pending) and
+  `lazily-rs::AsyncSourceMap`/`AsyncComputedMap`): `AsyncSourceMap` (input cells) and
+  `AsyncComputedMap` (derived slots). Derived slots resolve asynchronously so
+  `AsyncComputedMap.observe` returns a nullable `V?` (`null` while pending) and
   `observeAsync` drives resolution — the **eventual-transparency** law (proved in
   `lazily-formal` `AsyncMaterialization`). Replayed by `AsyncMapConformanceTest`.
 - `StateGraphMirror.kt` — pure native mirror that applies `snapshot`/`delta`.
@@ -192,7 +195,7 @@ and `Reactive.trackedSharedRead_registers_edge` formal pins.
   surface. This is an **optional transport** for consuming authoritative
   projections from the Rust binary; it is independent of the reactive core. A
   state chart or other compute runs natively — never via this FFI channel.
-- `Collections.kt` — native keyed cell collections layer (`CellMap` input-cell
+- `Collections.kt` — native keyed cell collections layer (`SourceMap` input-cell
   specialization, `CellTree` ordered keyed tree, move-minimized LIS `reconcile`):
   a composition of cells (not a new cell kind) with independent value /
   set-membership / order reactivity, stable handles, and atomic move.

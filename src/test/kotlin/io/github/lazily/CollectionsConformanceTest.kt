@@ -42,8 +42,8 @@ class CollectionsConformanceTest {
     private fun strings(element: JsonArray): List<String> =
         element.map { it.jsonPrimitive.content }
 
-    /** Set up a CellMap seeded from a fixture `initial` block + reader memos. */
-    private class Harness(ctx: Context, map: CellMap<String, Int>) {
+    /** Set up a SourceMap seeded from a fixture `initial` block + reader memos. */
+    private class Harness(ctx: Context, map: SourceMap<String, Int>) {
         val ctx = ctx
         val map = map
         val handles: MutableMap<String, Int> = HashMap()
@@ -54,7 +54,7 @@ class CollectionsConformanceTest {
         val order = strings(initial.getValue("order").jsonArray)
         val values = initial.getValue("values").jsonObject
         val entries = order.map { it to values.getValue(it).jsonPrimitive.int }
-        val map: CellMap<String, Int> = CellMap(ctx, entries)
+        val map: SourceMap<String, Int> = SourceMap(ctx, entries)
         return Harness(ctx, map).also { h ->
             for (k in order) h.handles[k] = h.map.value(k).id
         }
@@ -229,7 +229,7 @@ class CollectionsConformanceTest {
 
     @Test
     fun `reconcile round trips through a live cellmap`() {
-        // End-to-end: the op set applied to a live CellMap yields the target order
+        // End-to-end: the op set applied to a live SourceMap yields the target order
         // and keeps stable entries' value cells un-invalidated.
         val fixture = loadFixture("keyed_reconciliation_lis.json")
         val recon = fixture.getValue("reconcile").jsonObject
@@ -237,8 +237,8 @@ class CollectionsConformanceTest {
 
         val ctx = Context()
         val prior = reconState(recon.getValue("prior").jsonObject)
-        val map: CellMap<String, Int> =
-            CellMap(ctx, prior.order.map { it to prior.values.getValue(it) })
+        val map: SourceMap<String, Int> =
+            SourceMap(ctx, prior.order.map { it to prior.values.getValue(it) })
         val readerB = ctx.computed { map.get("b") }
         val readerC = ctx.computed { map.get("c") }
         ctx.get(readerB); ctx.get(readerC)

@@ -9,7 +9,7 @@ import kotlin.test.assertTrue
 
 /**
  * Cross-language conformance tests for the async keyed reactive collections
- * (`#reactivemap`, async flavor): the [AsyncCellMap] input-cell and [AsyncSlotMap]
+ * (`#reactivemap`, async flavor): the [AsyncSourceMap] input-cell and [AsyncComputedMap]
  * derived-slot specializations. Proves the [AsyncContext] flavor obeys the
  * eager/lazy contract and present-set monotonicity plus the
  * **eventual-transparency** law (a driven async slot resolves to the canonical
@@ -18,11 +18,11 @@ import kotlin.test.assertTrue
  * in `lazily-rs`.
  */
 class AsyncMapConformanceTest {
-    /** Input cells are always resolved: an AsyncCellMap is fully present once built. */
+    /** Input cells are always resolved: an AsyncSourceMap is fully present once built. */
     @Test
     fun cellMapResolvesImmediately() {
         val ctx = AsyncContext()
-        val map = AsyncCellMap<Int, Boolean>()
+        val map = AsyncSourceMap<Int, Boolean>()
         map.materializeAll(ctx, listOf(1, 2, 3)) { true }
         assertEquals(EntryKind.Cell, map.entryKind)
         assertEquals(3, map.presentCount)
@@ -32,12 +32,12 @@ class AsyncMapConformanceTest {
 
     /**
      * A lazy slot map materializes on `getOrInsertWith`, and the value is `null`
-     * until driven with [AsyncSlotMap.observeAsync].
+     * until driven with [AsyncComputedMap.observeAsync].
      */
     @Test
     fun slotMapDefersAndResolvesOnDrive() = runBlocking {
         val ctx = AsyncContext()
-        val map = AsyncSlotMap<Int, Int>()
+        val map = AsyncComputedMap<Int, Int>()
         assertEquals(0, map.presentCount)
         // Materialize but do not drive → pending, non-blocking observe is null.
         map.getOrInsertWith(ctx, 4) { it * 10 }
@@ -54,7 +54,7 @@ class AsyncMapConformanceTest {
     @Test
     fun cellMapMaterializesInputsAtBuild() {
         val ctx = AsyncContext()
-        val map = AsyncCellMap<String, Int>()
+        val map = AsyncSourceMap<String, Int>()
         map.materializeAll(ctx, listOf("a", "b")) { 0 }
         assertEquals(EntryKind.Cell, map.entryKind)
         assertEquals(2, map.presentCount)
@@ -64,10 +64,10 @@ class AsyncMapConformanceTest {
     @Test
     fun eventualTransparencyEagerEqualsLazy() = runBlocking {
         val ctxE = AsyncContext()
-        val eager = AsyncSlotMap<Int, Int>()
+        val eager = AsyncComputedMap<Int, Int>()
         eager.materializeAll(ctxE, listOf(1, 2, 3)) { it * 2 }
         val ctxL = AsyncContext()
-        val lazy = AsyncSlotMap<Int, Int>()
+        val lazy = AsyncComputedMap<Int, Int>()
         for (k in listOf(1, 2, 3)) {
             lazy.getOrInsertWith(ctxL, k) { it * 2 }
             assertEquals(eager.observeAsync(ctxE, k), lazy.observeAsync(ctxL, k))
@@ -78,7 +78,7 @@ class AsyncMapConformanceTest {
     @Test
     fun presentSetGrowsMonotonically() {
         val ctx = AsyncContext()
-        val map = AsyncSlotMap<Int, Int>()
+        val map = AsyncComputedMap<Int, Int>()
         map.getOrInsertWith(ctx, 5) { it }
         map.getOrInsertWith(ctx, 5) { it }
         map.getOrInsertWith(ctx, 9) { it }
@@ -91,7 +91,7 @@ class AsyncMapConformanceTest {
     @Test
     fun cellMapReactsToSet() {
         val ctx = AsyncContext()
-        val map = AsyncCellMap<Int, Boolean>()
+        val map = AsyncSourceMap<Int, Boolean>()
         map.materializeAll(ctx, listOf(10, 20)) { true }
         assertEquals(true, map.observe(ctx, 20))
         map.set(ctx, 20, false)

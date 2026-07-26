@@ -18,7 +18,7 @@ class CollectionsTest {
     @Test
     fun `value write invalidates only that key's value readers`() {
         val ctx = Context()
-        val map: CellMap<String, Int> = CellMap(
+        val map: SourceMap<String, Int> = SourceMap(
             ctx,
             listOf("a" to 1, "b" to 2, "c" to 3),
         )
@@ -41,7 +41,7 @@ class CollectionsTest {
     @Test
     fun `insert invalidates membership and order only`() {
         val ctx = Context()
-        val map: CellMap<String, Int> = CellMap(ctx, listOf("a" to 1, "b" to 2, "c" to 3))
+        val map: SourceMap<String, Int> = SourceMap(ctx, listOf("a" to 1, "b" to 2, "c" to 3))
         val readerA = ctx.computed { map.get("a", this) }
         val membership = ctx.computed { get(map.len()) }
         val order = ctx.computed { get(map.keys()) }
@@ -58,7 +58,7 @@ class CollectionsTest {
     @Test
     fun `atomic move keeps handle + bumps order only`() {
         val ctx = Context()
-        val map: CellMap<String, Int> = CellMap(ctx, listOf("a" to 1, "b" to 2, "c" to 3, "d" to 4))
+        val map: SourceMap<String, Int> = SourceMap(ctx, listOf("a" to 1, "b" to 2, "c" to 3, "d" to 4))
         val handleB = map.value("b").id
         val readerB = ctx.computed { map.get("b", this) }
         val membership = ctx.computed { get(map.contains("c")) }
@@ -77,7 +77,7 @@ class CollectionsTest {
     @Test
     fun `move_before and move_after`() {
         val ctx = Context()
-        val map: CellMap<String, Int> = CellMap(ctx, listOf("a" to 1, "b" to 2, "c" to 3, "d" to 4))
+        val map: SourceMap<String, Int> = SourceMap(ctx, listOf("a" to 1, "b" to 2, "c" to 3, "d" to 4))
         map.moveBefore("d", "a")
         assertEquals(listOf("d", "a", "b", "c"), map.keysNow())
         map.moveAfter("c", "a")
@@ -87,7 +87,7 @@ class CollectionsTest {
     @Test
     fun `remove invalidates membership and order only`() {
         val ctx = Context()
-        val map: CellMap<String, Int> = CellMap(ctx, listOf("a" to 1, "b" to 2, "c" to 3))
+        val map: SourceMap<String, Int> = SourceMap(ctx, listOf("a" to 1, "b" to 2, "c" to 3))
         val readerA = ctx.computed { map.get("a", this) }
         val membership = ctx.computed { get(map.len()) }
         val order = ctx.computed { get(map.keys()) }
@@ -104,7 +104,7 @@ class CollectionsTest {
     @Test
     fun `cell map mints typed maps`() {
         val ctx = Context()
-        val map = CellMap<String, Int>(ctx)
+        val map = SourceMap<String, Int>(ctx)
         map.insert("x", 7)
         assertEquals(7, map.get("x"))
     }
@@ -166,8 +166,8 @@ class CollectionsTest {
     @Test
     fun `reconcile applied to cellmap keeps stable entries uninvalidated`() {
         val ctx = Context()
-        val map: CellMap<String, Int> =
-            CellMap(ctx, listOf("a" to 1, "b" to 2, "c" to 3, "d" to 4))
+        val map: SourceMap<String, Int> =
+            SourceMap(ctx, listOf("a" to 1, "b" to 2, "c" to 3, "d" to 4))
         val readerB = ctx.computed { map.get("b", this) }
         val readerC = ctx.computed { map.get("c", this) }
         val readerA = ctx.computed { map.get("a", this) }

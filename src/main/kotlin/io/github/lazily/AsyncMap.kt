@@ -5,25 +5,25 @@ import kotlin.concurrent.withLock
 
 /**
  * The async keyed reactive collections (`#reactivemap`, async flavor) — the
- * [AsyncContext] analog of [CellMap] / [SlotMap]. Keys `K` map to per-entry async
+ * [AsyncContext] analog of [SourceMap] / [ComputedMap]. Keys `K` map to per-entry async
  * reactive nodes allocated on the owning [AsyncContext]; present-set state is
  * guarded by a [ReentrantLock] (the [AsyncContext] is itself shareable), so a map
- * can live in a cross-task owner. Mirrors lazily-rs `AsyncCellMap` /
- * `AsyncSlotMap` (feature `async`).
+ * can live in a cross-task owner. Mirrors lazily-rs `AsyncSourceMap` /
+ * `AsyncComputedMap` (feature `async`).
  *
  * Input cells are always resolved. A derived slot, however, resolves
  * **eventually**: a non-blocking read is `null` while pending and resolves to the
  * canonical value once driven — the eventual-transparency law proved in
  * `lazily-formal`'s `AsyncMaterialization` module. Drive a slot to resolution
- * with [AsyncSlotMap.observeAsync].
+ * with [AsyncComputedMap.observeAsync].
  */
 
 /**
- * An async keyed **input-cell** collection: the [AsyncContext] [CellMap]
+ * An async keyed **input-cell** collection: the [AsyncContext] [SourceMap]
  * specialization. Entries are settable async cells; [entry] mints one on first
  * access (input cells are always resolved) and [set] updates it.
  */
-class AsyncCellMap<K : Any, V : Any> : ReactiveMap<K, V> {
+class AsyncSourceMap<K : Any, V : Any> : ReactiveMap<K, V> {
     override val entryKind: EntryKind get() = EntryKind.Cell
 
     private val lock = ReentrantLock()
@@ -60,7 +60,7 @@ class AsyncCellMap<K : Any, V : Any> : ReactiveMap<K, V> {
 
     /** Observe [key]'s value (input cells are always resolved); throws if [key] is absent. */
     fun observe(ctx: AsyncContext, key: K): V {
-        val handle = handle(key) ?: error("AsyncCellMap has no entry for key $key")
+        val handle = handle(key) ?: error("AsyncSourceMap has no entry for key $key")
         return ctx.get(handle)
     }
 
@@ -75,13 +75,13 @@ class AsyncCellMap<K : Any, V : Any> : ReactiveMap<K, V> {
 }
 
 /**
- * An async keyed **derived-slot** collection: the [AsyncContext] [SlotMap]
+ * An async keyed **derived-slot** collection: the [AsyncContext] [ComputedMap]
  * specialization. [getOrInsertWith] mints a derived slot on first access (**lazy
  * materialization**); [materializeAll] pre-mints the keyset (**eager**). A derived
  * slot resolves asynchronously, so [observe] returns a **nullable** `V?` (`null`
  * while pending); drive it with [observeAsync]. No `set`.
  */
-class AsyncSlotMap<K : Any, V : Any> : ReactiveMap<K, V> {
+class AsyncComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
     override val entryKind: EntryKind get() = EntryKind.Slot
 
     private val lock = ReentrantLock()
@@ -121,7 +121,7 @@ class AsyncSlotMap<K : Any, V : Any> : ReactiveMap<K, V> {
 
     /** Await [key]'s value, driving a pending derived slot to resolution; throws if absent. */
     suspend fun observeAsync(ctx: AsyncContext, key: K): V =
-        ctx.getAsync(handle(key) ?: error("AsyncSlotMap has no entry for key $key"))
+        ctx.getAsync(handle(key) ?: error("AsyncComputedMap has no entry for key $key"))
 
     override fun isPresent(key: K): Boolean = lock.withLock { materialized.containsKey(key) }
 
@@ -129,3 +129,11 @@ class AsyncSlotMap<K : Any, V : Any> : ReactiveMap<K, V> {
 
     override val presentCount: Int get() = lock.withLock { materialized.size }
 }
+
+/** Deprecated pre-v2 spelling of [AsyncSourceMap] (`#lzcellkernel`). */
+@Deprecated("renamed to AsyncSourceMap", ReplaceWith("AsyncSourceMap<K, V>"))
+typealias AsyncCellMap<K, V> = AsyncSourceMap<K, V>
+
+/** Deprecated pre-v2 spelling of [AsyncComputedMap] (`#lzcellkernel`). */
+@Deprecated("renamed to AsyncComputedMap", ReplaceWith("AsyncComputedMap<K, V>"))
+typealias AsyncSlotMap<K, V> = AsyncComputedMap<K, V>

@@ -13,12 +13,12 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * Cross-language conformance tests for `SlotMap` materialization (`#reactivemap`),
+ * Cross-language conformance tests for `ComputedMap` materialization (`#reactivemap`),
  * driven by the canonical fixtures in `lazily-spec/conformance/materialization/`
- * (vendored under `src/test/resources/conformance/materialization/` so CI needs no
- * `lazily-spec` sibling). These exercise the laws proved in `lazily-formal`'s
- * `Materialization` module against the [SlotMap] derived-slot specialization (and,
- * for the mixed-kind fixture, the [CellMap] input-cell specialization):
+ * (read only from the sibling checkout — there is no bundled fallback, because a
+ * fallback is what makes spec drift invisible). These exercise the laws proved in `lazily-formal`'s
+ * `Materialization` module against the [ComputedMap] derived-slot specialization (and,
+ * for the mixed-kind fixture, the [SourceMap] input-cell specialization):
  *
  * - `observational_transparency.json` — eager (pre-mint loop) and lazy
  *   (`getOrInsertWith` mint-on-access) return identical values for every key;
@@ -28,18 +28,28 @@ import kotlin.test.assertTrue
  * - `entry_kind_orthogonal_to_mode.json` — input **cell** entries are materialized
  *   in every strategy; derived **slot** entries defer under lazy.
  *
- * Every fixture carries `"model": "SlotMap"`; the harness dispatches on it.
+ * Every fixture carries a materialization `"model"`; the harness dispatches on it.
  */
 class MaterializationConformanceTest {
     private val json = Json
 
+    /**
+     * Model tags this harness replays. The canonical corpus emits the v2 spelling
+     * `"ComputedMap"`, but the pre-v2 `"SlotMap"` is *deprecated, not removed*, so the
+     * dispatch accepts both spellings of the same model. Accepting both keeps this
+     * replay green against an older pinned `lazily-spec` checkout as well as the
+     * renamed one; it stays a real gate because any *other* model tag still fails.
+     */
+    private val materializationModels = setOf("ComputedMap", "SlotMap")
+
     private fun loadFixture(name: String): JsonObject {
         val text = ConformanceFixtures.read("materialization/$name")
         val obj = json.parseToJsonElement(text).jsonObject
-        assertEquals(
-            "SlotMap",
-            obj.getValue("model").jsonPrimitive.content,
-            "[$name] this harness replays the SlotMap materialization model",
+        val model = obj.getValue("model").jsonPrimitive.content
+        assertTrue(
+            model in materializationModels,
+            "[$name] this harness replays the ComputedMap materialization model " +
+                "(accepted tags: $materializationModels), got \"$model\"",
         )
         return obj
     }
@@ -63,14 +73,14 @@ class MaterializationConformanceTest {
         val lookup: (String) -> Int = { vals.getValue(it) }
 
         // eager: pre-mint the whole keyset.
-        val eager = SlotMap<String, Int>()
+        val eager = ComputedMap<String, Int>()
         eager.materializeAll(ctx, vals.keys) { lookup(it) }
         assertEquals(EntryKind.Slot, eager.entryKind)
         assertEquals(vals.size, eager.presentCount)
         assertEquals(strArray(expected, "eager_present").toSet(), eager.presentKeys().toSet())
 
         // lazy: empty at build.
-        val lazy = SlotMap<String, Int>()
+        val lazy = ComputedMap<String, Int>()
         assertEquals(0, lazy.presentCount)
 
         // observe_canonical / eager_lazy_observationally_equivalent.
@@ -81,7 +91,7 @@ class MaterializationConformanceTest {
 
         // Fresh lazy replay of the read sequence -> present set is exactly the reads.
         val ctx2 = Context()
-        val lazy2 = SlotMap<String, Int>()
+        val lazy2 = ComputedMap<String, Int>()
         for (k in strArray(fixture, "reads")) lazy2.getOrInsertWith(ctx2, k) { lookup(it) }
         assertEquals(strArray(expected, "lazy_present_after_reads").toSet(), lazy2.presentKeys().toSet())
     }
@@ -94,7 +104,7 @@ class MaterializationConformanceTest {
         val lookup: (String) -> Int = { vals.getValue(it) }
 
         val ctx = Context()
-        val lazy = SlotMap<String, Int>()
+        val lazy = ComputedMap<String, Int>()
 
         // present_after_each_read: monotone, unchanged by a re-read.
         val wantSizes = expected.getValue("present_after_each_read").jsonArray.map { it.jsonPrimitive.int }
@@ -118,8 +128,8 @@ class MaterializationConformanceTest {
         assertEquals("eager", expected.getValue("default_mode").jsonPrimitive.content)
 
         // Split declared entries by kind. A single ReactiveMap fixes one handle
-        // kind, so a mixed-kind fixture is modelled by a CellMap over the cell
-        // entries and a SlotMap over the slot entries, sharing one key space.
+        // kind, so a mixed-kind fixture is modelled by a SourceMap over the cell
+        // entries and a ComputedMap over the slot entries, sharing one key space.
         val entries = fixture.getValue("spec").jsonObject.getValue("entries").jsonObject
         val cellKeys = mutableListOf<String>()
         val slotKeys = mutableListOf<String>()
@@ -138,9 +148,9 @@ class MaterializationConformanceTest {
         val ctx = Context()
 
         // Eager build: every entry present (cells + slots).
-        val eagerCells = CellMap<String, Int>(ctx)
+        val eagerCells = SourceMap<String, Int>(ctx)
         for (k in cellKeys) eagerCells.insert(k, lookup(k))
-        val eagerSlots = SlotMap<String, Int>()
+        val eagerSlots = ComputedMap<String, Int>()
         eagerSlots.materializeAll(ctx, slotKeys) { lookup(it) }
         assertEquals(EntryKind.Cell, eagerCells.entryKind)
         assertEquals(EntryKind.Slot, eagerSlots.entryKind)
@@ -149,9 +159,9 @@ class MaterializationConformanceTest {
 
         // Lazy build: cells present at build (always materialized), slots deferred.
         val lazyCtx = Context()
-        val lazyCells = CellMap<String, Int>(lazyCtx)
+        val lazyCells = SourceMap<String, Int>(lazyCtx)
         for (k in cellKeys) lazyCells.insert(k, lookup(k))
-        val lazySlots = SlotMap<String, Int>()
+        val lazySlots = ComputedMap<String, Int>()
         assertTrue(lazySlots.presentKeys().isEmpty(), "slots deferred at build")
         assertEquals(strArray(expected, "lazy_present_at_build").toSet(), lazyCells.presentKeys().toSet())
 
