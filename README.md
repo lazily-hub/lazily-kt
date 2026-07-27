@@ -36,14 +36,14 @@ canonical matrix with per-cell notes and platform carve-outs lives in
 | Memoized semantic tree (`SemTree`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Stable-id alignment (manufactured identity) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Reactive queue (`QueueCell` SPSC/MPSC + `QueueStorage` adapter) **Core surface** — single-threaded flavor | ✅ | ✅ | ✅ | ~ | ✅ | ~ | ✅ | ✅ | — |
-| Reactive queue (`QueueCell` SPSC/MPSC + `QueueStorage` adapter) **Core surface** — thread-safe flavor (reader kinds + closure lifecycle) | ✅ | — | — | — | — | — | — | — | — |
-| Reactive queue (`QueueCell` SPSC/MPSC + `QueueStorage` adapter) **Core surface** — async flavor (reader kinds + eventual transparency) | ✅ | — | — | — | — | — | — | — | — |
+| Reactive queue (`QueueCell` SPSC/MPSC + `QueueStorage` adapter) **Core surface** — thread-safe flavor (reader kinds + closure lifecycle) | ✅ | — | ✅ | — | — | — | — | — | — |
+| Reactive queue (`QueueCell` SPSC/MPSC + `QueueStorage` adapter) **Core surface** — async flavor (reader kinds + eventual transparency) | ✅ | — | ✅ | — | — | — | — | — | — |
 | Broadcast topic (`TopicCell`) **Core surface** — single-threaded flavor — independent cursors + durable replay + safe GC (`#lztopiccell`) | ✅ | ✅ | ✅ | ~ | ✅ | ~ | ✅ | ✅ | — |
-| Broadcast topic (`TopicCell`) **Core surface** — thread-safe flavor (reader kinds + closure lifecycle) | ✅ | — | — | — | — | — | — | — | — |
-| Broadcast topic (`TopicCell`) **Core surface** — async flavor (reader kinds + eventual transparency) | ✅ | — | — | — | — | — | — | — | — |
+| Broadcast topic (`TopicCell`) **Core surface** — thread-safe flavor (reader kinds + closure lifecycle) | ✅ | — | ✅ | — | — | — | — | — | — |
+| Broadcast topic (`TopicCell`) **Core surface** — async flavor (reader kinds + eventual transparency) | ✅ | — | ✅ | — | — | — | — | — | — |
 | Competing-consumer work queue (`WorkQueueCell`) **Core surface** — single-threaded flavor — exclusive leases + ack/nack + redelivery + DLQ (`#lzworkqueue`) | ✅ | ✅ | ✅ | ~ | ✅ | ~ | ✅ | ✅ | — |
-| Competing-consumer work queue (`WorkQueueCell`) **Core surface** — thread-safe flavor (reader kinds + closure lifecycle) | ✅ | — | — | — | — | — | — | — | — |
-| Competing-consumer work queue (`WorkQueueCell`) **Core surface** — async flavor (reader kinds + eventual transparency) | ✅ | — | — | — | — | — | — | — | — |
+| Competing-consumer work queue (`WorkQueueCell`) **Core surface** — thread-safe flavor (reader kinds + closure lifecycle) | ✅ | — | ✅ | — | — | — | — | — | — |
+| Competing-consumer work queue (`WorkQueueCell`) **Core surface** — async flavor (reader kinds + eventual transparency) | ✅ | — | ✅ | — | — | — | — | — | — |
 | Merge algebra + `Source<T, M>` — associative `MergePolicy` (`KeepLatest`/`Sum`/`Max`/`SetUnion`/`RawFifo`), `Cell ≡ Source<KeepLatest>`, read-any-cell/write-`Source` split (`#relaycell`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | RelayCell — conflating relay + `BackpressurePolicy` + `SpillStore` + `Transport` + Inbox/Outbox + Rate/Window/Expiry/Priority/keyed policies (`#relaycell`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | Free-text character CRDT (`TextCrdt`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
@@ -326,11 +326,12 @@ lazily-kt replays the shared [`lazily-spec`][spec] conformance fixtures:
   `conformance/collections/` fixtures are now replayed, covering the full
   [Binding Conformance Matrix](https://github.com/lazily-hub/lazily-spec/blob/main/protocol.md#binding-conformance-matrix)
   keyed-collections + CRDT rows.
-- The reactive queue (`QueueCell` SPSC + MPSC-via-`batch()` usage rule +
-  `QueueStorage` adapter) replays the five `queuecell_*.json` fixtures
-  (`QueueCellConformanceTest`) — SPSC total FIFO, popped-head reader-kind
-  independence, MPSC multi-writer inside `batch()`, bounded reactive
-  backpressure (`is_full`), and the closure lifecycle.
+- `QueueFamilyConformanceTest` replays all eleven canonical queue-family
+  fixtures (five `queuecell_*`, four `topiccell_*`, two `workqueue_*`) against
+  `Context`, `ThreadSafeContext`, and `AsyncContext`. Its capability/skip ledger,
+  positive step counts, exact `steps[].expected.invalidates` checks, and
+  concurrency probes prevent a staged or non-reactive flavor from reporting
+  green.
 - The distributed CRDT plane runtime (LWW / MV / PN-counter registers, HLC
   clock, `StampFrontier`, causal-stability watermark, idempotent ingress into a
   reactive root cell) is covered by `CrdtRuntimeTest`.
@@ -453,14 +454,20 @@ specified as a **single-producer, single-consumer (SPSC)** primitive;
 producers push inside one `batch { … }` and the batch serializes the pushes into
 a deterministic order. There is no separate `MPSCQueueCell` type.
 
-The reactive shell owns the reader-kind version cells (`head` / `len` /
-`is_empty` / `is_full` / `closed`) and invalidates **by reader kind**: a push to
-a non-empty queue does NOT invalidate the `head` reader (head unchanged); a pop
-does. This reader-kind independence falls out of the `==` guard on `set` —
-after each op the shell re-derives each reader-kind cell from storage and writes
-it back, and a cell whose value did not change is not invalidated. The storage
-backend is pluggable via `QueueStorage`; the default `VecDequeStorage` is
-unbounded, and a bounded form exposes reactive backpressure via `is_full`.
+The reactive shell owns demand-driven reader-kind computeds (`head` / `len` /
+`is_empty` / `is_full`) plus a `closed` source and invalidates **by reader
+kind**: a push to a non-empty queue does NOT invalidate the `head` reader (head
+unchanged); a pop does. Each successful op clears exactly the computeds whose
+values changed in one multi-root frontier walk; an unobserved reader is never
+eagerly derived. The storage backend is pluggable via `QueueStorage`; the
+default `VecDequeStorage` is unbounded, and a bounded form exposes reactive
+backpressure via `is_full`.
+
+The same API shape is available as `ThreadSafeQueueCell` / `AsyncQueueCell`,
+`ThreadSafeTopicCell` / `AsyncTopicCell`, and
+`ThreadSafeWorkQueueCell` / `AsyncWorkQueueCell`. Async reader derives are
+synchronous because their values are already in memory; when composed inside an
+async computed, overloads accepting `AsyncComputeContext` register the edge.
 
 ```kotlin
 val ctx = Context()

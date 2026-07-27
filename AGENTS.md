@@ -245,6 +245,12 @@ and `Reactive.trackedSharedRead_registers_edge` formal pins.
   implements reader-kind independence for free. Conformance fixtures in
   `conformance/collections/` (`queuecell_*.json`, loaded from the sibling
   `lazily-spec` submodule) are replayed by `QueueCellConformanceTest`.
+- `QueueFlavors.kt` / `TopicFlavors.kt` / `WorkQueueFlavors.kt` — the
+  `ThreadSafeContext` and `AsyncContext` queue-family flavors. Every flavor owns
+  its reader-kind computeds on its own graph and clears all changed roots
+  atomically after releasing the storage lock. `QueueFamilyConformanceTest`
+  replays all eleven canonical fixtures against all three flavors with an exact
+  capability ledger and positive replay counts.
 - `WorkQueue.kt` — `WorkQueueCell` competing-consumer local authority
   (`#lzworkqueue`): exclusive FIFO leases, stable item/fresh delivery ids,
   worker-owned ack/nack, strict timeout redelivery, bounded attempts + DLQ,

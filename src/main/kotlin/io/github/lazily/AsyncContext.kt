@@ -278,6 +278,35 @@ class AsyncContext(
     ): AsyncComputed<T> = slotAsyncWithEquals(compute, equals = null)
 
     /**
+     * Create a guarded computed whose body is synchronous, while its node lives
+     * on the async graph. Queue-family reader kinds derive from in-memory state
+     * and have nothing to await, so they resolve inline on [get] just like the
+     * equivalent readers on [Context] and [ThreadSafeContext].
+     */
+    fun <T : Any> computed(
+        compute: AsyncComputeContext.() -> T,
+    ): AsyncComputed<T> {
+        val id = locked {
+            val id = allocId()
+            nodes[id] =
+                AsyncNode.Slot(
+                    state = SlotState.Empty,
+                    value = null,
+                    revision = 0L,
+                    compute = { error("synchronous computed reached async compute path") },
+                    syncCompute = { compute(it) },
+                    equals = { a, b -> a == b },
+                    dependencies = LinkedHashSet(),
+                    dependents = LinkedHashSet(),
+                    inFlight = null,
+                    job = null,
+                )
+            id
+        }
+        return AsyncComputed(id)
+    }
+
+    /**
      * Create an async memoized slot. Like [computedAsync] but an equal
      * recomputation (per [equals]) does not advance the published value.
      */
@@ -297,6 +326,7 @@ class AsyncContext(
                 value = null,
                 revision = 0L,
                 compute = { compute() },
+                syncCompute = null,
                 equals = equals,
                 dependencies = LinkedHashSet(),
                 dependents = LinkedHashSet(),
@@ -312,9 +342,27 @@ class AsyncContext(
     @Suppress("UNCHECKED_CAST")
     fun <T : Any> get(handle: AsyncComputed<T>): T? = doGet(handle.id) as T?
 
-    private fun doGet(slotId: Int): Any? = locked {
-        val slot = nodes[slotId] as? AsyncNode.Slot ?: return null
-        if (slot.state is SlotState.Resolved) slot.value else null
+    private fun doGet(slotId: Int): Any? {
+        while (true) {
+            val pending = locked {
+                val slot = nodes[slotId] as? AsyncNode.Slot ?: return null
+                if (slot.state is SlotState.Resolved) return slot.value
+                val compute = slot.syncCompute ?: return null
+                compute to slot.revision
+            }
+            val dependencies = LinkedHashSet<Int>()
+            val value = pending.first(AsyncComputeContext(this, slotId, dependencies))
+            val published = locked {
+                val slot = nodes[slotId] as? AsyncNode.Slot ?: return null
+                if (slot.state is SlotState.Resolved) return@locked slot.value
+                if (slot.revision != pending.second) return@locked RETRY_SYNC_COMPUTE
+                updateDependenciesLocked(slotId, dependencies)
+                slot.value = value
+                slot.state = SlotState.Resolved
+                value
+            }
+            if (published !== RETRY_SYNC_COMPUTE) return published
+        }
     }
 
     /**
@@ -671,6 +719,47 @@ class AsyncContext(
 
     // -- Internal: invalidation, dependency edges, effect scheduling -------
 
+    /**
+     * Clear several derived roots atomically on the async graph. The outer
+     * re-entrant lock keeps readers from observing a partially-cleared set.
+     * One visited frontier marks every root and shared descendant once, then
+     * effects are dispatched after the lock is released.
+     */
+    internal fun invalidateSlots(ids: IntArray) {
+        if (ids.isEmpty()) return
+        locked {
+            val stack = ArrayDeque<Int>()
+            ids.forEach(stack::addLast)
+            val visited = HashSet<Int>()
+            while (stack.isNotEmpty()) {
+                val slotId = stack.removeLast()
+                if (!visited.add(slotId)) continue
+                val slot = nodes[slotId] as? AsyncNode.Slot ?: continue
+                slot.revision += 1
+                slot.state = SlotState.Empty
+                slot.value = null
+                slot.job?.cancel()
+                slot.inFlight?.complete(Outcome.Retry)
+                slot.job = null
+                slot.inFlight = null
+                for (dependent in slot.dependents) {
+                    when (nodes[dependent]) {
+                        is AsyncNode.Effect -> scheduleEffectLocked(dependent)
+                        is AsyncNode.Slot -> stack.addLast(dependent)
+                        else -> {}
+                    }
+                }
+            }
+        }
+        flushEffects()
+    }
+
+    /** Whether a derived node currently has a fresh cached value (testing). */
+    fun isSet(handle: AsyncComputed<*>): Boolean = locked {
+        val slot = nodes[handle.id] as? AsyncNode.Slot ?: return@locked false
+        slot.state is SlotState.Resolved
+    }
+
     private fun invalidateDependents(dependents: List<Int>) {
         // Process a stable snapshot; invalidation can cascade.
         val toInvalidate = ArrayList<Int>()
@@ -851,6 +940,16 @@ class AsyncComputeContext internal constructor(
         return ctx.get(handle)
     }
 
+    /**
+     * Read an inline-resolving computed while recording its edge. This is
+     * intended for [AsyncContext.computed] nodes; a genuinely suspending
+     * [AsyncContext.computedAsync] can still be pending and must use [getAsync].
+     */
+    fun <T : Any> get(handle: AsyncContext.AsyncComputed<T>): T? {
+        dependencies.add(handle.id)
+        return ctx.get(handle)
+    }
+
     @Deprecated("Reads are unified — use get (#lzcellkernel).", ReplaceWith("get(handle)"))
     fun <T : Any> getCell(handle: AsyncContext.AsyncSource<T>): T = get(handle)
 
@@ -880,6 +979,7 @@ private sealed class AsyncNode {
         @JvmField var value: Any?,
         @JvmField var revision: Long,
         @JvmField val compute: suspend AsyncComputeContext.() -> Any?,
+        @JvmField val syncCompute: ((AsyncComputeContext) -> Any?)?,
         @JvmField val equals: ((Any?, Any?) -> Boolean)?,
         @JvmField var dependencies: MutableSet<Int>,
         @JvmField val dependents: MutableSet<Int>,
@@ -908,6 +1008,8 @@ private sealed class Outcome {
     data class Failed(val error: Throwable) : Outcome()
     data object Retry : Outcome()
 }
+
+private object RETRY_SYNC_COMPUTE
 
 /**
  * A teardown scope over an [AsyncContext]: nodes created through it are disposed

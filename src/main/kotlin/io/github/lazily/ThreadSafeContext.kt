@@ -308,6 +308,23 @@ class ThreadSafeContext {
         }
     }
 
+    /**
+     * Clear several derived roots in one lock-held frontier walk. Queue-family
+     * operations use this after releasing their storage lock so all changed
+     * reader kinds become dirty atomically and lock ordering stays
+     * context-then-storage.
+     */
+    internal fun invalidateSlots(ids: IntArray) = locked {
+        if (ids.isEmpty()) return@locked
+        val stack = ArrayDeque<Int>()
+        val forceStack = ArrayDeque<Boolean>()
+        for (id in ids) {
+            stack.addLast(id)
+            forceStack.addLast(true)
+        }
+        if (runFrontier(stack, forceStack)) flushEffects()
+    }
+
     @PublishedApi
     internal fun finishBatch() {
         check(batchDepth > 0) { "finishBatch without active batch" }
