@@ -49,6 +49,10 @@ value class ThreadSafeEffectHandle @PublishedApi internal constructor(val id: In
  * after every invalidation. Composed of clonable value-class handles, so it is
  * freely shareable across threads through the owning context.
  */
+@Deprecated(
+    "Retired by the Cell kernel (#lzcellkernel); retained for compatibility until " +
+        "the thread-safe plane exposes eager Computed.",
+)
 class ThreadSafeSignalHandle<T : Any> @PublishedApi internal constructor(
     @PublishedApi internal val slot: ThreadSafeComputed<T>,
     @PublishedApi internal val effect: ThreadSafeEffectHandle,
@@ -191,7 +195,14 @@ class ThreadSafeContext {
      * An **eager** derived value: a memo slot plus a puller effect. The value is
      * materialized at creation and re-materialized by the time the invalidating
      * `set`/`batch` returns — observers never see an intermediate unset state.
+     *
+     * Retained only as staged compatibility while this plane migrates eagerness
+     * onto [ThreadSafeComputed].
      */
+    @Deprecated(
+        "Retired by the Cell kernel (#lzcellkernel); retained for compatibility until " +
+            "the thread-safe plane exposes eager Computed.",
+    )
     inline fun <reified T : Any> signal(noinline compute: ThreadSafeContext.() -> T): ThreadSafeSignalHandle<T> {
         val ids = signalAny { compute() }
         return ThreadSafeSignalHandle(ThreadSafeComputed(ids.slot), ThreadSafeEffectHandle(ids.effect))
@@ -243,7 +254,10 @@ class ThreadSafeContext {
         return get(handle)
     }
 
-    /** Read a signal's current (always-materialized) value; auto-subscribes. */
+    /** Read a retired signal compatibility handle; auto-subscribes to its backing computed. */
+    @Deprecated(
+        "Signal handles are retired by the Cell kernel (#lzcellkernel); retained for staged compatibility.",
+    )
     inline fun <reified T : Any> getSignal(handle: ThreadSafeSignalHandle<T>): T = get(handle.slot)
 
     @PublishedApi

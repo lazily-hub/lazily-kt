@@ -121,7 +121,16 @@ class AsyncContext(
         override val nodeId: Int get() = id
     }
 
-    /** An eager async derived value (memo slot + puller effect). */
+    /**
+     * An eager async derived value (memo slot + puller effect).
+     *
+     * Retained only as staged compatibility while this plane migrates eagerness
+     * onto [AsyncComputed].
+     */
+    @Deprecated(
+        "Retired by the Cell kernel (#lzcellkernel); retained for compatibility until " +
+            "the async plane exposes eager AsyncComputed.",
+    )
     inner class AsyncSignalHandle<T> internal constructor(
         internal val slot: AsyncComputed<T>,
         internal val effect: AsyncEffectHandle,
@@ -668,7 +677,16 @@ class AsyncContext(
 
     // -- Signal (eager) ---------------------------------------------------
 
-    /** Eager async derived value (memo slot + puller effect). */
+    /**
+     * Eager async derived value (memo slot + puller effect).
+     *
+     * Retained only as staged compatibility while this plane migrates eagerness
+     * onto [AsyncComputed].
+     */
+    @Deprecated(
+        "Retired by the Cell kernel (#lzcellkernel); retained for compatibility until " +
+            "the async plane exposes eager AsyncComputed.",
+    )
     fun <T : Any> signalAsync(
         compute: suspend AsyncComputeContext.() -> T,
     ): AsyncSignalHandle<T> {
@@ -959,7 +977,10 @@ class AsyncComputeContext internal constructor(
         return ctx.getAsync(handle)
     }
 
-    /** Await an eager signal, recording its backing slot as a dependency. */
+    /** Await a retired signal compatibility handle, recording its backing slot as a dependency. */
+    @Deprecated(
+        "Signal handles are retired by the Cell kernel (#lzcellkernel); retained for staged compatibility.",
+    )
     suspend fun <T : Any> getAsync(signal: AsyncContext.AsyncSignalHandle<T>): T {
         dependencies.add(signal.slot.id)
         return ctx.getAsync(signal.slot)
