@@ -21,10 +21,12 @@ manifest="${1:-build/conformance-fixtures-loaded.txt}"
 # Minimum total fixtures replayed. Raise this when areas are added; never lower
 # it to make a red build green — a drop means a replay stopped running.
 # 96 before reactive-graph, +1 for the one reactive-graph fixture lazily-kt can
-# replay today (transitive_invalidation_reaches_depth). The other 8 are skipped
-# for named unsupported ops and are deliberately NOT counted — the manifest
-# means "actually replayed", so raise this as those ops land.
-MIN_FIXTURES="${MIN_FIXTURES:-107}"
+# replay today (transitive_invalidation_reaches_depth), and +3 for the portable
+# stdlib Timer / Timeout / RevisionBarrier corpus. The other 8 reactive-graph
+# fixtures are skipped for named unsupported ops and are deliberately NOT
+# counted — the manifest means "actually replayed", so raise this as those ops
+# land.
+MIN_FIXTURES="${MIN_FIXTURES:-110}"
 
 # Areas lazily-kt replays. message-passing and receipts are listed explicitly
 # because they were the areas that silently skipped for the entire life of the
@@ -53,6 +55,7 @@ REQUIRED_AREAS=(
   service
   signaling
   statechart
+  stdlib
   temporal
   windowing
 )
