@@ -80,9 +80,9 @@ canonical matrix with per-cell notes and platform carve-outs lives in
 | Portable stdlib caller-driven `Timeout<T>` (`stdlib_timeout_v1`) — distinct from reactive `TimeoutCell` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Portable stdlib `RevisionBarrier` (`stdlib_revision_barrier_v1`) — register/recheck lost-wakeup guard | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Embedded-service plane — `HealthCell` / `ReadinessCell` / `DiscoveryCell` / `ServiceRegistry` (`#lzservice`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Transport-agnostic reactive ingress (`IngressCell`) — keyed lifecycle scopes, generation/sequence/freshness envelopes, reorder buffer, accepted/dropped/error receipt readers (`#designimplementtransport`) | ✅ | — | — | — | — | — | — | — | — |
-| Ingress family — `Send + Sync` flavor (`ThreadSafeIngressCell`): one frontier walk per admission (`#designimplementtransport`) | ✅ | — | — | — | — | — | — | — | — |
-| Ingress family — async flavor (`AsyncIngressCell`): admission is not async-coloured (`#designimplementtransport`) | ✅ | — | — | — | — | — | — | — | — |
+| Transport-agnostic reactive ingress (`IngressCell`) — keyed lifecycle scopes, generation/sequence/freshness envelopes, reorder buffer, accepted/dropped/error receipt readers (`#designimplementtransport`) | ✅ | — | ✅ | — | — | — | — | — | — |
+| Ingress family — `Send + Sync` flavor (`ThreadSafeIngressCell`): one frontier walk per admission (`#designimplementtransport`) | ✅ | — | ✅ | — | — | — | — | — | — |
+| Ingress family — async flavor (`AsyncIngressCell`): admission is not async-coloured (`#designimplementtransport`) | ✅ | — | ✅ | — | — | — | — | — | — |
 <!-- coverage-table:end -->
 
 CRDT convergence and the wire protocol are pinned by the shared conformance fixtures
@@ -526,6 +526,87 @@ check(work.ack("worker-a", delivery.deliveryId))
 
 The instance is the local serialization point. Distributed/HA assignment must
 put `claim` behind a leader or consensus log.
+
+## Transport-agnostic reactive ingress
+
+`IngressCell` is the native implementation of the [`lazily-spec`][spec]
+transport-agnostic ingress family
+([transport-ingress.md](https://github.com/lazily-hub/lazily-spec/blob/main/docs/transport-ingress.md),
+`#designimplementtransport`). A client consuming a remote stream usually grows
+four accidental mechanisms — a `refresh()` loop, a hand-rolled relevance check, a
+reconnect path that forgets what it applied, and one copy of all three per
+transport. Each of those is a *derive* being simulated with a call, and this
+family makes them derives while keeping the transport a value the primitive never
+touches.
+
+The admission algebra lives in the graph-agnostic `IngressCore` and the
+reactivity lives in the shells (`IngressCell` / `ThreadSafeIngressCell` /
+`AsyncIngressCell`), the same split the queue and map families make: invalidation
+is a graph write, so every core mutator returns an `IngressChange` — *which*
+reader kinds the transition dirtied — and each shell clears exactly that set in
+**one** frontier walk, so no reader ever observes "new value, old authority".
+
+Each keyed scope exposes four reader kinds (`value` / `readiness` / `authority` /
+`retry`) plus three independent receipt channels (`accepted` / `dropped` /
+`error`) and a derived `IngressSchedule`. The negative cases are the contract: a
+buffered out-of-order envelope invalidates nothing and mints no receipt, a `tick`
+inside the freshness horizon invalidates nothing, an empty drain invalidates
+nothing, and a suspend invalidates readiness only.
+
+Admission applies a **normative** order — lifecycle → generation fence →
+freshness → generation handoff → dedupe → ordering → backpressure → merge. Two
+orderings are load-bearing: the fence outranks dedupe (else a zombie producer
+reads as a duplicate) and freshness outranks ordering (else an expired envelope
+takes a reorder slot). A generation handoff is a **baseline reset** — it discards
+the superseded incarnation's buffered successors *and* its undrained window.
+Backpressure reuses the relay `Overflow` policy, validated against the merge
+algebra's `conflates` flag at construction exactly as `RelayCell` does, and
+`Block` refuses **without** advancing the watermark so the producer's retry stays
+in order. A drain is an egress, not an ack: it never moves the watermark.
+
+**Admission is not async-coloured.** Whether an envelope is admissible is a
+function of the fence, the watermark, the reorder buffer, and the observed clock —
+nothing to await — so the async flavor uses synchronous computes on the async
+graph and returns plain values like the other two. Awaiting belongs to the
+transport, which is outside the primitive by construction.
+
+```kotlin
+val ctx = Context()
+val ingress = IngressCell<String, Long>(ctx, IngressPolicy(freshnessHorizon = 100), sum())
+
+// In-order delivery folds into one coalesced window under ⊕.
+ingress.admit(IngressEnvelope("alpha", generation = 1, sequence = 0, stampedAt = 0, payload = 5))
+ingress.admit(IngressEnvelope("alpha", generation = 1, sequence = 1, stampedAt = 0, payload = 7))
+assertEquals(12L, ingress.value("alpha"))
+assertEquals(IngressReadiness.Ready, ingress.readiness("alpha"))
+
+// Out of order buffers, and invalidates nothing a reader can observe.
+ingress.admit(IngressEnvelope("alpha", 1, 4, 0, 9))   // Buffered(gapFrom = 2)
+
+// A zombie producer is fenced before its sequence is even consulted.
+val zombie = ingress.admit(IngressEnvelope("alpha", 0, 0, 0, 99))
+assertEquals(IngressAdmission.Dropped(IngressDropReason.StaleGeneration), zombie)
+assertEquals(1, ingress.dropped().size)   // dropped only; accepted is untouched
+
+// A drain is an egress: the watermark does not move, so a replay resumes here.
+assertEquals(12L, ingress.drain("alpha"))
+assertEquals(1L, ingress.view("alpha")?.deliveredThrough)
+
+// The transport is a value. `pump` admits a decoded batch, then asks the
+// transport to replay whatever gap the algebra still reports.
+val transport = InProcIngress<String, Long>(IngressTransportKind.EventChannel)
+transport.push(IngressEnvelope("beta", 1, 0, 0, 1))
+transport.push(IngressEnvelope("beta", 1, 2, 0, 4))
+ingress.pump(transport)
+assertEquals(listOf("beta" to ReplayRequest(1, 1)), transport.replays())
+```
+
+The canonical `conformance/ingress/*.json` corpus is replayed against **all
+three** flavors by `IngressFamilyConformanceTest`, with `invalidates` asserted per
+reader kind in both directions through a cache-validity probe (so
+over-invalidation is as visible as under-), a positive replayed-step count per
+flavor, and a three-row capability ledger enforced by grepping `src/main/kotlin`
+in both directions.
 
 ## Distributed CRDT plane
 

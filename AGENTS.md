@@ -251,6 +251,44 @@ and `Reactive.trackedSharedRead_registers_edge` formal pins.
   atomically after releasing the storage lock. `QueueFamilyConformanceTest`
   replays all eleven canonical fixtures against all three flavors with an exact
   capability ledger and positive replay counts.
+- `IngressCore.kt` — the graph-agnostic admission algebra behind every ingress
+  flavor (`#designimplementtransport`), the same split `topic_core` makes for the
+  broadcast family. Keyed lifecycle scopes (Opening/Live/Suspended/Closed), a
+  **normative** admission order (lifecycle → generation fence → freshness →
+  handoff → dedupe → ordering → backpressure → merge), a bounded reorder buffer, a
+  coalescing hot window under a runtime `MergePolicy`, and a bounded three-channel
+  receipt log with eviction-stable offsets. **Reactivity is deliberately
+  excluded** — every mutator returns `IngressChange`, the set of dirtied reader
+  kinds, and each shell clears exactly that set on its own graph. Also carries the
+  `IngressTransport` seam and `InProcIngress`: the core never touches a transport,
+  so a WebSocket frame, an RPC response, and a polled page are the same input once
+  decoded. Freshness enters through an explicit `tick(now)`, so staleness
+  transitions are deterministic and fixture-replayable. Two orderings are
+  load-bearing and have named tests: the fence outranks dedupe (else a zombie
+  producer reads as a duplicate) and freshness outranks ordering (else an expired
+  envelope takes a reorder slot). Backpressure reuses the relay `Overflow` policy,
+  validated against `MergePolicy.conflates` at construction exactly as `RelayCell`
+  does; `Block` refuses **without** advancing the watermark, and a drain is an
+  egress that never moves it.
+- `Ingress.kt` / `IngressFlavors.kt` — the three flavor shells (`IngressCell` /
+  `ThreadSafeIngressCell` / `AsyncIngressCell`). Four reader kinds per keyed scope
+  (`value` / `readiness` / `authority` / `retry`) plus three receipt readers and a
+  derived `IngressSchedule`; readiness, authority, and retry are **derives, not
+  refresh calls**, and there is **no observer registry** anywhere (anything
+  surviving an invalidation would not be a graph edge). Both concurrent shells run
+  invalidation **outside** the core lock and fan out through one
+  `invalidateSlots`, so one admission is one frontier walk and a generation handoff
+  is never visible as "new value, old authority". The async flavor uses
+  `AsyncContext.computed` (sync compute, async graph) because **admission is not
+  async-coloured** — the decision is a function of the fence, the watermark, the
+  reorder buffer, and the observed clock, so there is nothing to await and no
+  `settle` step in the primitive. Nullable readers project `IngressReading<V>`
+  because the Kotlin kernel's `Computed<T : Any>` cannot carry `null`.
+  `IngressFamilyConformanceTest` replays all seven canonical
+  `conformance/ingress/*.json` fixtures against all three flavors with `invalidates`
+  asserted per reader kind in **both** directions, positive replayed-step counts,
+  and a filesystem-enforced three-row ledger. Spec:
+  `lazily-spec/docs/transport-ingress.md`.
 - `WorkQueue.kt` — `WorkQueueCell` competing-consumer local authority
   (`#lzworkqueue`): exclusive FIFO leases, stable item/fresh delivery ids,
   worker-owned ack/nack, strict timeout redelivery, bounded attempts + DLQ,
