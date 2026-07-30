@@ -4,9 +4,6 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.boolean
-import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
@@ -215,21 +212,17 @@ class IpcConformanceTest {
             when (message) {
                 is IpcMessage.SnapshotMessage -> {
                     val snapshot = message.snapshot
-                    a.long("epoch")?.let { assertEquals(it, snapshot.epoch, "epoch") }
-                    a.long("node_count")?.let { assertEquals(it, snapshot.nodes.size.toLong(), "node_count") }
-                    a.long("edge_count")?.let { assertEquals(it, snapshot.edges.size.toLong(), "edge_count") }
-                    a.long("root_count")?.let { assertEquals(it, snapshot.roots.size.toLong(), "root_count") }
-                    a.string("first_node_type_tag")?.let {
-                        assertEquals(it, snapshot.nodes.first().typeTag, "first_node_type_tag")
+                    a.assertLong("epoch") { snapshot.epoch }
+                    a.assertLong("node_count") { snapshot.nodes.size.toLong() }
+                    a.assertLong("edge_count") { snapshot.edges.size.toLong() }
+                    a.assertLong("root_count") { snapshot.roots.size.toLong() }
+                    a.assertString("first_node_type_tag") { snapshot.nodes.first().typeTag }
+                    a.assertString("first_node_state_kind") { variantName(snapshot.nodes.first().state) }
+                    a.assertBoolean("has_opaque_node") {
+                        snapshot.nodes.any { it.state is NodeState.Opaque }
                     }
-                    a.string("first_node_state_kind")?.let { expected ->
-                        assertEquals(expected, variantName(snapshot.nodes.first().state), "first_node_state_kind")
-                    }
-                    a.boolean("has_opaque_node")?.let {
-                        val has = snapshot.nodes.any { it.state is NodeState.Opaque }
-                        assertEquals(it, has, "has_opaque_node")
-                    }
-                    a.long("opaque_node_id")?.let { id ->
+                    a.assertKeyWith("opaque_node_id") { want ->
+                        val id = want.jsonPrimitive.long
                         val node = snapshot.nodes.single { it.node == id }
                         assertIs<NodeState.Opaque>(node.state, "opaque_node_id $id state")
                     }
@@ -239,62 +232,60 @@ class IpcConformanceTest {
                     if (a.has("blob_offset") || a.has("blob_len") || a.has("blob_epoch")) {
                         val sharedBlob = snapshot.nodes.firstNotNullOfOrNull { it.state as? NodeState.SharedBlob }
                             ?: error("$fixtureName: blob_* assertions need a SharedBlob node, snapshot has none")
-                        a.long("blob_offset")?.let { assertEquals(it, sharedBlob.blob.offset, "blob_offset") }
-                        a.long("blob_len")?.let { assertEquals(it, sharedBlob.blob.len, "blob_len") }
-                        a.long("blob_epoch")?.let { assertEquals(it, sharedBlob.blob.epoch, "blob_epoch") }
+                        a.assertLong("blob_offset") { sharedBlob.blob.offset }
+                        a.assertLong("blob_len") { sharedBlob.blob.len }
+                        a.assertLong("blob_epoch") { sharedBlob.blob.epoch }
                     }
                 }
                 is IpcMessage.DeltaMessage -> {
                     val delta = message.delta
-                    a.long("base_epoch")?.let { assertEquals(it, delta.baseEpoch, "base_epoch") }
-                    a.long("epoch")?.let { assertEquals(it, delta.epoch, "epoch") }
-                    a.long("op_count")?.let { assertEquals(it, delta.ops.size.toLong(), "op_count") }
-                    a.boolean("is_sequential")?.let {
-                        assertEquals(it, delta.epoch == delta.baseEpoch + 1, "is_sequential")
+                    a.assertLong("base_epoch") { delta.baseEpoch }
+                    a.assertLong("epoch") { delta.epoch }
+                    a.assertLong("op_count") { delta.ops.size.toLong() }
+                    a.assertBoolean("is_sequential") { delta.epoch == delta.baseEpoch + 1 }
+                    // Asserted, not gated. `if (it) { ... }` read the key and then
+                    // checked nothing when the fixture said false, so the claim
+                    // "this delta does NOT exercise every variant" was unfalsifiable
+                    // (#lzconsumednotasserted).
+                    a.assertBoolean("has_all_op_variants") {
+                        val allVariants = setOf(
+                            "CellSet", "SlotValue", "Invalidate",
+                            "NodeAdd", "NodeRemove", "EdgeAdd", "EdgeRemove",
+                        )
+                        delta.ops.map { variantName(it) }.toSet() == allVariants
                     }
-                    a.boolean("has_all_op_variants")?.let {
-                        if (it) {
-                            val allVariants = setOf(
-                                "CellSet", "SlotValue", "Invalidate",
-                                "NodeAdd", "NodeRemove", "EdgeAdd", "EdgeRemove",
-                            )
-                            assertEquals(allVariants, delta.ops.map { variantName(it) }.toSet(), "has_all_op_variants")
-                        }
-                    }
-                    a.string("first_op_kind")?.let {
-                        assertEquals(it, variantName(delta.ops.first()), "first_op_kind")
-                    }
-                    a.string("first_op_payload_kind")?.let { expected ->
-                        val actual = when (firstPayload(delta, "first_op_payload_kind")) {
+                    a.assertString("first_op_kind") { variantName(delta.ops.first()) }
+                    a.assertString("first_op_payload_kind") {
+                        when (firstPayload(delta, "first_op_payload_kind")) {
                             is IpcValue.Inline -> "Inline"
                             is IpcValue.SharedBlob -> "SharedBlob"
                         }
-                        assertEquals(expected, actual, "first_op_payload_kind")
                     }
                     // The pluggable blob-backend discriminator. Without this arm the
                     // arrow fixture would round-trip and "pass" while never checking
                     // the one field it exists to validate — a replay that asserts
                     // nothing is the failure mode this corpus is meant to prevent.
-                    a.string("first_op_payload_backend")?.let { expected ->
+                    a.assertString("first_op_payload_backend") {
                         val payload = firstPayload(delta, "first_op_payload_backend")
                         val blob = assertIs<IpcValue.SharedBlob>(payload, "first_op_payload_backend needs a SharedBlob payload")
-                        assertEquals(expected, blob.blob.backend.wire, "first_op_payload_backend")
+                        blob.blob.backend.wire
                     }
                     // `resync_after_epoch_<N>` parameterises the epoch in the key
-                    // itself, so the suffix is data, not a distinct assertion.
+                    // itself, so the suffix is data, not a distinct assertion. The
+                    // VALUE is data too and was discarded into `_`: a fixture
+                    // flipping it to false demanded the opposite outcome and this
+                    // arm would not have noticed (#lzconsumednotasserted).
                     for ((key, _) in a.withPrefix("resync_after_epoch_")) {
                         val lastEpoch = key.removePrefix("resync_after_epoch_").toLong()
-                        assertIs<DeltaApplyStatus.ResyncRequired>(delta.applyStatus(lastEpoch), "$key for lastEpoch=$lastEpoch")
+                        a.assertBoolean(key) {
+                            delta.applyStatus(lastEpoch) is DeltaApplyStatus.ResyncRequired
+                        }
                     }
                 }
                 is IpcMessage.CrdtSyncMessage -> {
                     val sync = message.sync
-                    a.long("frontier_count")?.let {
-                        assertEquals(it, sync.frontier.size.toLong(), "frontier_count")
-                    }
-                    a.long("op_count")?.let {
-                        assertEquals(it, sync.ops.size.toLong(), "op_count")
-                    }
+                    a.assertLong("frontier_count") { sync.frontier.size.toLong() }
+                    a.assertLong("op_count") { sync.ops.size.toLong() }
                 }
                 // Reliable-sync control frames carry no assertion metadata here;
                 // `requireAllConsumed` turns "carries none" into a checked claim.

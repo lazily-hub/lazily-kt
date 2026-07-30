@@ -121,13 +121,11 @@ class ReliableSyncConformanceTest {
         // The fixture-level `assertions` block was carried and read by nothing.
         val wire = assertIs<IpcMessage.DeltaMessage>(msg(fx["wire"]!!)).delta
         fx["assertions"]!!.jsonObject.consuming("multi_epoch_delta.json assertions") { a ->
-            a.long("base_epoch")?.let { assertEquals(it, wire.baseEpoch, "base_epoch") }
-            a.long("epoch")?.let { assertEquals(it, wire.epoch, "epoch") }
-            a.long("span")?.let { assertEquals(it, wire.span(), "span") }
-            a.boolean("is_multi_epoch")?.let {
-                assertEquals(it, wire.span() > 1, "is_multi_epoch")
-            }
-            a.int("op_count")?.let { assertEquals(it, wire.ops.size, "op_count") }
+            a.assertLong("base_epoch") { wire.baseEpoch }
+            a.assertLong("epoch") { wire.epoch }
+            a.assertLong("span") { wire.span() }
+            a.assertBoolean("is_multi_epoch") { wire.span() > 1 }
+            a.assertInt("op_count") { wire.ops.size }
         }
 
         val sc = scenario(fx, "span_3_applies_equal_to_unit_fold")
@@ -139,24 +137,21 @@ class ReliableSyncConformanceTest {
         val batch = Receiver(sc.long("receiver_last_epoch"))
         val action = batch.ingest(IpcMessage.ofDelta(delta))
         sc["expect"]!!.jsonObject.consuming("multi_epoch_delta.json[span_3] expect") { e ->
-            e.string("action")?.let { assertEquals(it, actionName(action), "action") }
-            e.boolean("applied")?.let { assertEquals(it, action is ResyncAction.Apply, "applied") }
-            e.long("receiver_last_epoch_after")?.let { assertEquals(it, batch.coord.lastEpoch, "receiver_last_epoch_after") }
+            e.assertString("action") { actionName(action) }
+            e.assertBoolean("applied") { action is ResyncAction.Apply }
+            e.assertLong("receiver_last_epoch_after") { batch.coord.lastEpoch }
             // last_epoch advances to `epoch` in one step, never through the
             // intermediate epochs the equivalent unit fold passes through.
-            e.boolean("atomic_advance")?.let {
-                assertEquals(it, batch.coord.lastEpoch == delta.epoch, "atomic_advance")
-            }
+            e.assertBoolean("atomic_advance") { batch.coord.lastEpoch == delta.epoch }
             // batch == fold: replaying the fixture's `equivalent_unit_fold` must
             // land on the same node state AND the same last_epoch.
-            e.boolean("fold_equivalent")?.let { want ->
+            e.assertBoolean("fold_equivalent") {
                 val unit = Receiver(sc.long("receiver_last_epoch"))
                 for (uEl in sc["equivalent_unit_fold"]!!.jsonArray) {
                     val u = assertIs<IpcMessage.DeltaMessage>(msg(buildDeltaWire(uEl.jsonObject))).delta
                     assertEquals(ResyncAction.Apply, unit.ingest(IpcMessage.ofDelta(u)), "unit fold step")
                 }
-                val equal = unit.state() == batch.state() && unit.coord.lastEpoch == batch.coord.lastEpoch
-                assertEquals(want, equal, "fold_equivalent: ${unit.state()} vs ${batch.state()}")
+                unit.state() == batch.state() && unit.coord.lastEpoch == batch.coord.lastEpoch
             }
         }
 
@@ -165,12 +160,12 @@ class ReliableSyncConformanceTest {
         val gc = Receiver(gap.long("receiver_last_epoch"))
         val gapAction = gc.ingest(IpcMessage.ofDelta(Delta(gd.long("base_epoch"), gd.long("epoch"))))
         gap["expect"]!!.jsonObject.consuming("multi_epoch_delta.json[gap_rule] expect") { e ->
-            e.string("action")?.let { assertEquals(it, actionName(gapAction), "action") }
-            e.long("request_from")?.let {
-                assertEquals(ResyncAction.RequestSnapshot(it), gapAction, "request_from")
+            e.assertString("action") { actionName(gapAction) }
+            e.assertKeyWith("request_from") { want ->
+                assertEquals(ResyncAction.RequestSnapshot(want.jsonPrimitive.long), gapAction, "request_from")
             }
-            e.boolean("applied")?.let { assertEquals(it, gapAction is ResyncAction.Apply, "applied") }
-            e.long("receiver_last_epoch_after")?.let { assertEquals(it, gc.coord.lastEpoch, "receiver_last_epoch_after") }
+            e.assertBoolean("applied") { gapAction is ResyncAction.Apply }
+            e.assertLong("receiver_last_epoch_after") { gc.coord.lastEpoch }
         }
     }
 
@@ -209,19 +204,19 @@ class ReliableSyncConformanceTest {
             assertEquals(frame.long("last_epoch_after"), recv.coord.lastEpoch)
         }
         sc["expect"]!!.jsonObject.consuming("resync_gap_converge.json[drop_suffix] expect") { e ->
-            e.long("final_last_epoch")?.let { assertEquals(it, recv.coord.lastEpoch, "final_last_epoch") }
-            e.long("resync_requests_emitted")?.let { assertEquals(it, requests.toLong(), "resync_requests_emitted") }
+            e.assertLong("final_last_epoch") { recv.coord.lastEpoch }
+            e.assertLong("resync_requests_emitted") { requests.toLong() }
             // Convergence is the point of the scenario, and it is state, not an
             // epoch counter: a receiver that requested the snapshot and then
             // failed to fold it still lands on final_last_epoch=4.
-            e["converged_nodes"]?.let { assertEquals(nodeState(it), recv.state(), "converged_nodes") }
+            e.assertKeyWith("converged_nodes") { assertEquals(nodeState(it), recv.state(), "converged_nodes") }
             // ... and it must equal what a receiver that never lost a frame
             // sees. The fixture does not record the dropped frame's contents, so
             // the no-drop receiver is reconstructed from the resync Snapshot,
             // which is by definition the full authoritative state at its epoch.
             // The real content of the claim is that nothing stale survived the
             // resync and nothing the drop cost is still missing.
-            e.boolean("equals_no_drop_receiver")?.let { want ->
+            e.assertBoolean("equals_no_drop_receiver") {
                 val snapshot = sc["inbound"]!!.jsonArray
                     .map { it.jsonObject }
                     .mapNotNull { it["frame"] }
@@ -231,7 +226,7 @@ class ReliableSyncConformanceTest {
                     ?: error("equals_no_drop_receiver needs a resync Snapshot in `inbound`")
                 val noDrop = Receiver(sc.long("start_last_epoch"))
                 noDrop.fold(snapshot)
-                assertEquals(want, noDrop.state() == recv.state(), "equals_no_drop_receiver")
+                noDrop.state() == recv.state()
             }
         }
 
@@ -242,8 +237,8 @@ class ReliableSyncConformanceTest {
             if (sc2.ingest(msg(frameEl.jsonObject["frame"]!!)) is ResyncAction.RequestSnapshot) req2++
         }
         single["expect"]!!.jsonObject.consuming("resync_gap_converge.json[single_request] expect") { e ->
-            e.long("resync_requests_emitted")?.let { assertEquals(it, req2.toLong(), "resync_requests_emitted") }
-            e.long("final_last_epoch")?.let { assertEquals(it, sc2.lastEpoch, "final_last_epoch") }
+            e.assertLong("resync_requests_emitted") { req2.toLong() }
+            e.assertLong("final_last_epoch") { sc2.lastEpoch }
         }
     }
 
@@ -265,14 +260,12 @@ class ReliableSyncConformanceTest {
                 assertEquals(frame.long("last_epoch_after"), recv.coord.lastEpoch)
             }
             sc["expect"]!!.jsonObject.consuming("idempotent_redelivery.json[$name] expect") { e ->
-                e.long("final_last_epoch")?.let { assertEquals(it, recv.coord.lastEpoch, "final_last_epoch") }
+                e.assertLong("final_last_epoch") { recv.coord.lastEpoch }
                 // At-least-once delivery, exactly-once effect: the re-sent frame
                 // carries a DIFFERENT payload for node 1 in the first scenario,
                 // so a receiver that folded it would land on 99, not 10.
-                e["state_after"]?.let { assertEquals(nodeState(it), recv.state(), "state_after") }
-                e.boolean("net_effect_unchanged")?.let {
-                    assertEquals(it, before == recv.state(), "net_effect_unchanged")
-                }
+                e.assertKeyWith("state_after") { assertEquals(nodeState(it), recv.state(), "state_after") }
+                e.assertBoolean("net_effect_unchanged") { before == recv.state() }
             }
         }
     }
@@ -354,20 +347,20 @@ class ReliableSyncConformanceTest {
         }
 
         sc["expect"]!!.jsonObject.consuming("outbox_replay_after_crash.json[crash] expect") { e ->
-            e["retained_after_ack"]?.let {
+            e.assertKeyWith("retained_after_ack") {
                 assertEquals(longs(it), mem.retainedEpochs(), "retained_after_ack (memory)")
                 assertEquals(longs(it), file.retainedEpochs(), "retained_after_ack (file)")
             }
-            e["replayed_from_cursor"]?.let {
+            e.assertKeyWith("replayed_from_cursor") {
                 assertEquals(longs(it), replay.map { r -> r.first }, "replayed_from_cursor")
             }
             // Replay must be ordered, not merely complete: a store that returned
             // the retained suffix as a set would satisfy replayed_from_cursor.
-            e["replay_order"]?.let {
+            e.assertKeyWith("replay_order") {
                 assertEquals(longs(it), replay.map { r -> r.first }, "replay_order")
             }
-            e["receiver_applies"]?.let { assertEquals(longs(it), applied, "receiver_applies") }
-            e.long("receiver_last_epoch_after")?.let { assertEquals(it, recv.coord.lastEpoch, "receiver_last_epoch_after") }
+            e.assertKeyWith("receiver_applies") { assertEquals(longs(it), applied, "receiver_applies") }
+            e.assertLong("receiver_last_epoch_after") { recv.coord.lastEpoch }
             // The exactly-once ledger. `ops_lost`/`ops_doubled` are counted
             // against the appended frames above the reconnect cursor, so an
             // outbox that dropped or duplicated on crash is caught here rather
@@ -375,11 +368,9 @@ class ReliableSyncConformanceTest {
             val expectedEpochs = appended.map { it.first }.filter { it > cursor }
             val lost = expectedEpochs.count { it !in applied }
             val doubled = applied.size - applied.distinct().size
-            e.int("ops_lost")?.let { assertEquals(it, lost, "ops_lost") }
-            e.int("ops_doubled")?.let { assertEquals(it, doubled, "ops_doubled") }
-            e.boolean("exactly_once_effect")?.let {
-                assertEquals(it, lost == 0 && doubled == 0, "exactly_once_effect")
-            }
+            e.assertInt("ops_lost") { lost }
+            e.assertInt("ops_doubled") { doubled }
+            e.assertBoolean("exactly_once_effect") { lost == 0 && doubled == 0 }
         }
 
         // send_failure_retains_frame_for_next_tick
@@ -388,17 +379,13 @@ class ReliableSyncConformanceTest {
         for ((e, m) in frames(sc2, "appended")) mem2.append(e, m)
         sc2["expect"]!!.jsonObject.consuming("outbox_replay_after_crash.json[send_failure] expect") { e ->
             val retained = longs(e["retained"] ?: error("retained is required"))
-            assertEquals(retained, mem2.retainedEpochs(), "retained")
+            e.assertKeyWith("retained") { assertEquals(longs(it), mem2.retainedEpochs(), "retained") }
             val resend = mem2.replayFrom(retained.first() - 1).map { it.first }
             // A failed send must not ack: the frame is still there for the next tick.
-            e.boolean("frame_retained_after_failed_send")?.let {
-                assertEquals(it, mem2.retainedEpochs().isNotEmpty(), "frame_retained_after_failed_send")
-            }
-            e["resent_on_next_tick"]?.let { assertEquals(longs(it), resend, "resent_on_next_tick") }
+            e.assertBoolean("frame_retained_after_failed_send") { mem2.retainedEpochs().isNotEmpty() }
+            e.assertKeyWith("resent_on_next_tick") { assertEquals(longs(it), resend, "resent_on_next_tick") }
             // The failure is transient precisely because nothing was ack'd away.
-            e.boolean("permanent_gap")?.let {
-                assertEquals(it, resend != retained, "permanent_gap")
-            }
+            e.assertBoolean("permanent_gap") { resend != retained }
         }
 
         Files.deleteIfExists(path)
@@ -426,28 +413,34 @@ class ReliableSyncConformanceTest {
         }
         val set = replayOrSet(addOps)
         add["expect"]!!.jsonObject.consuming("liveness_orset_lww.json[open_set_add_wins] expect") { e ->
-            e.boolean("present")?.let { assertEquals(it, set.present(), "present") }
+            e.assertBoolean("present") { set.present() }
             // Add-wins is a *semilattice* claim: applying the same ops in the
             // reverse order must agree. Reading only `present` cannot tell a
             // conforming OR-set from a last-write-wins set on this op stream.
-            e.boolean("order_independent")?.let {
-                assertEquals(it, replayOrSet(addOps.reversed()).present() == set.present(), "order_independent")
+            e.assertBoolean("order_independent") {
+                replayOrSet(addOps.reversed()).present() == set.present()
             }
-            // Idempotence: re-delivering the whole op stream changes nothing.
-            e.int("redeliver_applied_count")?.let { want ->
-                val before = set.present()
+            // Idempotence, COUNTED rather than gated. `assertEquals(0, want)`
+            // compared the fixture against a literal in the runner, so the count
+            // itself never met an observation (#lzconsumednotasserted). An op
+            // counts as applied when re-delivering it moves the replica's only
+            // observable — `present()`.
+            e.assertInt("redeliver_applied_count") {
+                var reapplied = 0
                 for (op in addOps) {
+                    val before = set.present()
                     when (op["op"]!!.jsonPrimitive.content) {
                         "add" -> set.add(op["tag"]!!.jsonPrimitive.content)
                         "remove" -> set.removeObserved(op["observed_tags"]!!.jsonArray.map { it.jsonPrimitive.content })
                     }
+                    if (set.present() != before) reapplied++
                 }
-                assertEquals(0, want, "only a 0 redeliver_applied_count is meaningful for a state-based set")
-                assertEquals(before, set.present(), "redeliver_applied_count=0 means state is unchanged")
+                reapplied
             }
             // Why the remove loses: it never observed tag `t3`. Asserted against
             // the op stream so the prose and the fixture cannot drift apart.
-            e.string("reason")?.let { reason ->
+            e.assertKeyWith("reason") { el ->
+                val reason = el.jsonPrimitive.content
                 val tag = Regex("add_tag_(\\w+?)_not_observed_by_remove").find(reason)
                     ?.groupValues?.get(1)
                     ?: error("unsupported reason spelling '$reason'")
@@ -470,13 +463,12 @@ class ReliableSyncConformanceTest {
         }
         val reg = replayLww(ops)
         lww["expect"]!!.jsonObject.consuming("liveness_orset_lww.json[lww_alive] expect") { e ->
-            e.boolean("value")?.let { assertEquals(it, reg.value, "value") }
-            e.boolean("order_independent")?.let {
-                assertEquals(it, replayLww(ops.reversed()).value == reg.value, "order_independent")
-            }
+            e.assertBoolean("value") { reg.value }
+            e.assertBoolean("order_independent") { replayLww(ops.reversed()).value == reg.value }
             // The rule, not just its outcome: the winner must be the op with the
             // greatest stamp, which a register resolving by arrival order fails.
-            e.string("resolution")?.let { rule ->
+            e.assertKeyWith("resolution") { el ->
+                val rule = el.jsonPrimitive.content
                 assertEquals("max_stamp", rule, "unsupported resolution rule '$rule'")
                 val winner = ops.maxWithOrNull(
                     compareBy<JsonObject>(
@@ -508,15 +500,17 @@ class ReliableSyncConformanceTest {
         alive[pid]!!.set(stamp(op["stamp"]!!.jsonObject), op.bool("value"))
         val liveAfter = liveDocs()
         death["expect"]!!.jsonObject.consuming("liveness_orset_lww.json[death_cascades] expect") { e ->
-            e.strings("live_docs_after")?.let { assertEquals(it.sorted(), liveAfter, "live_docs_after") }
+            e.assertKeyWith("live_docs_after") { want ->
+                assertEquals(want.jsonArray.map { it.jsonPrimitive.content }.sorted(), liveAfter, "live_docs_after")
+            }
             // The "before" half. Without it the fixture never establishes that
             // the docs it claims to lose were live in the first place, so a
             // binding deriving an empty aggregate satisfies `live_docs_after`
             // for the wrong reason.
-            e.strings("live_docs_before")?.let { assertEquals(it.sorted(), liveBefore, "live_docs_before") }
-            e.boolean("cascade")?.let {
-                assertEquals(it, liveAfter.size < liveBefore.size, "cascade")
+            e.assertKeyWith("live_docs_before") { want ->
+                assertEquals(want.jsonArray.map { it.jsonPrimitive.content }.sorted(), liveBefore, "live_docs_before")
             }
+            e.assertBoolean("cascade") { liveAfter.size < liveBefore.size }
         }
 
         // derived_live_doc_aggregate_converges_under_retry — replayed here for
@@ -551,19 +545,30 @@ class ReliableSyncConformanceTest {
         }
         val forward = aggregate(aggOps)
         agg["expect"]!!.jsonObject.consuming("liveness_orset_lww.json[aggregate] expect") { e ->
-            e.strings("converged_live_docs")?.let { assertEquals(it.sorted(), forward, "converged_live_docs") }
-            e.boolean("order_independent")?.let {
-                assertEquals(it, aggregate(aggOps.reversed()) == forward, "order_independent")
+            e.assertKeyWith("converged_live_docs") { want ->
+                assertEquals(
+                    want.jsonArray.map { it.jsonPrimitive.content }.sorted(),
+                    forward,
+                    "converged_live_docs",
+                )
             }
-            e.int("redeliver_applied_count")?.let { want ->
-                assertEquals(0, want, "only a 0 redeliver_applied_count is meaningful for a state-based join")
-                assertEquals(forward, aggregate(aggOps + aggOps), "redelivery must not change the aggregate")
+            e.assertBoolean("order_independent") { aggregate(aggOps.reversed()) == forward }
+            // Counted, not gated against a literal: an op counts as applied when
+            // re-delivering it moves the derived aggregate (#lzconsumednotasserted).
+            e.assertInt("redeliver_applied_count") {
+                var reapplied = 0
+                for (k in 1..aggOps.size) {
+                    if (aggregate(aggOps + aggOps.take(k)) != aggregate(aggOps + aggOps.take(k - 1))) {
+                        reapplied++
+                    }
+                }
+                reapplied
             }
             // Each doc's liveness derives only from its own OR-set and its own
             // owner's register: dropping docB's op must not move docA.
-            e.boolean("per_doc_isolation")?.let { want ->
+            e.assertBoolean("per_doc_isolation") {
                 val withoutB = aggregate(aggOps.filterNot { it["key"]!!.jsonPrimitive.content.startsWith("docB/") })
-                assertEquals(want, forward.filter { it != "docB" } == withoutB, "per_doc_isolation")
+                forward.filter { it != "docB" } == withoutB
             }
         }
     }

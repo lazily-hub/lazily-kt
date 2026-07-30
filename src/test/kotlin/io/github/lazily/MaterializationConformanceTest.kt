@@ -3,6 +3,7 @@ package io.github.lazily
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
@@ -57,17 +58,39 @@ class MaterializationConformanceTest {
     private fun strArray(obj: JsonObject, key: String): List<String> =
         obj.getValue(key).jsonArray.map { it.jsonPrimitive.content }
 
+    private fun strings(el: JsonElement): List<String> =
+        el.jsonArray.map { it.jsonPrimitive.content }
+
     /** Parse a `spec.val` object of key -> canonical value. */
     private fun valSpec(fixture: JsonObject): Map<String, Int> =
         fixture.getValue("spec").jsonObject.getValue("val").jsonObject
             .mapValues { (_, v) -> v.jsonPrimitive.int }
+
+    /**
+     * The one `expected` key with nothing in lazily-kt to compare against.
+     *
+     * `assertEquals("eager", ...default_mode)` compared the fixture to a literal
+     * in the runner, so the binding never entered the comparison and the arm
+     * asserted nothing (#lzconsumednotasserted). lazily-kt exposes no
+     * default-mode selector to assert instead: both builds are explicit calls
+     * (`materializeAll` vs `getOrInsertWith`), so the key names which of them the
+     * corpus calls the default rather than a value the binding can report. It is
+     * declared as an excuse, and the two builds it names are asserted by
+     * `eager_present` / `lazy_present_after_reads` below.
+     */
+    private fun excuseDefaultMode(a: AssertionKeys) {
+        a.excuseKey(
+            "default_mode",
+            "lazily-kt exposes no default-mode selector — both builds are explicit calls; " +
+                "eager_present / lazy_present_after_reads assert the two strategies themselves",
+        )
+    }
 
     @Test
     fun observationalTransparency() {
         val fixture = loadFixture("observational_transparency.json")
         val vals = valSpec(fixture)
         val expected = fixture.getValue("expected").jsonObject
-        assertEquals("eager", expected.getValue("default_mode").jsonPrimitive.content, "default is eager")
 
         val ctx = Context()
         val lookup: (String) -> Int = { vals.getValue(it) }
@@ -77,23 +100,32 @@ class MaterializationConformanceTest {
         eager.materializeAll(ctx, vals.keys) { lookup(it) }
         assertEquals(EntryKind.Computed, eager.entryKind)
         assertEquals(vals.size, eager.presentCount)
-        assertEquals(strArray(expected, "eager_present").toSet(), eager.presentKeys().toSet())
 
         // lazy: empty at build.
         val lazy = ComputedMap<String, Int>()
         assertEquals(0, lazy.presentCount)
 
-        // observe_canonical / eager_lazy_observationally_equivalent.
-        for ((k, want) in expected.getValue("observe").jsonObject) {
-            assertEquals(want.jsonPrimitive.int, eager.get(ctx, k), "eager observe $k")
-            assertEquals(want.jsonPrimitive.int, lazy.getOrInsertWith(ctx, k) { lookup(it) }, "lazy observe $k")
-        }
-
         // Fresh lazy replay of the read sequence -> present set is exactly the reads.
         val ctx2 = Context()
         val lazy2 = ComputedMap<String, Int>()
         for (k in strArray(fixture, "reads")) lazy2.getOrInsertWith(ctx2, k) { lookup(it) }
-        assertEquals(strArray(expected, "lazy_present_after_reads").toSet(), lazy2.presentKeys().toSet())
+
+        expected.consuming("materialization/observational_transparency.json expected") { a ->
+            excuseDefaultMode(a)
+            a.assertKeyWith("eager_present") { want ->
+                assertEquals(strings(want).toSet(), eager.presentKeys().toSet(), "eager_present")
+            }
+            // observe_canonical / eager_lazy_observationally_equivalent.
+            a.assertKeyWith("observe") { want ->
+                for ((k, v) in want.jsonObject) {
+                    assertEquals(v.jsonPrimitive.int, eager.get(ctx, k), "eager observe $k")
+                    assertEquals(v.jsonPrimitive.int, lazy.getOrInsertWith(ctx, k) { lookup(it) }, "lazy observe $k")
+                }
+            }
+            a.assertKeyWith("lazy_present_after_reads") { want ->
+                assertEquals(strings(want).toSet(), lazy2.presentKeys().toSet(), "lazy_present_after_reads")
+            }
+        }
     }
 
     @Test
@@ -107,18 +139,50 @@ class MaterializationConformanceTest {
         val lazy = ComputedMap<String, Int>()
 
         // present_after_each_read: monotone, unchanged by a re-read.
-        val wantSizes = expected.getValue("present_after_each_read").jsonArray.map { it.jsonPrimitive.int }
         val gotSizes = mutableListOf<Int>()
         for (k in strArray(fixture, "reads")) {
             lazy.getOrInsertWith(ctx, k) { lookup(it) }
             gotSizes.add(lazy.presentCount)
         }
-        assertEquals(wantSizes, gotSizes, "cumulative present-set sizes")
-
         val lazyPresent = lazy.presentKeys().toSet()
-        assertEquals(strArray(expected, "lazy_present_after_reads").toSet(), lazyPresent)
-        val eagerPresent = strArray(expected, "eager_present").toSet()
-        assertTrue(eagerPresent.containsAll(lazyPresent), "lazy present set must be a subset of eager present set")
+
+        // The eager build this fixture's `eager_present` describes, replayed so
+        // the key meets an observation instead of only bounding `lazyPresent`.
+        val eagerCtx = Context()
+        val eager = ComputedMap<String, Int>()
+        eager.materializeAll(eagerCtx, vals.keys) { lookup(it) }
+
+        expected.consuming("materialization/deferral_not_deallocation.json expected") { a ->
+            excuseDefaultMode(a)
+            a.assertKeyWith("present_after_each_read") { want ->
+                assertEquals(
+                    want.jsonArray.map { it.jsonPrimitive.int },
+                    gotSizes,
+                    "cumulative present-set sizes",
+                )
+            }
+            a.assertKeyWith("lazy_present_after_reads") { want ->
+                assertEquals(strings(want).toSet(), lazyPresent, "lazy_present_after_reads")
+            }
+            // `eager_present` was only ever used as an upper bound on the lazy
+            // set, so the eager build itself never entered the comparison.
+            a.assertKeyWith("eager_present") { want ->
+                val eagerPresent = strings(want).toSet()
+                assertEquals(eagerPresent, eager.presentKeys().toSet(), "eager_present")
+                assertTrue(
+                    eagerPresent.containsAll(lazyPresent),
+                    "lazy present set must be a subset of eager present set",
+                )
+            }
+            // Deferral is not deallocation: every key observes the same value
+            // through the lazy map as through the eager one.
+            a.assertKeyWith("observe") { want ->
+                for ((k, v) in want.jsonObject) {
+                    assertEquals(v.jsonPrimitive.int, eager.get(eagerCtx, k), "eager observe $k")
+                    assertEquals(v.jsonPrimitive.int, lazy.getOrInsertWith(ctx, k) { lookup(it) }, "lazy observe $k")
+                }
+            }
+        }
     }
 
     @Test
@@ -147,7 +211,6 @@ class MaterializationConformanceTest {
     private fun replayEntryKindFixture(rewriteKindTag: (String) -> String) {
         val fixture = loadFixture("entry_kind_orthogonal_to_mode.json")
         val expected = fixture.getValue("expected").jsonObject
-        assertEquals("eager", expected.getValue("default_mode").jsonPrimitive.content)
 
         // Split declared entries by kind. A single ReactiveMap fixes one handle
         // kind, so a mixed-kind fixture is modelled by a SourceMap over the cell
@@ -183,7 +246,6 @@ class MaterializationConformanceTest {
         assertEquals(EntryKind.Source, eagerCells.entryKind)
         assertEquals(EntryKind.Computed, eagerSlots.entryKind)
         val eagerPresent = (eagerCells.presentKeys() + eagerSlots.presentKeys()).toSet()
-        assertEquals(strArray(expected, "eager_present").toSet(), eagerPresent)
 
         // Lazy build: cells present at build (always materialized), slots deferred.
         val lazyCtx = Context()
@@ -191,24 +253,35 @@ class MaterializationConformanceTest {
         for (k in cellKeys) lazyCells.insert(k, lookup(k))
         val lazySlots = ComputedMap<String, Int>()
         assertTrue(lazySlots.presentKeys().isEmpty(), "slots deferred at build")
-        assertEquals(strArray(expected, "lazy_present_at_build").toSet(), lazyCells.presentKeys().toSet())
+        val lazyAtBuild = lazyCells.presentKeys().toSet()
 
         // Reads (slot pulls) grow only the slot present set.
         for (k in strArray(fixture, "reads")) {
             if (k in slotKeys) lazySlots.getOrInsertWith(lazyCtx, k) { lookup(it) }
         }
         val lazyAfter = (lazyCells.presentKeys() + lazySlots.presentKeys()).toSet()
-        assertEquals(strArray(expected, "lazy_present_after_reads").toSet(), lazyAfter)
 
-        // Observational transparency across kinds.
-        for ((k, want) in expected.getValue("observe").jsonObject) {
-            val w = want.jsonPrimitive.int
-            if (k in cellKeys) {
-                assertEquals(w, eagerCells.get(k), "eager cell observe $k")
-                assertEquals(w, lazyCells.get(k), "lazy cell observe $k")
-            } else {
-                assertEquals(w, eagerSlots.get(ctx, k), "eager slot observe $k")
-                assertEquals(w, lazySlots.getOrInsertWith(lazyCtx, k) { lookup(it) }, "lazy slot observe $k")
+        expected.consuming("materialization/entry_kind_orthogonal_to_mode.json expected") { a ->
+            excuseDefaultMode(a)
+            a.assertKeyWith("eager_present") { assertEquals(strings(it).toSet(), eagerPresent, "eager_present") }
+            a.assertKeyWith("lazy_present_at_build") {
+                assertEquals(strings(it).toSet(), lazyAtBuild, "lazy_present_at_build")
+            }
+            a.assertKeyWith("lazy_present_after_reads") {
+                assertEquals(strings(it).toSet(), lazyAfter, "lazy_present_after_reads")
+            }
+            // Observational transparency across kinds.
+            a.assertKeyWith("observe") { want ->
+                for ((k, v) in want.jsonObject) {
+                    val w = v.jsonPrimitive.int
+                    if (k in cellKeys) {
+                        assertEquals(w, eagerCells.get(k), "eager cell observe $k")
+                        assertEquals(w, lazyCells.get(k), "lazy cell observe $k")
+                    } else {
+                        assertEquals(w, eagerSlots.get(ctx, k), "eager slot observe $k")
+                        assertEquals(w, lazySlots.getOrInsertWith(lazyCtx, k) { lookup(it) }, "lazy slot observe $k")
+                    }
+                }
             }
         }
     }

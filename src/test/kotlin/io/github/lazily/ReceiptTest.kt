@@ -6,6 +6,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -124,19 +125,41 @@ class ReceiptTest {
                     ?: error("current_generation is required")
                 receipts.forEach { projection.observe(currentGeneration, it) }
 
-                a.int("receipt_count")?.let { assertEquals(it, receipts.size, "receipt_count") }
+                a.assertInt("receipt_count") { receipts.size }
+                // `current_generation` seeded the replay and was then discarded —
+                // the fixture could name any generation and the run behaved the
+                // same way (#lzconsumednotasserted). Its content is the split it
+                // induces: a receipt stamped with it is recorded, one stamped with
+                // anything else is stale.
+                a.assertKeyWith("current_generation") { want ->
+                    val gen = want.jsonPrimitive.long
+                    assertEquals(
+                        receipts.filter { it.generation != gen }.map { it.receiptId },
+                        projection.staleReceiptIds(),
+                        "current_generation: receipts off this generation are exactly the stale ones",
+                    )
+                }
+                // `causation_id` selected the projection lookup below and was
+                // otherwise unchecked: it is also a claim about the batch, namely
+                // that every receipt in it causes the same patch.
                 val causationId = a.string("causation_id") ?: error("causation_id is required")
-                a.string("terminal_outcome")?.let {
-                    assertEquals(it, projection.terminalFor(causationId)?.outcome?.wireName, "terminal_outcome")
+                a.assertKeyWith("causation_id") { want ->
+                    assertEquals(
+                        listOf(want.jsonPrimitive.content),
+                        receipts.map { it.causationId }.distinct(),
+                        "causation_id",
+                    )
                 }
-                a.strings("stale_receipt_ids")?.let {
-                    assertEquals(it, projection.staleReceiptIds(), "stale_receipt_ids")
+                a.assertString("terminal_outcome") {
+                    projection.terminalFor(causationId)?.outcome?.wireName
                 }
+                a.assertStrings("stale_receipt_ids") { projection.staleReceiptIds() }
                 // The non-terminal half of the outcome lattice. Carried by the
                 // fixture and read by nothing until #lzassertunknownkeys: a
                 // binding that classified `accepted` as terminal would satisfy
                 // every other key here and still be wrong.
-                a.strings("nonterminal_outcomes")?.let { want ->
+                a.assertKeyWith("nonterminal_outcomes") { el ->
+                    val want = el.jsonArray.map { it.jsonPrimitive.content }
                     val got = receipts
                         .filterNot { it.outcome.isTerminal }
                         .map { it.outcome.wireName }

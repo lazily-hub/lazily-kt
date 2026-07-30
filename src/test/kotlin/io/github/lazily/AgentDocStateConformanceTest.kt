@@ -5,12 +5,10 @@ import java.nio.file.Path
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.long
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -89,27 +87,27 @@ class AgentDocStateConformanceTest {
         fixture.getValue("assertions").jsonObject
             .consuming("agent-doc/snapshot_agent_doc_state.json assertions") { assertions ->
         // Structural assertions.
-        assertions.long("epoch")?.let { assertEquals(it, snapshot.epoch, "epoch") }
-        assertions.long("node_count")?.let { assertEquals(it, snapshot.nodes.size.toLong(), "node_count") }
-        assertions.long("edge_count")?.let { assertEquals(it, snapshot.edges.size.toLong(), "edge_count") }
-        assertions.long("root_count")?.let { assertEquals(it, snapshot.roots.size.toLong(), "root_count") }
+        assertions.assertLong("epoch") { snapshot.epoch }
+        assertions.assertLong("node_count") { snapshot.nodes.size.toLong() }
+        assertions.assertLong("edge_count") { snapshot.edges.size.toLong() }
+        assertions.assertLong("root_count") { snapshot.roots.size.toLong() }
 
         // type_tag vocabulary: the snapshot's tags match the asserted list and every tag is in the vocabulary.
-        val expectedTags = (assertions.strings("type_tags") ?: emptyList()).toSet()
         val actualTags = snapshot.nodes.map { it.typeTag }.toSet()
-        assertEquals(expectedTags, actualTags, "type_tags")
-        assertions.boolean("all_type_tags_in_vocabulary")?.let {
-            assertEquals(it, actualTags.all { tag -> tag in vocab }, "all_type_tags_in_vocabulary")
+        assertions.assertKeyWith("type_tags") { want ->
+            assertEquals(want.jsonArray.map { it.jsonPrimitive.content }.toSet(), actualTags, "type_tags")
         }
+        assertions.assertBoolean("all_type_tags_in_vocabulary") { actualTags.all { tag -> tag in vocab } }
 
         // Decoded payload phases: closeout.cycle and queue.head carry a `phase`.
-        val cycle = snapshot.nodes.single { it.typeTag == "agent_doc.closeout.cycle" }
-        val cyclePhase = payloadPhase(decodePayloadObject((cycle.state as NodeState.Payload).bytes))
-        assertions.string("cycle_phase")?.let { assertEquals(it, cyclePhase, "cycle_phase") }
-
-        val queueHead = snapshot.nodes.single { it.typeTag == "agent_doc.queue.head" }
-        val queuePhase = payloadPhase(decodePayloadObject((queueHead.state as NodeState.Payload).bytes))
-        assertions.string("queue_head_phase")?.let { assertEquals(it, queuePhase, "queue_head_phase") }
+        assertions.assertString("cycle_phase") {
+            val cycle = snapshot.nodes.single { it.typeTag == "agent_doc.closeout.cycle" }
+            payloadPhase(decodePayloadObject((cycle.state as NodeState.Payload).bytes))
+        }
+        assertions.assertString("queue_head_phase") {
+            val queueHead = snapshot.nodes.single { it.typeTag == "agent_doc.queue.head" }
+            payloadPhase(decodePayloadObject((queueHead.state as NodeState.Payload).bytes))
+        }
         }
 
         assertRoundTripJson(message, fixture)
@@ -128,38 +126,40 @@ class AgentDocStateConformanceTest {
         fixture.getValue("assertions").jsonObject
             .consuming("agent-doc/delta_agent_doc_state.json assertions") { assertions ->
         // Structural assertions.
-        assertions.long("base_epoch")?.let { assertEquals(it, delta.baseEpoch, "base_epoch") }
-        assertions.long("epoch")?.let { assertEquals(it, delta.epoch, "epoch") }
-        assertions.long("op_count")?.let { assertEquals(it, delta.ops.size.toLong(), "op_count") }
+        assertions.assertLong("base_epoch") { delta.baseEpoch }
+        assertions.assertLong("epoch") { delta.epoch }
+        assertions.assertLong("op_count") { delta.ops.size.toLong() }
 
         // added_type_tags: every NodeAdd in the delta introduces a vocabulary tag.
         val addedTags = delta.ops
             .filterIsInstance<DeltaOp.NodeAdd>()
             .map { it.typeTag }
             .toSet()
-        val expectedAdded = (assertions.strings("added_type_tags") ?: emptyList()).toSet()
-        assertEquals(expectedAdded, addedTags, "added_type_tags")
-        assertions.boolean("all_type_tags_in_vocabulary")?.let {
+        assertions.assertKeyWith("added_type_tags") { want ->
+            assertEquals(want.jsonArray.map { it.jsonPrimitive.content }.toSet(), addedTags, "added_type_tags")
+        }
+        assertions.assertBoolean("all_type_tags_in_vocabulary") {
             val allTags = addedTags + delta.ops.filterIsInstance<DeltaOp.NodeAdd>().map { it.typeTag }
-            assertEquals(it, allTags.all { tag -> tag in vocab }, "all_type_tags_in_vocabulary")
+            allTags.all { tag -> tag in vocab }
         }
 
         // Decoded payload phases after applying the delta's CellSet ops.
-        val cycleAfter = delta.ops
-            .filterIsInstance<DeltaOp.CellSet>()
-            .single { it.node == 102L }
-            .let { payloadPhase(decodePayloadObject((it.payload as IpcValue.Inline).bytes)) }
-        assertions.string("cycle_phase_after")?.let { assertEquals(it, cycleAfter, "cycle_phase_after") }
-
-        val queueAfter = delta.ops
-            .filterIsInstance<DeltaOp.CellSet>()
-            .single { it.node == 103L }
-            .let { payloadPhase(decodePayloadObject((it.payload as IpcValue.Inline).bytes)) }
-        assertions.string("queue_head_phase_after")?.let { assertEquals(it, queueAfter, "queue_head_phase_after") }
+        assertions.assertString("cycle_phase_after") {
+            delta.ops
+                .filterIsInstance<DeltaOp.CellSet>()
+                .single { it.node == 102L }
+                .let { payloadPhase(decodePayloadObject((it.payload as IpcValue.Inline).bytes)) }
+        }
+        assertions.assertString("queue_head_phase_after") {
+            delta.ops
+                .filterIsInstance<DeltaOp.CellSet>()
+                .single { it.node == 103L }
+                .let { payloadPhase(decodePayloadObject((it.payload as IpcValue.Inline).bytes)) }
+        }
 
         // The delta applies on top of the snapshot's epoch (base_epoch 3 → epoch 6, a coalesced jump).
         assertTrue(delta.epoch > delta.baseEpoch)
-        assertFalse(delta.isNextAfter(assertions.long("base_epoch") ?: delta.baseEpoch))
+        assertFalse(delta.isNextAfter(delta.baseEpoch))
         }
 
         assertRoundTripJson(message, fixture)

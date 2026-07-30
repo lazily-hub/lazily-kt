@@ -1013,7 +1013,17 @@ class ReactiveGraphConformanceTest {
                     // other op (the signal fixtures assert it on `signal`) it
                     // means the value of the node the op names, so it is read
                     // here — after `computes_of`, which sorts first.
-                    "value" -> if (expect["error"] == null) {
+                    // Paired with a NON-NULL `error` the value would be read here
+                    // and then dropped — the read-then-discard shape. No fixture
+                    // in the corpus pairs them, so refuse the combination rather
+                    // than skip it silently (#lzconsumednotasserted).
+                    "value" -> {
+                        val wantsError = expect["error"].let { it != null && it !is JsonNull }
+                        check(!wantsError) {
+                            "$fixture#$i: `value` alongside a non-null `error` would be read and " +
+                                "never compared. Either the error is authoritative and `value` " +
+                                "does not belong on this step, or the runner must assert both."
+                        }
                         val got = opValue
                             ?: readOrError(model, op["id"]!!.jsonPrimitive.content)
                         check("value", got, want)
@@ -1054,39 +1064,56 @@ class ReactiveGraphConformanceTest {
         // A tail key the corpus adds would have been invisible here while the
         // fixture still reported as replayed (#lzassertunknownkeys).
         tail.consuming("$fixture expected tail") { t ->
-            t.obj("final_state")?.consuming("$fixture expected.final_state") { fin ->
-                fin.obj("dependents_of")?.let { m ->
-                    for (id in m.keys.sorted()) {
-                        val got = model.dependentsOf(id)
-                        check("final.dependents_of.$id", got, m[id])
-                        report.observation.degrees[id] = got
+            t.assertKeyWith("final_state") { finalState ->
+                finalState.jsonObject.consuming("$fixture expected.final_state") { fin ->
+                    fin.assertKeyWith("dependents_of") { want ->
+                        val m = want.jsonObject
+                        for (id in m.keys.sorted()) {
+                            val got = model.dependentsOf(id)
+                            check("final.dependents_of.$id", got, m[id])
+                            report.observation.degrees[id] = got
+                        }
                     }
-                }
-                fin.obj("readable")?.let { m ->
-                    for (id in m.keys.sorted()) {
-                        val ok = alive(model, id)
-                        check("final.readable.$id", ok, m[id])
-                        report.observation.readable[id] = ok
+                    fin.assertKeyWith("readable") { want ->
+                        val m = want.jsonObject
+                        for (id in m.keys.sorted()) {
+                            val ok = alive(model, id)
+                            check("final.readable.$id", ok, m[id])
+                            report.observation.readable[id] = ok
+                        }
                     }
-                }
-                fin.obj("read")?.let { m ->
-                    for (id in m.keys.sorted()) {
-                        val got = readOrError(model, id)
-                        check("final.read.$id", got, m[id])
-                        report.observation.reads[id] = got
+                    fin.assertKeyWith("read") { want ->
+                        val m = want.jsonObject
+                        for (id in m.keys.sorted()) {
+                            val got = readOrError(model, id)
+                            check("final.read.$id", got, m[id])
+                            report.observation.reads[id] = got
+                        }
                     }
                 }
             }
 
-            // Consumed by `runCorpus`, which needs every scenario's report before
-            // it can compare two worlds — not evaluable from inside one replay.
-            t.consume("observationally_equal")
+            // Not evaluable from inside one replay: `observationally_equal` is a
+            // claim about two independent worlds, and `runCorpus` compares their
+            // reports after both have run. Declared as an excuse rather than a
+            // bare consume so the reason is on the record (#lzconsumednotasserted).
+            if (t.has("observationally_equal")) {
+                t.excuseKey(
+                    "observationally_equal",
+                    "a relation between two scenarios' reports; asserted in runCorpus after " +
+                        "every scenario has replayed, which is outside this single replay",
+                )
+            }
 
-            val publish = t.obj("after_publish")
-            if (publish != null) {
-                publish.consuming("$fixture expected.after_publish") { p ->
+            t.assertKeyWith("after_publish") { publishEl ->
+                publishEl.jsonObject.consuming("$fixture expected.after_publish") { p ->
                     val publishOp = p.obj("op")
                     if (publishOp != null) {
+                        p.excuseKey(
+                            "op",
+                            "the write this block replays, not an observable — every key below " +
+                                "asserts its effect",
+                        )
                         val before = model.runLog.size
                         model.set(
                             publishOp["id"]!!.jsonPrimitive.content,
@@ -1095,28 +1122,43 @@ class ReactiveGraphConformanceTest {
                         model.settle()
                         report.observation.afterPublishObserved =
                             model.runLog.toList().subList(before, model.runLog.size)
-                        checkList(
-                            "after_publish.observed_by",
-                            report.observation.afterPublishObserved,
-                            strs(p["observed_by"]),
-                        )
+                        p.assertKeyWith("observed_by") { want ->
+                            checkList(
+                                "after_publish.observed_by",
+                                report.observation.afterPublishObserved,
+                                strs(want),
+                            )
+                        }
                         // Order matches the reference runner: reads (which re-register
                         // edges in a lazy binding) precede the degree assertions that
                         // count them.
-                        p.obj("read")?.let { m ->
+                        p.assertKeyWith("read") { want ->
+                            val m = want.jsonObject
                             for (id in m.keys.sorted()) {
                                 val got = readOrError(model, id)
                                 check("after_publish.read.$id", got, m[id])
                                 report.observation.afterPublishReads[id] = got
                             }
                         }
-                        p.obj("dependents_of")?.let { m ->
+                        p.assertKeyWith("dependents_of") { want ->
+                            val m = want.jsonObject
                             for (id in m.keys.sorted()) {
                                 check("after_publish.dependents_of.$id", model.dependentsOf(id), m[id])
                             }
                         }
                     } else {
-                        p.consume("observed_by", "read", "dependents_of")
+                        // No `op` means there is no publish to make, so nothing in
+                        // this block has an observation to compare against. Said out
+                        // loud per key instead of a silent `consume`.
+                        for (key in listOf("observed_by", "read", "dependents_of")) {
+                            if (p.has(key)) {
+                                p.excuseKey(
+                                    key,
+                                    "`after_publish` carries no `op`, so this replay never " +
+                                        "performs the publish these keys describe",
+                                )
+                            }
+                        }
                     }
                 }
             }

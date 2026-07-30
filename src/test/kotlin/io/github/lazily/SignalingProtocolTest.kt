@@ -62,60 +62,55 @@ class SignalingProtocolTest {
 
     /** Evaluate one signaling frame's `assertions` block against the decoded message. */
     private fun assertFrameAssertions(label: String, decoded: Any, a: AssertionKeys) {
-        a.long("peer")?.let { want ->
-            val got = when (decoded) {
+        a.assertLong("peer") {
+            when (decoded) {
                 is ClientMessage.Join -> decoded.peer
                 is ServerMessage.Welcome -> decoded.peer
                 is ServerMessage.PeerJoined -> decoded.peer
                 is ServerMessage.PeerLeft -> decoded.peer
                 else -> error("$label: `peer` asserted on a frame that carries none")
             }
-            assertEquals(want, got, "$label: peer")
         }
-        a.long("to")?.let { want ->
-            val got = when (decoded) {
+        a.assertLong("to") {
+            when (decoded) {
                 is ClientMessage.Offer -> decoded.to
                 is ClientMessage.Answer -> decoded.to
                 is ClientMessage.Ice -> decoded.to
                 is ClientMessage.Relay -> decoded.to
                 else -> error("$label: `to` asserted on a frame that carries none")
             }
-            assertEquals(want, got, "$label: to")
         }
-        a.long("from")?.let { want ->
-            assertEquals(want, serverFrom(label, decoded), "$label: from")
-        }
+        a.assertLong("from") { serverFrom(label, decoded) }
         // The anti-spoof invariant, stated per frame: a server->client forward
         // identifies its sender with a `from` the server stamped, and carries no
         // client-supplied `to` that could be used to impersonate a target.
-        a.boolean("server_stamped_from")?.let { want ->
-            val stamped = runCatching { serverFrom(label, decoded) }.isSuccess
-            assertEquals(want, stamped, "$label: server_stamped_from")
+        a.assertBoolean("server_stamped_from") {
+            runCatching { serverFrom(label, decoded) }.isSuccess
         }
-        a.boolean("has_capabilities")?.let { want ->
+        a.assertBoolean("has_capabilities") {
             val join = decoded as? ClientMessage.Join
                 ?: error("$label: `has_capabilities` asserted on a non-join frame")
-            assertEquals(want, join.capabilities != null, "$label: has_capabilities")
+            join.capabilities != null
         }
-        a.strings("capabilities")?.let { want ->
+        a.assertKeyWith("capabilities") { want ->
             val join = decoded as? ClientMessage.Join
                 ?: error("$label: `capabilities` asserted on a non-join frame")
-            assertEquals(want, join.capabilities, "$label: capabilities")
+            assertEquals(want.jsonArray.map { it.jsonPrimitive.content }, join.capabilities, "$label: capabilities")
         }
-        a.array("peers")?.let { want ->
+        a.assertKeyWith("peers") { want ->
             val welcome = decoded as? ServerMessage.Welcome
                 ?: error("$label: `peers` asserted on a non-welcome frame")
-            assertEquals(want.map { it.jsonPrimitive.long }, welcome.peers, "$label: peers")
+            assertEquals(want.jsonArray.map { it.jsonPrimitive.long }, welcome.peers, "$label: peers")
         }
-        a.boolean("roster_excludes_self")?.let { want ->
+        a.assertBoolean("roster_excludes_self") {
             val welcome = decoded as? ServerMessage.Welcome
                 ?: error("$label: `roster_excludes_self` asserted on a non-welcome frame")
-            assertEquals(want, welcome.peer !in welcome.peers, "$label: roster_excludes_self")
+            welcome.peer !in welcome.peers
         }
-        a.string("code")?.let { want ->
+        a.assertString("code") {
             val err = decoded as? ServerMessage.Error
                 ?: error("$label: `code` asserted on a non-error frame")
-            assertEquals(want, err.code, "$label: code")
+            err.code
         }
     }
 
@@ -216,32 +211,20 @@ class SignalingProtocolTest {
         // emissions is what turns the fixture's contract into a check.
         fixture.getValue("assertions").jsonObject
             .consuming("signaling/anti_spoof_session.json assertions") { a ->
-                a.boolean("roster_excludes_self")?.let { want ->
+                a.assertBoolean("roster_excludes_self") {
                     assertTrue(welcomes.isNotEmpty(), "roster_excludes_self: no welcome emitted")
-                    assertEquals(
-                        want,
-                        welcomes.all { it.peer !in it.peers },
-                        "roster_excludes_self",
-                    )
+                    welcomes.all { it.peer !in it.peers }
                 }
-                a.boolean("roster_sorted_ascending")?.let { want ->
+                a.assertBoolean("roster_sorted_ascending") {
                     assertTrue(welcomes.isNotEmpty(), "roster_sorted_ascending: no welcome emitted")
-                    assertEquals(
-                        want,
-                        welcomes.all { it.peers == it.peers.sorted() },
-                        "roster_sorted_ascending",
-                    )
+                    welcomes.all { it.peers == it.peers.sorted() }
                 }
-                a.boolean("forwarded_from_is_server_registered")?.let { want ->
+                a.assertBoolean("forwarded_from_is_server_registered") {
                     assertTrue(
                         forwardedFrom.isNotEmpty(),
                         "forwarded_from_is_server_registered: nothing was forwarded",
                     )
-                    assertEquals(
-                        want,
-                        forwardedFrom.all { it in registered },
-                        "forwarded_from_is_server_registered",
-                    )
+                    forwardedFrom.all { it in registered }
                 }
             }
     }

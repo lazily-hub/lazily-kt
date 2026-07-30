@@ -131,15 +131,9 @@ class CrdtTreeAndOutboxStoreTest {
         // by nothing, so the fixture could rename or flip a claim and this replay
         // would keep reporting green (#lzassertunknownkeys).
         mergeScenario["expect"]!!.jsonObject.consuming("crdt-tree/algebra.json[merge] expect") { e ->
-            e.boolean("texts_equal")?.let { want ->
-                assertEquals(want, folds.drop(1).all { it.value() == folds.first().value() }, "texts_equal")
-            }
-            e.boolean("version_vectors_equal")?.let { want ->
-                assertEquals(
-                    want,
-                    folds.drop(1).all { it.versionVector() == folds.first().versionVector() },
-                    "version_vectors_equal",
-                )
+            e.assertBoolean("texts_equal") { folds.drop(1).all { it.value() == folds.first().value() } }
+            e.assertBoolean("version_vectors_equal") {
+                folds.drop(1).all { it.versionVector() == folds.first().versionVector() }
             }
         }
         for (folded in folds.drop(1)) {
@@ -164,19 +158,17 @@ class CrdtTreeAndOutboxStoreTest {
         canonical.applyDelta(restored.deltaSince(canonical.versionVector()))
         restored.applyDelta(canonical.deltaSince(restored.versionVector()))
         snapshotScenario["expect"]!!.jsonObject.consuming("crdt-tree/algebra.json[snapshot] expect") { e ->
-            e.boolean("restored_text_equal")?.let {
-                assertEquals(it, restoredText == snapshotSeed["text"]!!.jsonPrimitive.content, "restored_text_equal")
+            e.assertBoolean("restored_text_equal") {
+                restoredText == snapshotSeed["text"]!!.jsonPrimitive.content
             }
             // Restoring from a snapshot must preserve operation IDENTITY, not
             // merely the rendered text: a restore that re-minted ids would round
             // -trip the same string and then duplicate on the next merge.
-            e.boolean("op_ids_equal")?.let {
-                assertEquals(it, restoredOps == snapshot, "op_ids_equal")
-            }
+            e.assertBoolean("op_ids_equal") { restoredOps == snapshot }
             // ... which is exactly what this counts: the later merge must add no
             // duplicated seed characters.
-            e.int("later_merge_duplicates")?.let {
-                assertEquals(it, duplicates, "later_merge_duplicates")
+            e.assertInt("later_merge_duplicates") { duplicates }
+            if (e.has("later_merge_duplicates")) {
                 assertEquals(canonical.value(), restored.value(), "later merge must converge")
                 assertEquals(snapshotSeed["text"]!!.jsonPrimitive.content.length + 2, canonical.len())
             }
@@ -188,8 +180,18 @@ class CrdtTreeAndOutboxStoreTest {
         val empty = steady.deltaSince(steady.versionVector())
         val changed = steady.applyDelta(empty)
         steadyScenario["expect"]!!.jsonObject.consuming("crdt-tree/algebra.json[steady] expect") { e ->
-            e.array("delta")?.let { assertEquals(it.size, empty.size, "delta") }
-            e.boolean("apply_changed")?.let { assertEquals(it, changed, "apply_changed") }
+            e.assertKeyWith("delta") { want ->
+                val wantOps = want.jsonArray
+                // The corpus only ever pins the EMPTY delta here and this runner
+                // has no decoder for a TextCrdt op literal, so refuse a non-empty
+                // expectation rather than quietly comparing only its length.
+                assertTrue(
+                    wantOps.isEmpty(),
+                    "delta: a non-empty expected delta is not decodable by this runner",
+                )
+                assertEquals(wantOps.size, empty.size, "delta")
+            }
+            e.assertBoolean("apply_changed") { changed }
         }
         assertEquals(emptyList(), empty)
         assertFalse(changed)
@@ -210,7 +212,7 @@ class CrdtTreeAndOutboxStoreTest {
                         .ackThrough(write["epoch"]!!.jsonPrimitive.long)
                 }
                 scenario["expect"]!!.jsonObject.consuming("outbox_store_protocol.json[save_cursor] expect") { e ->
-                    e.long("loaded_cursor")?.let { assertEquals(it, Outbox(store).ackedThrough, "loaded_cursor") }
+                    e.assertLong("loaded_cursor") { Outbox(store).ackedThrough }
                 }
                 return@let
             }
@@ -223,9 +225,9 @@ class CrdtTreeAndOutboxStoreTest {
             val name = scenario["name"]?.jsonPrimitive?.content ?: "?"
             scenario["expect"]!!.jsonObject.consuming("outbox_store_protocol.json[$name] expect") { expected ->
                 scenario["scan_after"]?.jsonPrimitive?.long?.let { cursor ->
-                    expected.array("epochs")?.let { epochs ->
+                    expected.assertKeyWith("epochs") { want ->
                         assertEquals(
-                            epochs.map { it.jsonPrimitive.long },
+                            want.jsonArray.map { it.jsonPrimitive.long },
                             outbox.replayFrom(cursor).map { it.first },
                             "epochs",
                         )
@@ -233,17 +235,25 @@ class CrdtTreeAndOutboxStoreTest {
                 }
                 for (ack in scenario["ack_through"]?.jsonArray.orEmpty()) outbox.ackThrough(ack.jsonPrimitive.long)
                 val observed = if (scenario["restart"]?.jsonPrimitive?.content == "true") Outbox(store) else outbox
-                expected.long("cursor")?.let { assertEquals(it, observed.ackedThrough, "cursor") }
-                expected.long("loaded_cursor")?.let { assertEquals(it, observed.ackedThrough, "loaded_cursor") }
-                expected.array("retained")?.let { epochs ->
-                    assertEquals(epochs.map { it.jsonPrimitive.long }, observed.retainedEpochs(), "retained")
-                }
-                (expected.array("replay_from_zero") ?: expected.array("replay"))?.let { epochs ->
+                expected.assertLong("cursor") { observed.ackedThrough }
+                expected.assertLong("loaded_cursor") { observed.ackedThrough }
+                expected.assertKeyWith("retained") { want ->
                     assertEquals(
-                        epochs.map { it.jsonPrimitive.long },
-                        observed.replayFrom(0).map { it.first },
-                        "replay",
+                        want.jsonArray.map { it.jsonPrimitive.long },
+                        observed.retainedEpochs(),
+                        "retained",
                     )
+                }
+                // Both spellings, so whichever the fixture carries is asserted and
+                // neither can be read past. `?:` consumed both and asserted one.
+                for (key in listOf("replay_from_zero", "replay")) {
+                    expected.assertKeyWith(key) { want ->
+                        assertEquals(
+                            want.jsonArray.map { it.jsonPrimitive.long },
+                            observed.replayFrom(0).map { it.first },
+                            key,
+                        )
+                    }
                 }
             }
         }

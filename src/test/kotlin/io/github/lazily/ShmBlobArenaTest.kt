@@ -4,8 +4,6 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.boolean
-import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -62,16 +60,25 @@ class ShmBlobArenaTest {
 
         // Assertion metadata mirrors the descriptor + header layout.
         fixture.getValue("assertions").jsonObject.consuming("arena_blob.json assertions") { a ->
-            a.int("capacity")?.let { assertEquals(it, arena.capacity(), "capacity") }
-            a.long("epoch")?.let { assertEquals(it, descriptor.epoch, "epoch") }
-            a.int("header_len")?.let { assertEquals(it, SHM_BLOB_HEADER_LEN, "header_len") }
-            a.string("magic")?.let { assertEquals("LZSH", it, "magic") }
-            a.int("payload_len")?.let { assertEquals(payload.size, it, "payload_len") }
+            a.assertInt("capacity") { arena.capacity() }
+            a.assertLong("epoch") { descriptor.epoch }
+            a.assertInt("header_len") { SHM_BLOB_HEADER_LEN }
+            // `assertEquals("LZSH", it)` compared the fixture against a literal in
+            // the runner, so the arena's own header bytes never entered the
+            // comparison and a binding that wrote a different magic passed
+            // (#lzconsumednotasserted). The magic occupies the first 4 bytes of
+            // the 40-byte header as a little-endian u32, so the on-disk order is
+            // `H S Z L` and the spelled name is its big-endian rendering.
+            a.assertString("magic") {
+                String(arena.bytes().copyOfRange(0, 4).reversedArray(), Charsets.US_ASCII)
+            }
+            a.assertInt("payload_len") { payload.size }
             // The `assertions` block carries its OWN copy of the descriptor. Only
             // `expected.descriptor` was ever read, so this one could disagree with
             // it — and with the binding — and nothing would notice
             // (#lzassertunknownkeys).
-            a.obj("descriptor")?.let { d ->
+            a.assertKeyWith("descriptor") { want ->
+                val d = want.jsonObject
                 assertEquals(d.getValue("offset").jsonPrimitive.long, descriptor.offset, "assertions.descriptor.offset")
                 assertEquals(d.getValue("len").jsonPrimitive.long, descriptor.len, "assertions.descriptor.len")
                 assertEquals(
