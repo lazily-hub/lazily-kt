@@ -1,3 +1,5 @@
+import org.gradle.api.tasks.testing.logging.TestExceptionFormat
+
 plugins {
     kotlin("jvm") version "2.0.21"
     kotlin("plugin.serialization") version "2.0.21"
@@ -21,6 +23,21 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+
+    // Rungs 2 and 3 of the conformance-evidence ladder fail INSIDE the test JVM:
+    // AssertionKeys.requireAllSatisfied() throws when a fixture's assertion key
+    // went unread (#lzassertunknownkeys) or was read but never compared against
+    // the fixture's own value (#lzconsumednotasserted). Those messages name the
+    // fixture AND the offending key on purpose — "some assertion went unread" is
+    // not actionable — but Gradle's default console prints only the failing test
+    // name, so CI was red for an unreadable reason and the diagnostic died in the
+    // HTML report nobody downloads (#lzguardsnotinci). The rung-1 and rung-4
+    // guards run as a shell step and already print theirs; this puts rungs 2 and 3
+    // on equal footing.
+    testLogging {
+        events("failed")
+        exceptionFormat = TestExceptionFormat.FULL
+    }
 }
 
 tasks.register<JavaExec>("interopPeer") {
