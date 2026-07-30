@@ -29,8 +29,7 @@ class PortableStdlibConformanceTest {
                 ConformanceFixtures.read("stdlib/$name"),
             ).jsonObject
             assertFixtureBookkeeping(fixture)
-            fixture.required("scenarios").jsonArray.forEach { scenarioElement ->
-                val scenario = scenarioElement.jsonObject
+            ConformanceScenarios.of("stdlib/$name", fixture).forEach { scenario ->
                 when (fixture.string("feature")) {
                     "stdlib_timer_v1" -> replayTimer(scenario)
                     "stdlib_timeout_v1" -> replayTimeout(scenario)

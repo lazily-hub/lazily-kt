@@ -32,10 +32,19 @@ class ReliableSyncConformanceTest {
         return json.parseToJsonElement(text).jsonObject
     }
 
-    private fun scenario(fx: JsonObject, name: String): JsonObject =
-        fx["scenarios"]!!.jsonArray
-            .map { it.jsonObject }
-            .first { it["name"]!!.jsonPrimitive.content == name }
+    /**
+     * The one scenario of [fx] named [name], recorded in the runtime scenario
+     * ledger (`#lzscenariocoverage`).
+     *
+     * This runner reaches for scenarios by name rather than iterating, which is
+     * the shape where a skipped scenario is hardest to notice: nothing enumerates
+     * the ones you did not name. [ConformanceScenarios.pick] records what was
+     * actually taken, and the guard compares that against the ids the fixture
+     * carries on disk. [file] is threaded through because the ledger is keyed by
+     * spec-relative fixture path, exactly as the fixture manifest is.
+     */
+    private fun scenario(file: String, fx: JsonObject, name: String): JsonObject =
+        ConformanceScenarios.pick("reliable-sync/$file", fx, name)
 
     private fun JsonObject.long(key: String): Long = this[key]!!.jsonPrimitive.long
     private fun JsonObject.bool(key: String): Boolean = this[key]!!.jsonPrimitive.boolean
@@ -128,7 +137,7 @@ class ReliableSyncConformanceTest {
             a.assertInt("op_count") { wire.ops.size }
         }
 
-        val sc = scenario(fx, "span_3_applies_equal_to_unit_fold")
+        val sc = scenario("multi_epoch_delta.json", fx, "span_3_applies_equal_to_unit_fold")
         val d = sc["delta"]!!.jsonObject
         val delta = assertIs<IpcMessage.DeltaMessage>(msg(buildDeltaWire(d))).delta
         assertTrue(delta.epoch > delta.baseEpoch + 1, "fixture pins a multi-epoch span")
@@ -155,7 +164,7 @@ class ReliableSyncConformanceTest {
             }
         }
 
-        val gap = scenario(fx, "gap_rule_unchanged_under_span")
+        val gap = scenario("multi_epoch_delta.json", fx, "gap_rule_unchanged_under_span")
         val gd = gap["delta"]!!.jsonObject
         val gc = Receiver(gap.long("receiver_last_epoch"))
         val gapAction = gc.ingest(IpcMessage.ofDelta(Delta(gd.long("base_epoch"), gd.long("epoch"))))
@@ -185,7 +194,7 @@ class ReliableSyncConformanceTest {
     fun resyncGapConverge() {
         val fx = loadFixture("resync_gap_converge.json")
 
-        val sc = scenario(fx, "drop_suffix_then_resync_converges")
+        val sc = scenario("resync_gap_converge.json", fx, "drop_suffix_then_resync_converges")
         val recv = Receiver(sc.long("start_last_epoch"))
         var requests = 0
         for (frameEl in sc["inbound"]!!.jsonArray) {
@@ -230,7 +239,7 @@ class ReliableSyncConformanceTest {
             }
         }
 
-        val single = scenario(fx, "single_request_per_gap")
+        val single = scenario("resync_gap_converge.json", fx, "single_request_per_gap")
         val sc2 = ResyncCoordinator(single.long("start_last_epoch"))
         var req2 = 0
         for (frameEl in single["inbound"]!!.jsonArray) {
@@ -248,7 +257,7 @@ class ReliableSyncConformanceTest {
     fun idempotentRedelivery() {
         val fx = loadFixture("idempotent_redelivery.json")
         for (name in listOf("replayed_delta_is_ignored", "duplicate_current_head_is_ignored")) {
-            val sc = scenario(fx, name)
+            val sc = scenario("idempotent_redelivery.json", fx, name)
             val recv = Receiver(sc.long("start_last_epoch"))
             // `state_before` seeds the receiver so "unchanged" is a claim about
             // real state rather than about an empty map staying empty.
@@ -318,7 +327,7 @@ class ReliableSyncConformanceTest {
     @Test
     fun outboxReplayAfterCrash() {
         val fx = loadFixture("outbox_replay_after_crash.json")
-        val sc = scenario(fx, "crash_between_append_and_ack_replays_on_reconnect")
+        val sc = scenario("outbox_replay_after_crash.json", fx, "crash_between_append_and_ack_replays_on_reconnect")
         val appended = frames(sc, "appended")
         val ack = sc.long("ack_through")
         val cursor = sc.long("reconnect_cursor")
@@ -374,7 +383,7 @@ class ReliableSyncConformanceTest {
         }
 
         // send_failure_retains_frame_for_next_tick
-        val sc2 = scenario(fx, "send_failure_retains_frame_for_next_tick")
+        val sc2 = scenario("outbox_replay_after_crash.json", fx, "send_failure_retains_frame_for_next_tick")
         val mem2 = InMemoryOutbox()
         for ((e, m) in frames(sc2, "appended")) mem2.append(e, m)
         sc2["expect"]!!.jsonObject.consuming("outbox_replay_after_crash.json[send_failure] expect") { e ->
@@ -401,7 +410,7 @@ class ReliableSyncConformanceTest {
     fun livenessOrSetLww() {
         val fx = loadFixture("liveness_orset_lww.json")
 
-        val add = scenario(fx, "open_set_add_wins_over_stale_remove")
+        val add = scenario("liveness_orset_lww.json", fx, "open_set_add_wins_over_stale_remove")
         val addOps = add["ops"]!!.jsonArray.map { it.jsonObject }
         fun replayOrSet(ops: List<JsonObject>): OrSet = OrSet().also { s ->
             for (op in ops) {
@@ -454,7 +463,7 @@ class ReliableSyncConformanceTest {
             }
         }
 
-        val lww = scenario(fx, "lww_alive_highest_stamp_wins")
+        val lww = scenario("liveness_orset_lww.json", fx, "lww_alive_highest_stamp_wins")
         val ops = lww["ops"]!!.jsonArray.map { it.jsonObject }
         fun replayLww(seq: List<JsonObject>): WireLwwRegister<Boolean> {
             val r = WireLwwRegister(stamp(seq[0]["stamp"]!!.jsonObject), seq[0].bool("value"))
@@ -481,7 +490,7 @@ class ReliableSyncConformanceTest {
             }
         }
 
-        val death = scenario(fx, "whole_editor_death_cascades")
+        val death = scenario("liveness_orset_lww.json", fx, "whole_editor_death_cascades")
         val open = death["open_set"]!!.jsonArray.map { it.jsonObject }
             .filter { it.bool("present") }
             .map {
@@ -516,7 +525,7 @@ class ReliableSyncConformanceTest {
         // derived_live_doc_aggregate_converges_under_retry — replayed here for
         // the first time: it was the one scenario in this fixture the runner
         // skipped entirely, so all four of its keys were unevaluated.
-        val agg = scenario(fx, "derived_live_doc_aggregate_converges_under_retry")
+        val agg = scenario("liveness_orset_lww.json", fx, "derived_live_doc_aggregate_converges_under_retry")
         val aggOps = agg["ops"]!!.jsonArray.map { it.jsonObject }
         fun aggregate(seq: List<JsonObject>): List<String> {
             val docs = sortedMapOf<String, OrSet>()

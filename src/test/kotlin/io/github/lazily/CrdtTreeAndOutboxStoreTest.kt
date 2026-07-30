@@ -110,8 +110,13 @@ class CrdtTreeAndOutboxStoreTest {
 
     @Test
     fun crdtTreeCanonicalFixtureReplay() {
-        val scenarios = fixture("crdt-tree/algebra.json")["scenarios"]!!.jsonArray
-        val mergeScenario = scenarios[0].jsonObject
+        val fx = fixture("crdt-tree/algebra.json")
+        val mergeScenario =
+            ConformanceScenarios.pick(
+                "crdt-tree/algebra.json",
+                fx,
+                "merge algebra is order and duplication independent",
+            )
         val seed = mergeScenario["seed"]!!.jsonObject
         val base = TextCrdt(seed["peer"]!!.jsonPrimitive.long, seed["text"]!!.jsonPrimitive.content)
         val replicas = mergeScenario["replicas"]!!.jsonArray.associate { definitionElement ->
@@ -141,7 +146,12 @@ class CrdtTreeAndOutboxStoreTest {
             assertEquals(folds.first().versionVector(), folded.versionVector())
         }
 
-        val snapshotScenario = scenarios[1].jsonObject
+        val snapshotScenario =
+            ConformanceScenarios.pick(
+                "crdt-tree/algebra.json",
+                fx,
+                "empty frontier snapshot preserves lineage",
+            )
         val snapshotSeed = snapshotScenario["seed"]!!.jsonObject
         val canonical = TextCrdt(
             snapshotSeed["peer"]!!.jsonPrimitive.long,
@@ -174,7 +184,12 @@ class CrdtTreeAndOutboxStoreTest {
             }
         }
 
-        val steadyScenario = scenarios[2].jsonObject
+        val steadyScenario =
+            ConformanceScenarios.pick(
+                "crdt-tree/algebra.json",
+                fx,
+                "own frontier emits an empty delta",
+            )
         val steadySeed = steadyScenario["seed"]!!.jsonObject
         val steady = TextCrdt(steadySeed["peer"]!!.jsonPrimitive.long, steadySeed["text"]!!.jsonPrimitive.content)
         val empty = steady.deltaSince(steady.versionVector())
@@ -199,10 +214,8 @@ class CrdtTreeAndOutboxStoreTest {
 
     @Test
     fun outboxStoreCanonicalFixtureReplay() {
-        val scenarios =
-            fixture("reliable-sync/outbox_store_protocol.json")["scenarios"]!!.jsonArray
-        for (scenarioElement in scenarios) {
-            val scenario = scenarioElement.jsonObject
+        val fx = fixture("reliable-sync/outbox_store_protocol.json")
+        for (scenario in ConformanceScenarios.of("reliable-sync/outbox_store_protocol.json", fx)) {
             val store = InMemoryStore()
             scenario["save_cursor"]?.jsonArray?.let { writes ->
                 val handles = mapOf("stale" to Outbox(store), "current" to Outbox(store))

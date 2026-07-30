@@ -182,8 +182,7 @@ class CommandConformanceTest {
     @Test
     fun `cancel preempts nonterminal scenarios`() {
         val fx = load("cancel_preempts_nonterminal.json")
-        fx.getValue("scenarios").jsonArray.forEach { scenarioEl ->
-            val scenario = scenarioEl.jsonObject
+        ConformanceScenarios.of("message-passing/cancel_preempts_nonterminal.json", fx).forEach { scenario ->
             val p = CommandProjection()
             scenario.getValue("frames").jsonArray.forEach { foldFrame(p, it) }
             assertProjection(p, scenario.getValue("expect").jsonObject)

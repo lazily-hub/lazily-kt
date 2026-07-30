@@ -151,9 +151,8 @@ class LosslessTreeCrdtConformanceTest {
 
     private fun runFixture(name: String) {
         val fixture = loadFixture(name)
-        for ((i, scenarioEl) in fixture.getValue("scenarios").jsonArray.withIndex()) {
-            val scenario = scenarioEl.jsonObject
-            val label = scenario["name"]?.jsonPrimitive?.content?.let { "$name[$it]" } ?: "$name[$i]"
+        for ((i, scenario) in ConformanceScenarios.indexed("lossless-tree/$name", fixture)) {
+            val label = "$name[${ConformanceScenarios.idOf(scenario, i).value}]"
             val seed = scenario.getValue("seed").jsonObject
             val peer = seed.getValue("peer").jsonPrimitive.long
             val world = World()

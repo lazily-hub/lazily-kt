@@ -115,8 +115,7 @@ class CrdtPlaneTest {
         val scenarios = fixture.getValue("scenarios").jsonArray
         assertTrue(scenarios.isNotEmpty())
 
-        for (scenarioEl in scenarios) {
-            val scenario = scenarioEl.jsonObject
+        for (scenario in ConformanceScenarios.of("distributed/anti_entropy_converge.json", fixture)) {
             val name = scenario.getValue("name").jsonPrimitive.content
             val ops = parseOps(scenario)
 

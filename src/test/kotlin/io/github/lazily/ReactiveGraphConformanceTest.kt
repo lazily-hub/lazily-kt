@@ -1234,7 +1234,12 @@ class ReactiveGraphConformanceTest {
                     }
                     "scenarios" -> {
                         val tail = fx["expected"]?.jsonObject
-                        for (sc in scenariosOf(fx)) {
+                        // Records each scenario id as it is yielded
+                        // (#lzscenariocoverage). `scenariosOf` is used elsewhere in
+                        // this class for op-vocabulary analysis and for the
+                        // `observationally_equal` name lookup — neither is a replay,
+                        // so neither records.
+                        for (sc in ConformanceScenarios.of("$area/$name", fx)) {
                             // Each scenario gets its OWN context:
                             // `observationally_equal` is a claim about two
                             // independent worlds, not about one world twice.

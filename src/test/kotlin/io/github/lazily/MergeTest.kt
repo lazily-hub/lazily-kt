@@ -115,8 +115,12 @@ class MergeTest {
         val fixture = Json.parseToJsonElement(loadFixture("mergecell_algebra.json")).jsonObject
         val byName = mapOf("KeepLatest" to keepLatest<Long>(), "Sum" to sum(), "Max" to max())
         var seen = 0
-        for (scenarioEl in fixture["scenarios"]!!.jsonArray) {
-            val scenario = scenarioEl.jsonObject
+        // `collections/mergecell_algebra.json` is the one fixture in the corpus
+        // whose scenarios carry NO identifier — they differ only by `policy` — so
+        // the ledger records them by positional fallback (`#0`/`#1`/`#2`) and the
+        // guard reports that fallback rather than accepting it silently
+        // (#lzscenariocoverage).
+        for (scenario in ConformanceScenarios.of("collections/mergecell_algebra.json", fixture)) {
             val policy = byName[scenario["policy"]!!.jsonPrimitive.content]!!
             val flags = scenario["flags"]!!.jsonObject
             assertEquals(flags["commutative"]!!.jsonPrimitive.boolean, policy.commutative)

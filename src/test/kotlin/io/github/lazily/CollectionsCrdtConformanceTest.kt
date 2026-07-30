@@ -48,8 +48,7 @@ class CollectionsCrdtConformanceTest {
     @Test
     fun `conformance stableid alignment`() {
         val fixture = loadFixture("stableid_alignment.json")
-        for (scenario in fixture.getValue("scenarios").jsonArray) {
-            val s = scenario.jsonObject
+        for (s in ConformanceScenarios.of("collections/stableid_alignment.json", fixture)) {
             val name = s.getValue("name").jsonPrimitive.content
 
             // Scenario 1 & 2: key equality over a single `blocks` list.
@@ -133,8 +132,7 @@ class CollectionsCrdtConformanceTest {
     @Test
     fun `conformance textcrdt convergence`() {
         val fixture = loadFixture("textcrdt_convergence.json")
-        for (scenario in fixture.getValue("scenarios").jsonArray) {
-            val s = scenario.jsonObject
+        for (s in ConformanceScenarios.of("collections/textcrdt_convergence.json", fixture)) {
             val name = s.getValue("name").jsonPrimitive.content
             val replicas = LinkedHashMap<String, TextRepl>()
             val (defaultName, defaultRepl) = seedTextCrdt(s)
@@ -196,8 +194,7 @@ class CollectionsCrdtConformanceTest {
     @Test
     fun `conformance textcrdt delta sync`() {
         val fixture = loadFixture("textcrdt_delta_sync.json")
-        for (scenario in fixture.getValue("scenarios").jsonArray) {
-            val s = scenario.jsonObject
+        for (s in ConformanceScenarios.of("collections/textcrdt_delta_sync.json", fixture)) {
             val name = s.getValue("name").jsonPrimitive.content
             val replicas = LinkedHashMap<String, TextRepl>()
             val (defaultName, defaultRepl) = seedTextCrdt(s)
@@ -317,8 +314,7 @@ class CollectionsCrdtConformanceTest {
     @Test
     fun `conformance seqcrdt convergence`() {
         val fixture = loadFixture("seqcrdt_convergence.json")
-        for (scenario in fixture.getValue("scenarios").jsonArray) {
-            val s = scenario.jsonObject
+        for (s in ConformanceScenarios.of("collections/seqcrdt_convergence.json", fixture)) {
             val name = s.getValue("name").jsonPrimitive.content
             val replicas = LinkedHashMap<String, SeqRepl>()
             val defaultPeer = s["replica"]?.jsonObject?.get("peer")?.jsonPrimitive?.long
@@ -433,8 +429,7 @@ class CollectionsCrdtConformanceTest {
     @Test
     fun `conformance semtree incremental`() {
         val fixture = loadFixture("semtree_incremental.json")
-        for (scenario in fixture.getValue("scenarios").jsonArray) {
-            val s = scenario.jsonObject
+        for (s in ConformanceScenarios.of("collections/semtree_incremental.json", fixture)) {
             val name = s.getValue("name").jsonPrimitive.content
             val foldName = s.getValue("fold").jsonPrimitive.content
             val fold = semFold(foldName)

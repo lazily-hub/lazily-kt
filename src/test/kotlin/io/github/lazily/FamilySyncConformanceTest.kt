@@ -45,8 +45,7 @@ class FamilySyncConformanceTest {
             "this harness replays the bool value_type",
         )
 
-        for (scenario in fixture.getValue("scenarios").jsonArray) {
-            val s = scenario.jsonObject
+        for (s in ConformanceScenarios.of("familysync/materialize_on_ingest.json", fixture)) {
             val name = s.getValue("name").jsonPrimitive.content
             val originPeer = s.getValue("origin_peer").jsonPrimitive.long
             val targetPeer = s.getValue("target_peer").jsonPrimitive.long
