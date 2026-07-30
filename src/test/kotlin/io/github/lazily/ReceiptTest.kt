@@ -116,25 +116,40 @@ class ReceiptTest {
         ).jsonObject
         val message = ReceiptMessage.fromJson(fixture.getValue("wire"))
         val receipts = assertIs<ReceiptMessage.CausalReceiptsMessage>(message).batch.receipts
-        val assertions = fixture.getValue("assertions").jsonObject
-        val currentGeneration = assertions.getValue("current_generation").jsonPrimitive.content.toLong()
         val projection = ReceiptProjection()
 
-        receipts.forEach { projection.observe(currentGeneration, it) }
+        fixture.getValue("assertions").jsonObject
+            .consuming("receipts/causal_receipts.json assertions") { a ->
+                val currentGeneration = a.long("current_generation")
+                    ?: error("current_generation is required")
+                receipts.forEach { projection.observe(currentGeneration, it) }
 
-        assertEquals(
-            assertions.getValue("receipt_count").jsonPrimitive.content.toInt(),
-            receipts.size,
-        )
-        val causationId = assertions.getValue("causation_id").jsonPrimitive.content
-        assertEquals(
-            assertions.getValue("terminal_outcome").jsonPrimitive.content,
-            projection.terminalFor(causationId)?.outcome?.wireName,
-        )
-        assertEquals(
-            assertions.getValue("stale_receipt_ids").jsonArray.map { it.jsonPrimitive.content },
-            projection.staleReceiptIds(),
-        )
+                a.int("receipt_count")?.let { assertEquals(it, receipts.size, "receipt_count") }
+                val causationId = a.string("causation_id") ?: error("causation_id is required")
+                a.string("terminal_outcome")?.let {
+                    assertEquals(it, projection.terminalFor(causationId)?.outcome?.wireName, "terminal_outcome")
+                }
+                a.strings("stale_receipt_ids")?.let {
+                    assertEquals(it, projection.staleReceiptIds(), "stale_receipt_ids")
+                }
+                // The non-terminal half of the outcome lattice. Carried by the
+                // fixture and read by nothing until #lzassertunknownkeys: a
+                // binding that classified `accepted` as terminal would satisfy
+                // every other key here and still be wrong.
+                a.strings("nonterminal_outcomes")?.let { want ->
+                    val got = receipts
+                        .filterNot { it.outcome.isTerminal }
+                        .map { it.outcome.wireName }
+                        .distinct()
+                    assertEquals(want, got, "nonterminal_outcomes")
+                    for (name in want) {
+                        assertFalse(
+                            ReceiptOutcome.fromWire(name).isTerminal,
+                            "nonterminal_outcomes: '$name' must not be terminal",
+                        )
+                    }
+                }
+            }
         assertNull(projection.terminalFor("missing"))
     }
 }

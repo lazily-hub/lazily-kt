@@ -40,7 +40,6 @@ class ShmBlobArenaTest {
         assertEquals("Arena", fixture.getValue("kind").jsonPrimitive.content)
         val input = fixture.getValue("input").jsonObject
         val expected = fixture.getValue("expected").jsonObject
-        val assertions = fixture.getValue("assertions").jsonObject
 
         val capacity = input.getValue("capacity").jsonPrimitive.int
         val epoch = input.getValue("epoch").jsonPrimitive.long
@@ -62,11 +61,33 @@ class ShmBlobArenaTest {
         )
 
         // Assertion metadata mirrors the descriptor + header layout.
-        assertEquals(assertions.getValue("capacity").jsonPrimitive.int, arena.capacity())
-        assertEquals(assertions.getValue("epoch").jsonPrimitive.long, descriptor.epoch)
-        assertEquals(assertions.getValue("header_len").jsonPrimitive.int, SHM_BLOB_HEADER_LEN)
-        assertEquals("LZSH", assertions.getValue("magic").jsonPrimitive.content)
-        assertEquals(payload.size, assertions.getValue("payload_len").jsonPrimitive.int)
+        fixture.getValue("assertions").jsonObject.consuming("arena_blob.json assertions") { a ->
+            a.int("capacity")?.let { assertEquals(it, arena.capacity(), "capacity") }
+            a.long("epoch")?.let { assertEquals(it, descriptor.epoch, "epoch") }
+            a.int("header_len")?.let { assertEquals(it, SHM_BLOB_HEADER_LEN, "header_len") }
+            a.string("magic")?.let { assertEquals("LZSH", it, "magic") }
+            a.int("payload_len")?.let { assertEquals(payload.size, it, "payload_len") }
+            // The `assertions` block carries its OWN copy of the descriptor. Only
+            // `expected.descriptor` was ever read, so this one could disagree with
+            // it — and with the binding — and nothing would notice
+            // (#lzassertunknownkeys).
+            a.obj("descriptor")?.let { d ->
+                assertEquals(d.getValue("offset").jsonPrimitive.long, descriptor.offset, "assertions.descriptor.offset")
+                assertEquals(d.getValue("len").jsonPrimitive.long, descriptor.len, "assertions.descriptor.len")
+                assertEquals(
+                    d.getValue("generation").jsonPrimitive.long,
+                    descriptor.generation,
+                    "assertions.descriptor.generation",
+                )
+                assertEquals(d.getValue("epoch").jsonPrimitive.long, descriptor.epoch, "assertions.descriptor.epoch")
+                assertEquals(
+                    d.getValue("checksum").jsonPrimitive.content.toULong(),
+                    descriptor.checksum.toULong(),
+                    "assertions.descriptor.checksum",
+                )
+                assertEquals(expectedDescriptor, d, "assertions.descriptor must agree with expected.descriptor")
+            }
+        }
 
         // 40-byte LZSH header byte-identical across bindings.
         val expectedHeader = bytesOf(expected, "header_bytes")

@@ -39,20 +39,30 @@ class CrdtPlaneTest {
             val message = IpcMessage.fromJson(wire)
             val sync = assertIs<IpcMessage.CrdtSyncMessage>(message).sync
 
-            val assertions = frame.getValue("assertions").jsonObject
-            assertions["frontier_len"]?.let {
-                assertEquals(it.jsonPrimitive.int, sync.frontier.size, "frontier_len mismatch for $label")
-            }
-            assertions["frontier_omitted"]?.let {
-                // #lzspecfrontiersuppress: an omitted frontier decodes as empty.
-                assertTrue(it.jsonPrimitive.boolean, "frontier_omitted must assert true for $label")
-                assertTrue(sync.frontier.isEmpty(), "frontier must decode empty for $label")
-            }
-            assertEquals(
-                assertions.getValue("op_count").jsonPrimitive.int,
-                sync.ops.size,
-                "op_count mismatch for $label",
-            )
+            frame.getValue("assertions").jsonObject
+                .consuming("distributed/crdt_sync_frames.json[$label]") { a ->
+                    a.int("frontier_len")?.let {
+                        assertEquals(it, sync.frontier.size, "frontier_len mismatch for $label")
+                    }
+                    a.boolean("frontier_omitted")?.let {
+                        // An omitted frontier decodes as empty (frontier suppression).
+                        assertTrue(it, "frontier_omitted must assert true for $label")
+                        assertTrue(sync.frontier.isEmpty(), "frontier must decode empty for $label")
+                    }
+                    a.int("op_count")?.let {
+                        assertEquals(it, sync.ops.size, "op_count mismatch for $label")
+                    }
+                    // `key` is nullable on the wire, and the two spellings decode
+                    // through different branches. Both were carried by the fixture
+                    // and read by nothing (#lzassertunknownkeys): a binding that
+                    // dropped the key on decode round-tripped and passed.
+                    a.boolean("has_keyed_op")?.let {
+                        assertEquals(it, sync.ops.any { op -> op.key != null }, "has_keyed_op for $label")
+                    }
+                    a.boolean("has_keyless_op")?.let {
+                        assertEquals(it, sync.ops.any { op -> op.key == null }, "has_keyless_op for $label")
+                    }
+                }
             // JSON round-trip through the externally-tagged envelope. Byte-for-byte
             // except for schema-declared-equivalent encodings (conformance.md §
             // Round-trip equivalence exemptions): `CrdtSync.frontier` omitted ≡ [].
@@ -79,14 +89,18 @@ class CrdtPlaneTest {
     private fun parseOps(scenario: JsonObject): List<CrdtOp> =
         scenario.getValue("ops").jsonArray.map { CrdtOp.fromJson(it) }
 
-    private fun assertConverged(runtime: CrdtPlaneRuntime, expect: JsonObject) {
-        for (entryEl in expect.getValue("converged").jsonArray) {
+    private fun assertConverged(runtime: CrdtPlaneRuntime, converged: JsonArray) {
+        for (entryEl in converged) {
             val entry = entryEl.jsonObject
             val node = entry.getValue("node").jsonPrimitive.long
             val expectedState = IpcValue.fromJson(entry.getValue("state"))
             assertEquals(expectedState, runtime.value(node), "converged state mismatch for node $node")
         }
     }
+
+    /** Lexicographic `(wall_time, logical, peer)` order — the plane's decisive stamp order. */
+    private val stampOrder: Comparator<WireStamp> =
+        compareBy<WireStamp> { it.wallTime }.thenBy { it.logical }.thenBy { it.peer }
 
     @Test
     fun `anti-entropy scenarios converge and are idempotent`() {
@@ -98,28 +112,60 @@ class CrdtPlaneTest {
             val scenario = scenarioEl.jsonObject
             val name = scenario.getValue("name").jsonPrimitive.content
             val ops = parseOps(scenario)
-            val expect = scenario.getValue("expect").jsonObject
-            val expectedApplied = expect.getValue("applied_count").jsonPrimitive.int
 
-            val runtime = CrdtPlaneRuntime(peer = 99)
-            val frame = CrdtSync(frontier = emptyList(), ops = ops)
-            val applied = runtime.ingest(frame)
-            assertEquals(expectedApplied, applied, "applied_count mismatch for $name")
-            assertConverged(runtime, expect)
+            scenario.getValue("expect").jsonObject
+                .consuming("distributed/anti_entropy_converge.json[$name] expect") { a ->
+                    val converged = a.array("converged")
+                        ?: error("$name: `converged` is required")
+                    val expectedApplied = a.int("applied_count")
+                        ?: error("$name: `applied_count` is required")
 
-            // State-based CvRDT idempotence: re-delivering applies 0 new ops.
-            val reApplied = runtime.ingest(frame)
-            assertEquals(0, reApplied, "re-delivery must apply 0 ops for $name")
-            expect["redeliver_applied_count"]?.let {
-                assertEquals(it.jsonPrimitive.int, reApplied, "redeliver_applied_count mismatch for $name")
-            }
-            assertConverged(runtime, expect)
+                    val runtime = CrdtPlaneRuntime(peer = 99)
+                    val frame = CrdtSync(frontier = emptyList(), ops = ops)
+                    val applied = runtime.ingest(frame)
+                    assertEquals(expectedApplied, applied, "applied_count mismatch for $name")
+                    assertConverged(runtime, converged)
 
-            // Order independence: reversed delivery converges to the same state.
-            val reversed = CrdtPlaneRuntime(peer = 99)
-            val revApplied = reversed.ingest(CrdtSync(frontier = emptyList(), ops = ops.reversed()))
-            assertEquals(expectedApplied, revApplied, "reversed applied_count mismatch for $name")
-            assertConverged(reversed, expect)
+                    // The conflict-resolution rule the fixture names. Carried and
+                    // read by nothing until #lzassertunknownkeys: every other key
+                    // here is satisfied by *a* deterministic winner, so a binding
+                    // resolving by arrival order rather than by stamp could pass
+                    // the whole scenario on a fixture whose op order happens to
+                    // agree. Stated here, the rule itself is the assertion.
+                    a.string("resolution")?.let { rule ->
+                        assertEquals("max_stamp", rule, "$name: unsupported resolution rule '$rule'")
+                        for (entryEl in converged) {
+                            val node = entryEl.jsonObject.getValue("node").jsonPrimitive.long
+                            val winner = ops.filter { it.node == node }.maxWithOrNull(
+                                compareBy(stampOrder) { it.stamp },
+                            ) ?: error("$name: no op targets node $node")
+                            assertEquals(
+                                winner.state,
+                                runtime.value(node),
+                                "$name: resolution=max_stamp must select the greatest-stamp op for node $node",
+                            )
+                        }
+                    }
+
+                    // State-based CvRDT idempotence: re-delivering applies 0 new ops.
+                    val reApplied = runtime.ingest(frame)
+                    assertEquals(0, reApplied, "re-delivery must apply 0 ops for $name")
+                    a.int("redeliver_applied_count")?.let {
+                        assertEquals(it, reApplied, "redeliver_applied_count mismatch for $name")
+                    }
+                    assertConverged(runtime, converged)
+
+                    // Order independence: reversed delivery converges to the same
+                    // state. Always exercised; the key turns it into a claim the
+                    // fixture makes rather than a habit of this runner.
+                    a.boolean("order_independent")?.let {
+                        assertTrue(it, "$name: order_independent=false is not a supported claim")
+                    }
+                    val reversed = CrdtPlaneRuntime(peer = 99)
+                    val revApplied = reversed.ingest(CrdtSync(frontier = emptyList(), ops = ops.reversed()))
+                    assertEquals(expectedApplied, revApplied, "reversed applied_count mismatch for $name")
+                    assertConverged(reversed, converged)
+                }
         }
     }
 

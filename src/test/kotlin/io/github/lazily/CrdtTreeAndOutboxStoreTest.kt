@@ -127,6 +127,21 @@ class CrdtTreeAndOutboxStoreTest {
                 }
             }
         }
+        // The `expect` blocks were hand-mirrored by the assertions below and read
+        // by nothing, so the fixture could rename or flip a claim and this replay
+        // would keep reporting green (#lzassertunknownkeys).
+        mergeScenario["expect"]!!.jsonObject.consuming("crdt-tree/algebra.json[merge] expect") { e ->
+            e.boolean("texts_equal")?.let { want ->
+                assertEquals(want, folds.drop(1).all { it.value() == folds.first().value() }, "texts_equal")
+            }
+            e.boolean("version_vectors_equal")?.let { want ->
+                assertEquals(
+                    want,
+                    folds.drop(1).all { it.versionVector() == folds.first().versionVector() },
+                    "version_vectors_equal",
+                )
+            }
+        }
         for (folded in folds.drop(1)) {
             assertEquals(folds.first().value(), folded.value())
             assertEquals(folds.first().versionVector(), folded.versionVector())
@@ -141,20 +156,43 @@ class CrdtTreeAndOutboxStoreTest {
         val snapshot = canonical.deltaSince(emptyMap())
         val restored = TextCrdt(snapshotScenario["restore_peer"]!!.jsonPrimitive.long)
         assertTrue(restored.applyDelta(snapshot))
-        assertEquals(canonical.value(), restored.value())
-        assertEquals(snapshot, restored.deltaSince(emptyMap()), "snapshot preserves operation identity")
+        val restoredText = restored.value()
+        val restoredOps = restored.deltaSince(emptyMap())
         canonical.insertString(canonical.len(), "A")
         restored.insertString(restored.len(), "B")
+        val duplicates = canonical.len() - (snapshotSeed["text"]!!.jsonPrimitive.content.length + 1)
         canonical.applyDelta(restored.deltaSince(canonical.versionVector()))
         restored.applyDelta(canonical.deltaSince(restored.versionVector()))
-        assertEquals(canonical.value(), restored.value())
-        assertEquals(snapshotSeed["text"]!!.jsonPrimitive.content.length + 2, canonical.len())
+        snapshotScenario["expect"]!!.jsonObject.consuming("crdt-tree/algebra.json[snapshot] expect") { e ->
+            e.boolean("restored_text_equal")?.let {
+                assertEquals(it, restoredText == snapshotSeed["text"]!!.jsonPrimitive.content, "restored_text_equal")
+            }
+            // Restoring from a snapshot must preserve operation IDENTITY, not
+            // merely the rendered text: a restore that re-minted ids would round
+            // -trip the same string and then duplicate on the next merge.
+            e.boolean("op_ids_equal")?.let {
+                assertEquals(it, restoredOps == snapshot, "op_ids_equal")
+            }
+            // ... which is exactly what this counts: the later merge must add no
+            // duplicated seed characters.
+            e.int("later_merge_duplicates")?.let {
+                assertEquals(it, duplicates, "later_merge_duplicates")
+                assertEquals(canonical.value(), restored.value(), "later merge must converge")
+                assertEquals(snapshotSeed["text"]!!.jsonPrimitive.content.length + 2, canonical.len())
+            }
+        }
 
-        val steadySeed = scenarios[2].jsonObject["seed"]!!.jsonObject
+        val steadyScenario = scenarios[2].jsonObject
+        val steadySeed = steadyScenario["seed"]!!.jsonObject
         val steady = TextCrdt(steadySeed["peer"]!!.jsonPrimitive.long, steadySeed["text"]!!.jsonPrimitive.content)
         val empty = steady.deltaSince(steady.versionVector())
+        val changed = steady.applyDelta(empty)
+        steadyScenario["expect"]!!.jsonObject.consuming("crdt-tree/algebra.json[steady] expect") { e ->
+            e.array("delta")?.let { assertEquals(it.size, empty.size, "delta") }
+            e.boolean("apply_changed")?.let { assertEquals(it, changed, "apply_changed") }
+        }
         assertEquals(emptyList(), empty)
-        assertFalse(steady.applyDelta(empty))
+        assertFalse(changed)
     }
 
     @Test
@@ -171,8 +209,9 @@ class CrdtTreeAndOutboxStoreTest {
                     handles.getValue(write["handle"]!!.jsonPrimitive.content)
                         .ackThrough(write["epoch"]!!.jsonPrimitive.long)
                 }
-                val loaded = scenario["expect"]!!.jsonObject["loaded_cursor"]!!.jsonPrimitive.long
-                assertEquals(loaded, Outbox(store).ackedThrough)
+                scenario["expect"]!!.jsonObject.consuming("outbox_store_protocol.json[save_cursor] expect") { e ->
+                    e.long("loaded_cursor")?.let { assertEquals(it, Outbox(store).ackedThrough, "loaded_cursor") }
+                }
                 return@let
             }
             if (scenario["save_cursor"] != null) continue
@@ -181,22 +220,31 @@ class CrdtTreeAndOutboxStoreTest {
                 val epoch = epochElement.jsonPrimitive.long
                 outbox.append(epoch, IpcMessage.ofDelta(Delta(epoch - 1, epoch)))
             }
-            val expected = scenario["expect"]!!.jsonObject
-            scenario["scan_after"]?.jsonPrimitive?.long?.let { cursor ->
-                assertEquals(
-                    expected["epochs"]!!.jsonArray.map { it.jsonPrimitive.long },
-                    outbox.replayFrom(cursor).map { it.first },
-                )
-            }
-            for (ack in scenario["ack_through"]?.jsonArray.orEmpty()) outbox.ackThrough(ack.jsonPrimitive.long)
-            val observed = if (scenario["restart"]?.jsonPrimitive?.content == "true") Outbox(store) else outbox
-            expected["cursor"]?.jsonPrimitive?.long?.let { assertEquals(it, observed.ackedThrough) }
-            expected["loaded_cursor"]?.jsonPrimitive?.long?.let { assertEquals(it, observed.ackedThrough) }
-            expected["retained"]?.jsonArray?.let { epochs ->
-                assertEquals(epochs.map { it.jsonPrimitive.long }, observed.retainedEpochs())
-            }
-            (expected["replay_from_zero"] ?: expected["replay"])?.jsonArray?.let { epochs ->
-                assertEquals(epochs.map { it.jsonPrimitive.long }, observed.replayFrom(0).map { it.first })
+            val name = scenario["name"]?.jsonPrimitive?.content ?: "?"
+            scenario["expect"]!!.jsonObject.consuming("outbox_store_protocol.json[$name] expect") { expected ->
+                scenario["scan_after"]?.jsonPrimitive?.long?.let { cursor ->
+                    expected.array("epochs")?.let { epochs ->
+                        assertEquals(
+                            epochs.map { it.jsonPrimitive.long },
+                            outbox.replayFrom(cursor).map { it.first },
+                            "epochs",
+                        )
+                    }
+                }
+                for (ack in scenario["ack_through"]?.jsonArray.orEmpty()) outbox.ackThrough(ack.jsonPrimitive.long)
+                val observed = if (scenario["restart"]?.jsonPrimitive?.content == "true") Outbox(store) else outbox
+                expected.long("cursor")?.let { assertEquals(it, observed.ackedThrough, "cursor") }
+                expected.long("loaded_cursor")?.let { assertEquals(it, observed.ackedThrough, "loaded_cursor") }
+                expected.array("retained")?.let { epochs ->
+                    assertEquals(epochs.map { it.jsonPrimitive.long }, observed.retainedEpochs(), "retained")
+                }
+                (expected.array("replay_from_zero") ?: expected.array("replay"))?.let { epochs ->
+                    assertEquals(
+                        epochs.map { it.jsonPrimitive.long },
+                        observed.replayFrom(0).map { it.first },
+                        "replay",
+                    )
+                }
             }
         }
     }

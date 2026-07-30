@@ -1046,58 +1046,78 @@ class ReactiveGraphConformanceTest {
         if (tail == null) return report
 
         stepIdx = -1 // the `expected` tail is not a numbered step
-        tail["final_state"]?.jsonObject?.let { finalState ->
-            finalState["dependents_of"]?.jsonObject?.let { m ->
-                for (id in m.keys.sorted()) {
-                    val got = model.dependentsOf(id)
-                    check("final.dependents_of.$id", got, m[id])
-                    report.observation.degrees[id] = got
-                }
-            }
-            finalState["readable"]?.jsonObject?.let { m ->
-                for (id in m.keys.sorted()) {
-                    val ok = alive(model, id)
-                    check("final.readable.$id", ok, m[id])
-                    report.observation.readable[id] = ok
-                }
-            }
-            finalState["read"]?.jsonObject?.let { m ->
-                for (id in m.keys.sorted()) {
-                    val got = readOrError(model, id)
-                    check("final.read.$id", got, m[id])
-                    report.observation.reads[id] = got
-                }
-            }
-        }
 
-        val publish = tail["after_publish"]?.jsonObject
-        val publishOp = publish?.get("op")?.jsonObject
-        if (publish != null && publishOp != null) {
-            val before = model.runLog.size
-            model.set(
-                publishOp["id"]!!.jsonPrimitive.content,
-                publishOp["value"]!!.jsonPrimitive.int,
-            )
-            model.settle()
-            report.observation.afterPublishObserved =
-                model.runLog.toList().subList(before, model.runLog.size)
-            checkList(
-                "after_publish.observed_by",
-                report.observation.afterPublishObserved,
-                strs(publish["observed_by"]),
-            )
-            // Order matches the reference runner: reads (which re-register edges
-            // in a lazy binding) precede the degree assertions that count them.
-            publish["read"]?.jsonObject?.let { m ->
-                for (id in m.keys.sorted()) {
-                    val got = readOrError(model, id)
-                    check("after_publish.read.$id", got, m[id])
-                    report.observation.afterPublishReads[id] = got
+        // The `scenarios` tail is the one path in this runner that was NOT
+        // fail-closed: the step-level `expect` refuses an unrecognised key, but
+        // the tail read `final_state`/`after_publish`/`observationally_equal` by
+        // name and let everything else fall through, at every nesting level.
+        // A tail key the corpus adds would have been invisible here while the
+        // fixture still reported as replayed (#lzassertunknownkeys).
+        tail.consuming("$fixture expected tail") { t ->
+            t.obj("final_state")?.consuming("$fixture expected.final_state") { fin ->
+                fin.obj("dependents_of")?.let { m ->
+                    for (id in m.keys.sorted()) {
+                        val got = model.dependentsOf(id)
+                        check("final.dependents_of.$id", got, m[id])
+                        report.observation.degrees[id] = got
+                    }
+                }
+                fin.obj("readable")?.let { m ->
+                    for (id in m.keys.sorted()) {
+                        val ok = alive(model, id)
+                        check("final.readable.$id", ok, m[id])
+                        report.observation.readable[id] = ok
+                    }
+                }
+                fin.obj("read")?.let { m ->
+                    for (id in m.keys.sorted()) {
+                        val got = readOrError(model, id)
+                        check("final.read.$id", got, m[id])
+                        report.observation.reads[id] = got
+                    }
                 }
             }
-            publish["dependents_of"]?.jsonObject?.let { m ->
-                for (id in m.keys.sorted()) {
-                    check("after_publish.dependents_of.$id", model.dependentsOf(id), m[id])
+
+            // Consumed by `runCorpus`, which needs every scenario's report before
+            // it can compare two worlds — not evaluable from inside one replay.
+            t.consume("observationally_equal")
+
+            val publish = t.obj("after_publish")
+            if (publish != null) {
+                publish.consuming("$fixture expected.after_publish") { p ->
+                    val publishOp = p.obj("op")
+                    if (publishOp != null) {
+                        val before = model.runLog.size
+                        model.set(
+                            publishOp["id"]!!.jsonPrimitive.content,
+                            publishOp["value"]!!.jsonPrimitive.int,
+                        )
+                        model.settle()
+                        report.observation.afterPublishObserved =
+                            model.runLog.toList().subList(before, model.runLog.size)
+                        checkList(
+                            "after_publish.observed_by",
+                            report.observation.afterPublishObserved,
+                            strs(p["observed_by"]),
+                        )
+                        // Order matches the reference runner: reads (which re-register
+                        // edges in a lazy binding) precede the degree assertions that
+                        // count them.
+                        p.obj("read")?.let { m ->
+                            for (id in m.keys.sorted()) {
+                                val got = readOrError(model, id)
+                                check("after_publish.read.$id", got, m[id])
+                                report.observation.afterPublishReads[id] = got
+                            }
+                        }
+                        p.obj("dependents_of")?.let { m ->
+                            for (id in m.keys.sorted()) {
+                                check("after_publish.dependents_of.$id", model.dependentsOf(id), m[id])
+                            }
+                        }
+                    } else {
+                        p.consume("observed_by", "read", "dependents_of")
+                    }
                 }
             }
         }
