@@ -155,6 +155,7 @@ class IpcConformanceTest {
             "delta_sequential.json",
             "delta_non_sequential.json",
             "delta_shared_blob.json",
+            "delta_zero_copy_arrow.json",
         ).forEach { name ->
             val fixture = loadFixture(name)
             val message = parseWire(fixture)
@@ -171,6 +172,7 @@ class IpcConformanceTest {
             "delta_sequential.json",
             "delta_non_sequential.json",
             "delta_shared_blob.json",
+            "delta_zero_copy_arrow.json",
         ).forEach { name ->
             val fixture = loadFixture(name)
             val message = parseWire(fixture)
@@ -264,6 +266,20 @@ class IpcConformanceTest {
                         is IpcValue.SharedBlob -> "SharedBlob"
                     }
                     assertEquals(expected, actual, "first_op_payload_kind")
+                }
+                // The pluggable blob-backend discriminator. Without this arm the
+                // arrow fixture would round-trip and "pass" while never checking
+                // the one field it exists to validate — a replay that asserts
+                // nothing is the failure mode this corpus is meant to prevent.
+                assertions.assertionString("first_op_payload_backend")?.let { expected ->
+                    val first = delta.ops.first()
+                    val payload = when (first) {
+                        is DeltaOp.CellSet -> first.payload
+                        is DeltaOp.SlotValue -> first.payload
+                        else -> error("first_op_payload_backend only valid for payload-bearing ops, got ${variantName(first)}")
+                    }
+                    val blob = assertIs<IpcValue.SharedBlob>(payload, "first_op_payload_backend needs a SharedBlob payload")
+                    assertEquals(expected, blob.blob.backend.wire, "first_op_payload_backend")
                 }
                 assertions.entries.firstOrNull { it.key.startsWith("resync_after_epoch_") }?.let { (key) ->
                     val lastEpoch = key.removePrefix("resync_after_epoch_").toLong()
