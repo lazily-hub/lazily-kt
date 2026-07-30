@@ -699,6 +699,32 @@ scale bench (`ScaleBench.kt`) models a spreadsheet of `2N` reactive nodes and
 highlights the lazy-pull viewport win (off-viewport formulas stay dirty and
 never recompute). Override the graph size with `LAZILY_SCALE_N`.
 
+## The lazily family
+
+lazily is one reactive kernel — `Source` / `Computed` / `Effect`, keyed
+collections, state charts, CRDTs, and a distributed plane — implemented natively
+in each language and held to a single cross-language contract:
+
+- [`lazily-spec`][spec] — the wire protocol, the generated feature matrix, and
+  the conformance corpus every binding replays.
+- [`lazily-formal`][formal] — the Lean 4 formal model the bindings share.
+
+| repo | language |
+|---|---|
+| [`lazily-rs`][rs] | Rust — the reference implementation |
+| [`lazily-py`][py] | Python |
+| [`lazily-go`][go] | Go |
+| **`lazily-kt`** | Kotlin / JVM — you are here |
+| [`lazily-js`][js] | JavaScript / TypeScript |
+| [`lazily-cs`][cs] | C# / .NET |
+| [`lazily-cpp`][cpp] | C++ |
+| [`lazily-zig`][zig] | Zig |
+| [`lazily-dart`][dart] | Dart / Flutter |
+| [`lazily-react`][react] | React / Preact bindings layered over [`lazily-js`][js] — not a separate language binding |
+
+Per-binding feature parity is tracked in the `coverage.json`-generated matrix in
+[`lazily-spec`][spec]; read it there rather than any hand copy.
+
 ## See also
 
 - [`lazily-spec`][spec] — language-agnostic wire protocol + the conformance
@@ -711,6 +737,12 @@ never recompute). Override the graph size with `LAZILY_SCALE_N`.
 
 [rs]: https://github.com/lazily-hub/lazily-rs
 [py]: https://github.com/lazily-hub/lazily-py
+[go]: https://github.com/lazily-hub/lazily-go
+[js]: https://github.com/lazily-hub/lazily-js
+[cs]: https://github.com/lazily-hub/lazily-cs
+[cpp]: https://github.com/lazily-hub/lazily-cpp
 [zig]: https://github.com/lazily-hub/lazily-zig
+[dart]: https://github.com/lazily-hub/lazily-dart
+[react]: https://github.com/lazily-hub/lazily-react
 [spec]: https://github.com/lazily-hub/lazily-spec
 [formal]: https://github.com/lazily-hub/lazily-formal
