@@ -20,44 +20,46 @@ import kotlin.test.assertEquals
  */
 class AsyncBatchCoalesceRaceTest {
     @Test
-    fun signalMaterializesOncePerBatchUnderRace() = runBlocking {
-        repeat(200) { iter ->
-            val ctx = AsyncContext()
-            val count = AtomicInteger(0)
-            try {
-                val a = ctx.source(1)
-                val b = ctx.source(2)
-                val sig = ctx.signalAsync {
-                    count.incrementAndGet()
-                    val av = get(a)
-                    yield()
-                    val bv = get(b)
-                    av + bv
-                }
-                ctx.settle()
-                assertEquals(1, count.get(), "iter=$iter baseline: one compute at creation")
+    fun signalMaterializesOncePerBatchUnderRace() =
+        runBlocking {
+            repeat(200) { iter ->
+                val ctx = AsyncContext()
+                val count = AtomicInteger(0)
+                try {
+                    val a = ctx.source(1)
+                    val b = ctx.source(2)
+                    val sig =
+                        ctx.signalAsync {
+                            count.incrementAndGet()
+                            val av = get(a)
+                            yield()
+                            val bv = get(b)
+                            av + bv
+                        }
+                    ctx.settle()
+                    assertEquals(1, count.get(), "iter=$iter baseline: one compute at creation")
 
-                // Batch with two writes -> exactly one additional compute.
-                ctx.batch {
-                    it.set(a, 10)
-                    it.set(b, 20)
-                }
-                ctx.settle()
-                assertEquals(30, ctx.getAsync(sig.slot))
-                assertEquals(2, count.get(), "iter=$iter: two writes, ONE additional compute")
+                    // Batch with two writes -> exactly one additional compute.
+                    ctx.batch {
+                        it.set(a, 10)
+                        it.set(b, 20)
+                    }
+                    ctx.settle()
+                    assertEquals(30, ctx.getAsync(sig.slot))
+                    assertEquals(2, count.get(), "iter=$iter: two writes, ONE additional compute")
 
-                // Batch with three writes (incl. repeat) -> still one more compute.
-                ctx.batch {
-                    it.set(a, 100)
-                    it.set(b, 200)
-                    it.set(a, 101)
+                    // Batch with three writes (incl. repeat) -> still one more compute.
+                    ctx.batch {
+                        it.set(a, 100)
+                        it.set(b, 200)
+                        it.set(a, 101)
+                    }
+                    ctx.settle()
+                    assertEquals(301, ctx.getAsync(sig.slot))
+                    assertEquals(3, count.get(), "iter=$iter: three writes, ONE additional compute")
+                } finally {
+                    ctx.dispose()
                 }
-                ctx.settle()
-                assertEquals(301, ctx.getAsync(sig.slot))
-                assertEquals(3, count.get(), "iter=$iter: three writes, ONE additional compute")
-            } finally {
-                ctx.dispose()
             }
         }
-    }
 }

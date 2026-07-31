@@ -75,7 +75,10 @@ class WorkQueueCell<T : Any>(
 
     private fun counts() = Counts(pending.size, inFlight.size, deadLetters.size)
 
-    private fun invalidate(before: Counts, after: Counts) {
+    private fun invalidate(
+        before: Counts,
+        after: Counts,
+    ) {
         val roots = ArrayList<Int>(4)
         if (before.pending != after.pending) roots += readers.pendingLen.id
         if ((before.pending == 0) != (after.pending == 0)) roots += readers.isEmpty.id
@@ -89,7 +92,10 @@ class WorkQueueCell<T : Any>(
         return if (Long.MAX_VALUE - now < visibilityTimeout) Long.MAX_VALUE else now + visibilityTimeout
     }
 
-    private fun fail(delivery: WorkQueueDelivery<T>, reason: WorkQueueDeadLetterReason) {
+    private fun fail(
+        delivery: WorkQueueDelivery<T>,
+        reason: WorkQueueDeadLetterReason,
+    ) {
         if (delivery.attempt < maxDeliveries) {
             pending.addLast(WorkQueueItem(delivery.itemId, delivery.value, delivery.attempt))
         } else {
@@ -115,7 +121,10 @@ class WorkQueueCell<T : Any>(
     }
 
     /** Claim the oldest pending item, minting a fresh delivery identity. */
-    fun claim(worker: String, now: Long): WorkQueueDelivery<T>? {
+    fun claim(
+        worker: String,
+        now: Long,
+    ): WorkQueueDelivery<T>? {
         require(now >= 0) { "now must be non-negative" }
         if (pending.isEmpty()) return null
         check(nextDeliveryId < Long.MAX_VALUE) { "delivery id exhausted" }
@@ -138,7 +147,10 @@ class WorkQueueCell<T : Any>(
     }
 
     /** Ack only the matching current delivery owned by [worker]. */
-    fun ack(worker: String, deliveryId: Long): Boolean {
+    fun ack(
+        worker: String,
+        deliveryId: Long,
+    ): Boolean {
         val delivery = inFlight[deliveryId] ?: return false
         if (delivery.worker != worker) return false
         val before = counts()
@@ -148,7 +160,10 @@ class WorkQueueCell<T : Any>(
     }
 
     /** Nack a matching delivery, requeueing or dead-lettering at the attempt limit. */
-    fun nack(worker: String, deliveryId: Long): Boolean {
+    fun nack(
+        worker: String,
+        deliveryId: Long,
+    ): Boolean {
         val delivery = inFlight[deliveryId] ?: return false
         if (delivery.worker != worker) return false
         val before = counts()

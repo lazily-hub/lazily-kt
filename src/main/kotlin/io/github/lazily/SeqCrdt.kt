@@ -31,7 +31,10 @@ private typealias SeqPeer = Long
  * that minted it so concurrent inserts into the same gap get a deterministic
  * total order. Compared lexicographically by `frac`, then `peer`.
  */
-data class Position(val frac: ByteArray, val peer: SeqPeer) : Comparable<Position> {
+data class Position(
+    val frac: ByteArray,
+    val peer: SeqPeer,
+) : Comparable<Position> {
     override fun compareTo(other: Position): Int {
         val n = minOf(frac.size, other.frac.size)
         for (i in 0 until n) {
@@ -44,51 +47,78 @@ data class Position(val frac: ByteArray, val peer: SeqPeer) : Comparable<Positio
         return peer.compareTo(other.peer)
     }
 
-    override fun equals(other: Any?): Boolean =
-        other is Position && frac.contentEquals(other.frac) && peer == other.peer
+    override fun equals(other: Any?): Boolean = other is Position && frac.contentEquals(other.frac) && peer == other.peer
 
     override fun hashCode(): Int = frac.contentHashCode() * 31 + peer.hashCode()
 }
 
 /** A hybrid logical clock stamp (wall, logical, peer) with a `(wall, logical)` then `peer` total order. */
-data class SeqStamp(val wall: Long, val logical: Long, val peer: SeqPeer) : Comparable<SeqStamp> {
+data class SeqStamp(
+    val wall: Long,
+    val logical: Long,
+    val peer: SeqPeer,
+) : Comparable<SeqStamp> {
     override fun compareTo(other: SeqStamp): Int {
-        var c = wall.compareTo(other.wall); if (c != 0) return c
-        c = logical.compareTo(other.logical); if (c != 0) return c
+        var c = wall.compareTo(other.wall)
+        if (c != 0) return c
+        c = logical.compareTo(other.logical)
+        if (c != 0) return c
         return peer.compareTo(other.peer)
     }
 }
 
 /** Caller-driven hybrid logical clock — deterministic (never reads the wall clock). */
-private class SeqHlc(private val peer: SeqPeer) {
+private class SeqHlc(
+    private val peer: SeqPeer,
+) {
     private var lastWall: Long = 0L
     private var lastLogical: Long = 0L
 
     /** Stamp a local event at caller-supplied wall time [nowMicros]. */
     fun send(nowMicros: Long): SeqStamp {
-        if (nowMicros > lastWall) { lastWall = nowMicros; lastLogical = 0L }
-        else lastLogical += 1
+        if (nowMicros > lastWall) {
+            lastWall = nowMicros
+            lastLogical = 0L
+        } else {
+            lastLogical += 1
+        }
         return SeqStamp(lastWall, lastLogical, peer)
     }
 
     /** Observe a remote [stamp] at wall time [nowMicros], advancing past it. */
-    fun recv(remote: SeqStamp, nowMicros: Long) {
+    fun recv(
+        remote: SeqStamp,
+        nowMicros: Long,
+    ) {
         val wall = maxOf(lastWall, remote.wall, nowMicros)
-        lastLogical = when {
-            wall == lastWall && wall == remote.wall -> maxOf(lastLogical, remote.logical) + 1
-            wall == lastWall -> lastLogical + 1
-            wall == remote.wall -> remote.logical + 1
-            else -> 0L
-        }
+        lastLogical =
+            when {
+                wall == lastWall && wall == remote.wall -> maxOf(lastLogical, remote.logical) + 1
+                wall == lastWall -> lastLogical + 1
+                wall == remote.wall -> remote.logical + 1
+                else -> 0L
+            }
         lastWall = wall
     }
 }
 
 /** Last-write-wins register over a stamp: the greatest stamp wins; equal never displaces. */
-private class SeqLww<T>(var value: T, var stamp: SeqStamp) {
+private class SeqLww<T>(
+    var value: T,
+    var stamp: SeqStamp,
+) {
     /** Apply a write, overwriting iff [s] strictly beats the current stamp. */
-    fun set(v: T, s: SeqStamp): Boolean =
-        if (s > stamp) { value = v; stamp = s; true } else false
+    fun set(
+        v: T,
+        s: SeqStamp,
+    ): Boolean =
+        if (s > stamp) {
+            value = v
+            stamp = s
+            true
+        } else {
+            false
+        }
 
     /** Merge another replica's state; returns whether the value changed. */
     fun mergeFrom(other: SeqLww<T>): Boolean = set(other.value, other.stamp)
@@ -111,7 +141,6 @@ class SeqCrdt<Id, V> private constructor(
     private var hlc: SeqHlc,
     private var peer: SeqPeer,
 ) where Id : Any, V : Any {
-
     /** Create an empty sequence owned by [peer]. */
     constructor(peer: SeqPeer) : this(LinkedHashMap(), SeqHlc(peer), peer)
 
@@ -121,33 +150,52 @@ class SeqCrdt<Id, V> private constructor(
      * Insert [id]/[value] between the live neighbours [left] and [right] (each
      * `null` for an open end). If [id] already exists this is a no-op.
      */
-    fun insertBetween(id: Id, value: V, left: Id?, right: Id?, nowMicros: Long) {
+    fun insertBetween(
+        id: Id,
+        value: V,
+        left: Id?,
+        right: Id?,
+        nowMicros: Long,
+    ) {
         if (entries.containsKey(id)) return
         val lo = left?.let { fracOf(it) }
         val hi = right?.let { fracOf(it) }
         val pos = Position(keyBetween(lo, hi), peer)
         val stamp = hlc.send(nowMicros)
-        entries[id] = SeqEntry(
-            SeqLww(value, stamp),
-            SeqLww(pos, stamp),
-            SeqLww(false, stamp),
-        )
+        entries[id] =
+            SeqEntry(
+                SeqLww(value, stamp),
+                SeqLww(pos, stamp),
+                SeqLww(false, stamp),
+            )
     }
 
     /** Append [id]/[value] after the current last live element. */
-    fun insertBack(id: Id, value: V, nowMicros: Long) {
+    fun insertBack(
+        id: Id,
+        value: V,
+        nowMicros: Long,
+    ) {
         val last = order().lastOrNull()
         insertBetween(id, value, last, null, nowMicros)
     }
 
     /** Prepend [id]/[value] before the current first live element. */
-    fun insertFront(id: Id, value: V, nowMicros: Long) {
+    fun insertFront(
+        id: Id,
+        value: V,
+        nowMicros: Long,
+    ) {
         val first = order().firstOrNull()
         insertBetween(id, value, null, first, nowMicros)
     }
 
     /** Last-writer-wins update of [id]'s value. Returns whether it applied. */
-    fun setValue(id: Id, value: V, nowMicros: Long): Boolean {
+    fun setValue(
+        id: Id,
+        value: V,
+        nowMicros: Long,
+    ): Boolean {
         val stamp = hlc.send(nowMicros)
         return entries[id]?.value?.set(value, stamp) ?: false
     }
@@ -156,7 +204,12 @@ class SeqCrdt<Id, V> private constructor(
      * Atomically move [id] between [left] and [right] (move-aware): a single LWW
      * reassignment of its position, keeping identity and value.
      */
-    fun moveBetween(id: Id, left: Id?, right: Id?, nowMicros: Long): Boolean {
+    fun moveBetween(
+        id: Id,
+        left: Id?,
+        right: Id?,
+        nowMicros: Long,
+    ): Boolean {
         if (!entries.containsKey(id)) return false
         val lo = left?.let { fracOf(it) }
         val hi = right?.let { fracOf(it) }
@@ -166,7 +219,11 @@ class SeqCrdt<Id, V> private constructor(
     }
 
     /** Move [id] to just after [anchor]. */
-    fun moveAfter(id: Id, anchor: Id, nowMicros: Long): Boolean {
+    fun moveAfter(
+        id: Id,
+        anchor: Id,
+        nowMicros: Long,
+    ): Boolean {
         val ord = order()
         val i = ord.indexOf(anchor)
         val right = if (i >= 0) ord.getOrNull(i + 1) else null
@@ -174,7 +231,11 @@ class SeqCrdt<Id, V> private constructor(
     }
 
     /** Move [id] to just before [anchor]. */
-    fun moveBefore(id: Id, anchor: Id, nowMicros: Long): Boolean {
+    fun moveBefore(
+        id: Id,
+        anchor: Id,
+        nowMicros: Long,
+    ): Boolean {
         val ord = order()
         val i = ord.indexOf(anchor)
         val left = if (i > 0) ord[i - 1] else null
@@ -182,7 +243,10 @@ class SeqCrdt<Id, V> private constructor(
     }
 
     /** Tombstone [id] (LWW). Returns whether it applied. */
-    fun remove(id: Id, nowMicros: Long): Boolean {
+    fun remove(
+        id: Id,
+        nowMicros: Long,
+    ): Boolean {
         val stamp = hlc.send(nowMicros)
         return entries[id]?.deleted?.set(true, stamp) ?: false
     }
@@ -232,7 +296,10 @@ class SeqCrdt<Id, V> private constructor(
      * adopted. Advances the local clock past everything observed. Returns
      * whether anything changed.
      */
-    fun merge(other: SeqCrdt<Id, V>, nowMicros: Long): Boolean {
+    fun merge(
+        other: SeqCrdt<Id, V>,
+        nowMicros: Long,
+    ): Boolean {
         // Advance the clock past the highest stamp we are about to observe.
         var maxStamp: SeqStamp? = null
         for (e in other.entries.values) {
@@ -258,34 +325,38 @@ class SeqCrdt<Id, V> private constructor(
     }
 
     /** Fork this replica's state to a new owning [peer] (deep copy, new identity). */
-    fun cloneStateAs(peer: SeqPeer): SeqCrdt<Id, V> =
-        SeqCrdt(LinkedHashMap(entries.mapValues { cloneEntry(it.value) }), SeqHlc(peer), peer)
+    fun cloneStateAs(peer: SeqPeer): SeqCrdt<Id, V> = SeqCrdt(LinkedHashMap(entries.mapValues { cloneEntry(it.value) }), SeqHlc(peer), peer)
 
     /** Clone state keeping the same peer identity. */
     fun cloneState(): SeqCrdt<Id, V> = cloneStateAs(peer)
 
-    private fun cloneEntry(e: SeqEntry<V>): SeqEntry<V> = SeqEntry(
-        SeqLww(e.value.value, e.value.stamp),
-        SeqLww(e.position.value, e.position.stamp),
-        SeqLww(e.deleted.value, e.deleted.stamp),
-    )
+    private fun cloneEntry(e: SeqEntry<V>): SeqEntry<V> =
+        SeqEntry(
+            SeqLww(e.value.value, e.value.stamp),
+            SeqLww(e.position.value, e.position.stamp),
+            SeqLww(e.deleted.value, e.deleted.stamp),
+        )
 }
 
 /**
  * Generate a fractional key strictly between [lo] and [hi] (each `null` for an
  * open end), as a byte sequence compared lexicographically.
  */
-internal fun keyBetween(lo: ByteArray?, hi: ByteArray?): ByteArray {
+internal fun keyBetween(
+    lo: ByteArray?,
+    hi: ByteArray?,
+): ByteArray {
     val result = ArrayList<Byte>()
     var i = 0
     // Safety bound: the shared prefix can be at most lo.len()+hi.len() long.
     val cap = (lo?.size ?: 0) + (hi?.size ?: 0) + 2
     while (i <= cap) {
         val a: Int = lo?.getOrNull(i)?.let { it.toInt() and 0xff } ?: 0
-        val b: Int = when {
-            hi != null -> hi.getOrNull(i)?.let { it.toInt() and 0xff } ?: 0
-            else -> 256
-        }
+        val b: Int =
+            when {
+                hi != null -> hi.getOrNull(i)?.let { it.toInt() and 0xff } ?: 0
+                else -> 256
+            }
         if (a + 1 < b) {
             // Gap of >= 2 at this digit: a midpoint digit lands strictly between.
             result.add(((a + b) / 2).toByte())

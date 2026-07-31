@@ -26,15 +26,21 @@ package io.github.lazily
  * A dotted, totally-ordered operation id (Lamport counter tiebroken by peer),
  * ordered `(counter, peer)`. Distinct from [OpId] (the text-CRDT char id).
  */
-data class TreeOpId(val counter: Long, val peer: Long) : Comparable<TreeOpId> {
+data class TreeOpId(
+    val counter: Long,
+    val peer: Long,
+) : Comparable<TreeOpId> {
     override fun compareTo(other: TreeOpId): Int {
-        val c = counter.compareTo(other.counter); if (c != 0) return c
+        val c = counter.compareTo(other.counter)
+        if (c != 0) return c
         return peer.compareTo(other.peer)
     }
 }
 
 /** Stable identity of one tree node: the id of the op that created it. */
-data class TreeNodeId(val op: TreeOpId) : Comparable<TreeNodeId> {
+data class TreeNodeId(
+    val op: TreeOpId,
+) : Comparable<TreeNodeId> {
     override fun compareTo(other: TreeNodeId): Int = op.compareTo(other.op)
 
     companion object {
@@ -48,18 +54,29 @@ enum class LeafKind { Token, Trivia, Raw, Error }
 
 /** What a `CreateNode` materializes: an element shell or a seeded text leaf. */
 sealed class NodeSeed {
-    data class Element(val kind: String) : NodeSeed()
-    data class Leaf(val kind: LeafKind, val text: String) : NodeSeed()
+    data class Element(
+        val kind: String,
+    ) : NodeSeed()
+
+    data class Leaf(
+        val kind: LeafKind,
+        val text: String,
+    ) : NodeSeed()
 }
 
 /** A fractional-index child position: orderable bytes tiebroken by minting peer. */
-data class SortKey(val frac: List<Int>, val peer: Long) : Comparable<SortKey> {
+data class SortKey(
+    val frac: List<Int>,
+    val peer: Long,
+) : Comparable<SortKey> {
     override fun compareTo(other: SortKey): Int {
         val n = minOf(frac.size, other.frac.size)
         for (i in 0 until n) {
-            val c = frac[i].compareTo(other.frac[i]); if (c != 0) return c
+            val c = frac[i].compareTo(other.frac[i])
+            if (c != 0) return c
         }
-        val c = frac.size.compareTo(other.frac.size); if (c != 0) return c
+        val c = frac.size.compareTo(other.frac.size)
+        if (c != 0) return c
         return peer.compareTo(other.peer)
     }
 }
@@ -73,11 +90,20 @@ sealed class TreeOpKind {
         val seed: NodeSeed,
     ) : TreeOpKind()
 
-    data class Tombstone(val node: TreeNodeId) : TreeOpKind()
+    data class Tombstone(
+        val node: TreeNodeId,
+    ) : TreeOpKind()
 
-    data class Reorder(val node: TreeNodeId, val sort: SortKey) : TreeOpKind()
+    data class Reorder(
+        val node: TreeNodeId,
+        val sort: SortKey,
+    ) : TreeOpKind()
 
-    data class LeafEdit(val node: TreeNodeId, val prev: TreeOpId, val ops: List<TextOp>) : TreeOpKind()
+    data class LeafEdit(
+        val node: TreeNodeId,
+        val prev: TreeOpId,
+        val ops: List<TextOp>,
+    ) : TreeOpKind()
 
     data class SplitLeaf(
         val node: TreeNodeId,
@@ -96,16 +122,26 @@ sealed class TreeOpKind {
 }
 
 /** A transport-ready tree operation: its dotted id plus the change it encodes. */
-data class TreeOp(val id: TreeOpId, val kind: TreeOpKind)
+data class TreeOp(
+    val id: TreeOpId,
+    val kind: TreeOpKind,
+)
 
 /** A batch of ops — the output of [LosslessTreeCrdt.diff], input to [LosslessTreeCrdt.applyUpdate]. */
-data class TreeUpdate(val ops: List<TreeOp>)
+data class TreeUpdate(
+    val ops: List<TreeOp>,
+)
 
 /** Errors from tree mutations. Text preservation wins, so these reject rather than drop bytes. */
-class TreeException(message: String) : RuntimeException(message)
+class TreeException(
+    message: String,
+) : RuntimeException(message)
 
 /** The observed dots for one peer: a contiguous prefix plus out-of-order holes. */
-internal class DotRange(var contiguous: Long = 0L, val sparse: java.util.TreeSet<Long> = java.util.TreeSet()) {
+internal class DotRange(
+    var contiguous: Long = 0L,
+    val sparse: java.util.TreeSet<Long> = java.util.TreeSet(),
+) {
     fun contains(counter: Long): Boolean = counter <= contiguous || sparse.contains(counter)
 
     fun observe(counter: Long) {
@@ -120,7 +156,9 @@ internal class DotRange(var contiguous: Long = 0L, val sparse: java.util.TreeSet
  * version vector (per-peer max), this represents non-contiguous delivery so
  * [LosslessTreeCrdt.diff] never omits a missing interior op.
  */
-class TreeVersionFrontier internal constructor(private val dots: MutableMap<Long, DotRange>) {
+class TreeVersionFrontier internal constructor(
+    private val dots: MutableMap<Long, DotRange>,
+) {
     constructor() : this(HashMap())
 
     /** Whether the op with dotted [id] is held. */
@@ -138,8 +176,14 @@ class TreeVersionFrontier internal constructor(private val dots: MutableMap<Long
 }
 
 private sealed class NodeBody {
-    class Element(val kind: String) : NodeBody()
-    class Leaf(val kind: LeafKind, var text: TextCrdt) : NodeBody()
+    class Element(
+        val kind: String,
+    ) : NodeBody()
+
+    class Leaf(
+        val kind: LeafKind,
+        var text: TextCrdt,
+    ) : NodeBody()
 }
 
 private class NodeRecord(
@@ -171,19 +215,20 @@ class LosslessTreeCrdt private constructor(
         peer,
         0L,
         hashMapOf(
-            TreeNodeId.ROOT to NodeRecord(
-                parent = null,
-                sort = SortKey(emptyList(), 0L),
-                sortStamp = TreeOpId(0L, 0L),
-                body = NodeBody.Element("root"),
-                tomb = null,
-                textHead = TreeOpId(0L, 0L),
-            ),
+            TreeNodeId.ROOT to
+                NodeRecord(
+                    parent = null,
+                    sort = SortKey(emptyList(), 0L),
+                    sortStamp = TreeOpId(0L, 0L),
+                    body = NodeBody.Element("root"),
+                    tomb = null,
+                    textHead = TreeOpId(0L, 0L),
+                ),
         ),
         TreeVersionFrontier(),
         mutableListOf(),
         mutableListOf(),
-        HashMap(),  // root has no parent → empty index
+        HashMap(), // root has no parent → empty index
     )
 
     /** Fork this replica's full state under a new owning [peer] (deep copy, new identity). */
@@ -208,17 +253,21 @@ class LosslessTreeCrdt private constructor(
     private fun copyNodes(): MutableMap<TreeNodeId, NodeRecord> {
         val out = HashMap<TreeNodeId, NodeRecord>(nodes.size)
         for ((id, r) in nodes) {
-            val body = when (val b = r.body) {
-                is NodeBody.Element -> NodeBody.Element(b.kind)
-                is NodeBody.Leaf -> NodeBody.Leaf(b.kind, b.text.clone())
-            }
+            val body =
+                when (val b = r.body) {
+                    is NodeBody.Element -> NodeBody.Element(b.kind)
+                    is NodeBody.Leaf -> NodeBody.Leaf(b.kind, b.text.clone())
+                }
             out[id] = NodeRecord(r.parent, r.sort, r.sortStamp, body, r.tomb, r.textHead)
         }
         return out
     }
 
     /** Insert child [id] under [parent] in this crdt's index (idempotent under apply replay). */
-    private fun indexAdd(parent: TreeNodeId, id: TreeNodeId) {
+    private fun indexAdd(
+        parent: TreeNodeId,
+        id: TreeNodeId,
+    ) {
         childrenByParent.getOrPut(parent) { mutableListOf() }.let { bucket ->
             if (id !in bucket) bucket.add(id)
         }
@@ -247,7 +296,10 @@ class LosslessTreeCrdt private constructor(
         return sb.toString()
     }
 
-    private fun renderInto(id: TreeNodeId, sb: StringBuilder) {
+    private fun renderInto(
+        id: TreeNodeId,
+        sb: StringBuilder,
+    ) {
         when (val body = nodes[id]?.body ?: return) {
             is NodeBody.Leaf -> sb.append(body.text.text())
             is NodeBody.Element -> for (child in liveChildren(id)) renderInto(child, sb)
@@ -270,24 +322,29 @@ class LosslessTreeCrdt private constructor(
     fun children(parent: TreeNodeId): List<TreeNodeId> = liveChildren(parent)
 
     /** A leaf's current text; throws if [node] is absent or an element. */
-    fun leafText(node: TreeNodeId): String = when (val body = nodes[node]?.body) {
-        is NodeBody.Leaf -> body.text.text()
-        is NodeBody.Element -> throw TreeException("node is not a leaf")
-        null -> throw TreeException("node not found")
-    }
+    fun leafText(node: TreeNodeId): String =
+        when (val body = nodes[node]?.body) {
+            is NodeBody.Leaf -> body.text.text()
+            is NodeBody.Element -> throw TreeException("node is not a leaf")
+            null -> throw TreeException("node not found")
+        }
 
-    private fun leafBody(node: TreeNodeId): NodeBody.Leaf = when (val body = nodes[node]?.body) {
-        is NodeBody.Leaf -> body
-        is NodeBody.Element -> throw TreeException("node is not a leaf")
-        null -> throw TreeException("node not found")
-    }
+    private fun leafBody(node: TreeNodeId): NodeBody.Leaf =
+        when (val body = nodes[node]?.body) {
+            is NodeBody.Leaf -> body
+            is NodeBody.Element -> throw TreeException("node is not a leaf")
+            null -> throw TreeException("node not found")
+        }
 
     /**
      * The fractional key placing a new/moved child of [parent] immediately after
      * [after] (front when `null`). Mirrors `SeqCrdt`'s `key_between`, with the
      * local peer as the tiebreak.
      */
-    private fun keyAfter(parent: TreeNodeId, after: TreeNodeId?): SortKey {
+    private fun keyAfter(
+        parent: TreeNodeId,
+        after: TreeNodeId?,
+    ): SortKey {
         val order = liveChildren(parent)
         val lo: TreeNodeId?
         val hi: TreeNodeId?
@@ -311,7 +368,11 @@ class LosslessTreeCrdt private constructor(
     }
 
     /** Create a node under [parent], positioned after [after] (front when `null`). */
-    fun createNode(parent: TreeNodeId, after: TreeNodeId?, seed: NodeSeed): TreeNodeId {
+    fun createNode(
+        parent: TreeNodeId,
+        after: TreeNodeId?,
+        seed: NodeSeed,
+    ): TreeNodeId {
         if (!nodes.containsKey(parent)) throw TreeException("node not found")
         val sort = keyAfter(parent, after)
         val opId = nextOpId()
@@ -328,7 +389,10 @@ class LosslessTreeCrdt private constructor(
     }
 
     /** Reorder [node] within its parent to just after [after] (front when `null`). */
-    fun reorderChild(node: TreeNodeId, after: TreeNodeId?) {
+    fun reorderChild(
+        node: TreeNodeId,
+        after: TreeNodeId?,
+    ) {
         val parent = nodes[node]?.parent ?: throw TreeException("node not found")
         val sort = keyAfter(parent, after)
         val opId = nextOpId()
@@ -339,11 +403,17 @@ class LosslessTreeCrdt private constructor(
      * Edit a leaf's text: delete [deleteBytes] and insert [insert] at UTF-8 byte
      * offset [atByte] (leaf-local). Offsets must land on char boundaries.
      */
-    fun editLeaf(node: TreeNodeId, atByte: Int, deleteBytes: Int, insert: String) {
+    fun editLeaf(
+        node: TreeNodeId,
+        atByte: Int,
+        deleteBytes: Int,
+        insert: String,
+    ) {
         val s = leafText(node)
         val start = Utf8Offsets.byteToUtf16(s, atByte) ?: throw TreeException("offset not on a char boundary")
-        val end = Utf8Offsets.byteToUtf16(s, atByte + deleteBytes)
-            ?: throw TreeException("offset not on a char boundary")
+        val end =
+            Utf8Offsets.byteToUtf16(s, atByte + deleteBytes)
+                ?: throw TreeException("offset not on a char boundary")
         val deleteCount = end - start
 
         // Re-own the leaf's text under this replica so concurrent edits from
@@ -365,7 +435,10 @@ class LosslessTreeCrdt private constructor(
      * Split a leaf at UTF-8 byte offset [atByte] into two adjacent leaves of the
      * same kind (head keeps [node], tail is a fresh node returned here).
      */
-    fun splitLeaf(node: TreeNodeId, atByte: Int): TreeNodeId {
+    fun splitLeaf(
+        node: TreeNodeId,
+        atByte: Int,
+    ): TreeNodeId {
         val s = leafText(node)
         val atChar = Utf8Offsets.byteToCodePoint(s, atByte) ?: throw TreeException("offset not on a char boundary")
         val parent = nodes.getValue(node).parent ?: throw TreeException("node not found")
@@ -378,7 +451,10 @@ class LosslessTreeCrdt private constructor(
     }
 
     /** Merge [right] into [left] when they are adjacent live leaf siblings. */
-    fun mergeAdjacentLeaves(left: TreeNodeId, right: TreeNodeId) {
+    fun mergeAdjacentLeaves(
+        left: TreeNodeId,
+        right: TreeNodeId,
+    ) {
         leafText(left) // validate leaf-ness
         leafText(right)
         val parent = nodes.getValue(left).parent ?: throw TreeException("node not found")
@@ -394,8 +470,10 @@ class LosslessTreeCrdt private constructor(
 
     /** Ops this replica holds that [their] frontier lacks, ordered by dotted id. */
     fun diff(their: TreeVersionFrontier): TreeUpdate {
-        val ops = log.filter { !their.contains(it.id) }
-            .sortedWith(compareBy({ it.id.counter }, { it.id.peer }))
+        val ops =
+            log
+                .filter { !their.contains(it.id) }
+                .sortedWith(compareBy({ it.id.counter }, { it.id.peer }))
         return TreeUpdate(ops)
     }
 
@@ -432,16 +510,19 @@ class LosslessTreeCrdt private constructor(
         }
     }
 
-    private fun dependenciesReady(op: TreeOp): Boolean = when (val k = op.kind) {
-        is TreeOpKind.CreateNode -> nodes.containsKey(k.parent)
-        is TreeOpKind.Tombstone -> nodes.containsKey(k.node)
-        is TreeOpKind.Reorder -> nodes.containsKey(k.node)
-        is TreeOpKind.LeafEdit -> nodes.containsKey(k.node) && frontier.contains(k.prev)
-        is TreeOpKind.SplitLeaf -> nodes.containsKey(k.node) && frontier.contains(k.prev)
-        is TreeOpKind.MergeLeaves ->
-            nodes.containsKey(k.left) && nodes.containsKey(k.right) &&
-                frontier.contains(k.prevLeft) && frontier.contains(k.prevRight)
-    }
+    private fun dependenciesReady(op: TreeOp): Boolean =
+        when (val k = op.kind) {
+            is TreeOpKind.CreateNode -> nodes.containsKey(k.parent)
+            is TreeOpKind.Tombstone -> nodes.containsKey(k.node)
+            is TreeOpKind.Reorder -> nodes.containsKey(k.node)
+            is TreeOpKind.LeafEdit -> nodes.containsKey(k.node) && frontier.contains(k.prev)
+            is TreeOpKind.SplitLeaf -> nodes.containsKey(k.node) && frontier.contains(k.prev)
+            is TreeOpKind.MergeLeaves ->
+                nodes.containsKey(k.left) &&
+                    nodes.containsKey(k.right) &&
+                    frontier.contains(k.prevLeft) &&
+                    frontier.contains(k.prevRight)
+        }
 
     private fun commitLocal(op: TreeOp) {
         applyOp(op)
@@ -457,18 +538,20 @@ class LosslessTreeCrdt private constructor(
         when (val k = op.kind) {
             is TreeOpKind.CreateNode -> {
                 if (nodes.containsKey(k.id)) return
-                val body = when (val seed = k.seed) {
-                    is NodeSeed.Element -> NodeBody.Element(seed.kind)
-                    is NodeSeed.Leaf -> NodeBody.Leaf(seed.kind, TextCrdt(k.id.op.peer, seed.text))
-                }
-                nodes[k.id] = NodeRecord(
-                    parent = k.parent,
-                    sort = k.sort,
-                    sortStamp = op.id,
-                    body = body,
-                    tomb = null,
-                    textHead = op.id,
-                )
+                val body =
+                    when (val seed = k.seed) {
+                        is NodeSeed.Element -> NodeBody.Element(seed.kind)
+                        is NodeSeed.Leaf -> NodeBody.Leaf(seed.kind, TextCrdt(k.id.op.peer, seed.text))
+                    }
+                nodes[k.id] =
+                    NodeRecord(
+                        parent = k.parent,
+                        sort = k.sort,
+                        sortStamp = op.id,
+                        body = body,
+                        tomb = null,
+                        textHead = op.id,
+                    )
                 indexAdd(k.parent, k.id)
             }
             is TreeOpKind.Tombstone -> {
@@ -495,7 +578,13 @@ class LosslessTreeCrdt private constructor(
         }
     }
 
-    private fun applySplit(node: TreeNodeId, new: TreeNodeId, sort: SortKey, atChar: Int, opId: TreeOpId) {
+    private fun applySplit(
+        node: TreeNodeId,
+        new: TreeNodeId,
+        sort: SortKey,
+        atChar: Int,
+        opId: TreeOpId,
+    ) {
         val rec = nodes[node] ?: return
         val leaf = rec.body as? NodeBody.Leaf ?: return
         val kind = leaf.kind
@@ -523,7 +612,11 @@ class LosslessTreeCrdt private constructor(
         if (!existedBefore && parent != null) indexAdd(parent, new)
     }
 
-    private fun applyMerge(left: TreeNodeId, right: TreeNodeId, opId: TreeOpId) {
+    private fun applyMerge(
+        left: TreeNodeId,
+        right: TreeNodeId,
+        opId: TreeOpId,
+    ) {
         val l = nodes[left] ?: return
         val r = nodes[right] ?: return
         val lb = l.body as? NodeBody.Leaf ?: return
@@ -540,7 +633,10 @@ class LosslessTreeCrdt private constructor(
  * end), compared lexicographically. Mirrors `SeqCrdt`'s `key_between`; bytes are
  * held as `Int` in `0..255`.
  */
-internal fun keyBetween(lo: List<Int>?, hi: List<Int>?): List<Int> {
+internal fun keyBetween(
+    lo: List<Int>?,
+    hi: List<Int>?,
+): List<Int> {
     val result = ArrayList<Int>()
     var i = 0
     val cap = (lo?.size ?: 0) + (hi?.size ?: 0) + 2

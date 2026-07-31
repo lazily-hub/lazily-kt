@@ -4,16 +4,22 @@ package io.github.lazily
  * Error from a [WebRtcSink] or [WebRtcSource]. Mirrors lazily-rs
  * `WebRtcTransportError`.
  */
-sealed class WebRtcTransportError(message: String, cause: Throwable? = null) :
-    RuntimeException(message, cause) {
+sealed class WebRtcTransportError(
+    message: String,
+    cause: Throwable? = null,
+) : RuntimeException(message, cause) {
     /** The channel was closed. */
     data object Closed : WebRtcTransportError("data channel closed")
 
     /** Frame serialization failure. */
-    class Encode(cause: Throwable) : WebRtcTransportError("frame encode error: ${cause.message}", cause)
+    class Encode(
+        cause: Throwable,
+    ) : WebRtcTransportError("frame encode error: ${cause.message}", cause)
 
     /** Frame deserialization failure. */
-    class Decode(cause: Throwable) : WebRtcTransportError("frame decode error: ${cause.message}", cause)
+    class Decode(
+        cause: Throwable,
+    ) : WebRtcTransportError("frame decode error: ${cause.message}", cause)
 }
 
 /**
@@ -42,21 +48,23 @@ class WebRtcSink(
      */
     fun send(msg: IpcMessage) {
         if (!channel.isOpen) throw WebRtcTransportError.Closed
-        val filtered: IpcMessage = when (msg) {
-            is IpcMessage.SnapshotMessage ->
-                IpcMessage.SnapshotMessage(msg.snapshot.filterReadable(permissions, peer))
-            is IpcMessage.DeltaMessage ->
-                IpcMessage.DeltaMessage(msg.delta.filterReadable(permissions, peer))
-            is IpcMessage.CrdtSyncMessage ->
-                IpcMessage.CrdtSyncMessage(msg.sync.filterReadable(permissions, peer))
-            // Reliable-sync control frames carry no node content; filtering is identity.
-            is IpcMessage.ResyncRequestMessage, is IpcMessage.OutboxAckMessage -> msg
-        }
-        val frame = try {
-            filtered.encodeJson()
-        } catch (e: Throwable) {
-            throw WebRtcTransportError.Encode(e)
-        }
+        val filtered: IpcMessage =
+            when (msg) {
+                is IpcMessage.SnapshotMessage ->
+                    IpcMessage.SnapshotMessage(msg.snapshot.filterReadable(permissions, peer))
+                is IpcMessage.DeltaMessage ->
+                    IpcMessage.DeltaMessage(msg.delta.filterReadable(permissions, peer))
+                is IpcMessage.CrdtSyncMessage ->
+                    IpcMessage.CrdtSyncMessage(msg.sync.filterReadable(permissions, peer))
+                // Reliable-sync control frames carry no node content; filtering is identity.
+                is IpcMessage.ResyncRequestMessage, is IpcMessage.OutboxAckMessage -> msg
+            }
+        val frame =
+            try {
+                filtered.encodeJson()
+            } catch (e: Throwable) {
+                throw WebRtcTransportError.Encode(e)
+            }
         channel.sendFrame(frame)
     }
 }
@@ -68,7 +76,9 @@ class WebRtcSink(
  * transport carries frames, and the graph-apply layer is the authority that
  * checks write permission before mutating local state.
  */
-class WebRtcSource(private val channel: DataChannel) {
+class WebRtcSource(
+    private val channel: DataChannel,
+) {
     /** Borrow the underlying channel. */
     fun channel(): DataChannel = channel
 

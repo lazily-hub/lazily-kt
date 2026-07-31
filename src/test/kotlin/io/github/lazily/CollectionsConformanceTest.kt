@@ -1,19 +1,13 @@
 package io.github.lazily
 
-import java.nio.file.Files
-import java.nio.file.Path
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
-import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.int
-import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.long
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -39,11 +33,13 @@ class CollectionsConformanceTest {
         return json.parseToJsonElement(text).jsonObject
     }
 
-    private fun strings(element: JsonArray): List<String> =
-        element.map { it.jsonPrimitive.content }
+    private fun strings(element: JsonArray): List<String> = element.map { it.jsonPrimitive.content }
 
     /** Set up a SourceMap seeded from a fixture `initial` block + reader memos. */
-    private class Harness(ctx: Context, map: SourceMap<String, Int>) {
+    private class Harness(
+        ctx: Context,
+        map: SourceMap<String, Int>,
+    ) {
         val ctx = ctx
         val map = map
         val handles: MutableMap<String, Int> = HashMap()
@@ -73,7 +69,10 @@ class CollectionsConformanceTest {
     /** A memo reading the order list — an order-class reader. */
     private fun Harness.orderReader() = ctx.computed { get(map.keys()) }
 
-    private fun applyOp(h: Harness, op: JsonObject) {
+    private fun applyOp(
+        h: Harness,
+        op: JsonObject,
+    ) {
         val type = op.getValue("type").jsonPrimitive.content
         when (type) {
             "set_value" -> h.map.setValue(op.getValue("key").jsonPrimitive.content, op.getValue("value").jsonPrimitive.int)
@@ -84,19 +83,25 @@ class CollectionsConformanceTest {
             }
             "remove" -> h.map.remove(op.getValue("key").jsonPrimitive.content)
             "move_to" -> h.map.moveTo(op.getValue("key").jsonPrimitive.content, op.getValue("index").jsonPrimitive.int)
-            "move_before" -> h.map.moveBefore(
-                op.getValue("key").jsonPrimitive.content,
-                op.getValue("before").jsonPrimitive.content,
-            )
-            "move_after" -> h.map.moveAfter(
-                op.getValue("key").jsonPrimitive.content,
-                op.getValue("after").jsonPrimitive.content,
-            )
+            "move_before" ->
+                h.map.moveBefore(
+                    op.getValue("key").jsonPrimitive.content,
+                    op.getValue("before").jsonPrimitive.content,
+                )
+            "move_after" ->
+                h.map.moveAfter(
+                    op.getValue("key").jsonPrimitive.content,
+                    op.getValue("after").jsonPrimitive.content,
+                )
             else -> error("unknown collection op: $type")
         }
     }
 
-    private fun assertExpected(h: Harness, expected: JsonObject, readers: Readers) {
+    private fun assertExpected(
+        h: Harness,
+        expected: JsonObject,
+        readers: Readers,
+    ) {
         if ("order" in expected) {
             assertEquals(strings(expected.getValue("order").jsonArray), h.map.keysNow(), "order")
         }
@@ -186,24 +191,26 @@ class CollectionsConformanceTest {
         val expected = fixture.getValue("expected").jsonObject
 
         // Assert the op set matches the canonical fixture (remove d, move a after c).
-        val expectedOps = expected.getValue("ops").jsonArray.map { opEl ->
-            val op = opEl.jsonObject
-            when (op.getValue("type").jsonPrimitive.content) {
-                "remove" -> ReconOp.Remove(op.getValue("key").jsonPrimitive.content)
-                "move" -> {
-                    val key = op.getValue("key").jsonPrimitive.content
-                    val anchor = if ("after" in op) {
-                        ReconOp.Anchor.After(op.getValue("after").jsonPrimitive.content)
-                    } else {
-                        ReconOp.Anchor.Before(op.getValue("before").jsonPrimitive.content)
+        val expectedOps =
+            expected.getValue("ops").jsonArray.map { opEl ->
+                val op = opEl.jsonObject
+                when (op.getValue("type").jsonPrimitive.content) {
+                    "remove" -> ReconOp.Remove(op.getValue("key").jsonPrimitive.content)
+                    "move" -> {
+                        val key = op.getValue("key").jsonPrimitive.content
+                        val anchor =
+                            if ("after" in op) {
+                                ReconOp.Anchor.After(op.getValue("after").jsonPrimitive.content)
+                            } else {
+                                ReconOp.Anchor.Before(op.getValue("before").jsonPrimitive.content)
+                            }
+                        ReconOp.Move(key, anchor)
                     }
-                    ReconOp.Move(key, anchor)
+                    "insert" -> ReconOp.Insert(op.getValue("key").jsonPrimitive.content)
+                    "update" -> ReconOp.Update(op.getValue("key").jsonPrimitive.content)
+                    else -> error("unknown reconcile op")
                 }
-                "insert" -> ReconOp.Insert(op.getValue("key").jsonPrimitive.content)
-                "update" -> ReconOp.Update(op.getValue("key").jsonPrimitive.content)
-                else -> error("unknown reconcile op")
             }
-        }
         assertEquals(expectedOps, ops)
 
         // Result order.
@@ -223,7 +230,11 @@ class CollectionsConformanceTest {
 
     private fun reconState(obj: JsonObject): ReconcileState {
         val order = strings(obj.getValue("order").jsonArray)
-        val values = obj.getValue("values").jsonObject.entries.associate { (k, v) -> k to v.jsonPrimitive.int }
+        val values =
+            obj
+                .getValue("values")
+                .jsonObject.entries
+                .associate { (k, v) -> k to v.jsonPrimitive.int }
         return ReconcileState(order, values)
     }
 
@@ -241,7 +252,8 @@ class CollectionsConformanceTest {
             SourceMap(ctx, prior.order.map { it to prior.values.getValue(it) })
         val readerB = ctx.computed { map.get("b") }
         val readerC = ctx.computed { map.get("c") }
-        ctx.get(readerB); ctx.get(readerC)
+        ctx.get(readerB)
+        ctx.get(readerC)
 
         map.reconcile(target.order, target.values)
 

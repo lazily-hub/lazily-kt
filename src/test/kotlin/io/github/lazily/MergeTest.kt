@@ -1,17 +1,15 @@
 package io.github.lazily
 
-import java.nio.file.Files
-import java.nio.file.Path
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertFalse
-import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /**
  * Phase 1 law-tests for the merge algebra (#relaycell). Every policy MUST be
@@ -20,9 +18,7 @@ import kotlinx.serialization.json.jsonPrimitive
  * identically to lazily-rs / lazily-js / lazily-py / lazily-go / lazily-zig.
  */
 class MergeTest {
-    private fun loadFixture(name: String): String {
-        return ConformanceFixtures.read("collections/$name")
-    }
+    private fun loadFixture(name: String): String = ConformanceFixtures.read("collections/$name")
 
     @Test
     fun every_policy_is_associative() {

@@ -1,7 +1,5 @@
 package io.github.lazily
 
-import java.nio.file.Files
-import java.nio.file.Path
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -9,6 +7,8 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.nio.file.Files
+import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -52,27 +52,31 @@ class AgentDocStateConformanceTest {
                 "clone lazily-spec as a sibling or set LAZILY_SPEC_DIR"
         }
         val schema = json.parseToJsonElement(Files.readString(schemaPath)).jsonObject
-        val enum = schema
-            .getValue("\$defs").jsonObject
-            .getValue("TypeTag").jsonObject
-            .getValue("enum").jsonArray
+        val enum =
+            schema
+                .getValue("\$defs")
+                .jsonObject
+                .getValue("TypeTag")
+                .jsonObject
+                .getValue("enum")
+                .jsonArray
         return enum.map { it.jsonPrimitive.content }.toSet()
     }
 
-    private fun parseWire(fixture: JsonObject): IpcMessage =
-        IpcMessage.fromJson(fixture.getValue("wire"))
+    private fun parseWire(fixture: JsonObject): IpcMessage = IpcMessage.fromJson(fixture.getValue("wire"))
 
-    private fun assertRoundTripJson(message: IpcMessage, fixture: JsonObject) {
+    private fun assertRoundTripJson(
+        message: IpcMessage,
+        fixture: JsonObject,
+    ) {
         assertEquals(fixture.getValue("wire"), message.toJson())
         assertEquals(message, IpcMessage.decodeJson(message.encodeJson()))
     }
 
     /** Decode a `Payload`/`Inline` byte payload (`serde_json(struct)` bytes) as a JSON object. */
-    private fun decodePayloadObject(bytes: ByteArray): JsonObject =
-        json.parseToJsonElement(String(bytes, Charsets.UTF_8)).jsonObject
+    private fun decodePayloadObject(bytes: ByteArray): JsonObject = json.parseToJsonElement(String(bytes, Charsets.UTF_8)).jsonObject
 
-    private fun payloadPhase(obj: JsonObject): String? =
-        (obj["phase"] as? JsonPrimitive)?.contentOrNull
+    private fun payloadPhase(obj: JsonObject): String? = (obj["phase"] as? JsonPrimitive)?.contentOrNull
 
     @Test
     fun `conformance agent-doc snapshot decodes round-trips and satisfies assertions`() {
@@ -84,31 +88,33 @@ class AgentDocStateConformanceTest {
         val snapshot = assertIs<IpcMessage.SnapshotMessage>(message).snapshot
         val vocab = typeTagVocabulary()
 
-        fixture.getValue("assertions").jsonObject
+        fixture
+            .getValue("assertions")
+            .jsonObject
             .consuming("agent-doc/snapshot_agent_doc_state.json assertions") { assertions ->
-        // Structural assertions.
-        assertions.assertLong("epoch") { snapshot.epoch }
-        assertions.assertLong("node_count") { snapshot.nodes.size.toLong() }
-        assertions.assertLong("edge_count") { snapshot.edges.size.toLong() }
-        assertions.assertLong("root_count") { snapshot.roots.size.toLong() }
+                // Structural assertions.
+                assertions.assertLong("epoch") { snapshot.epoch }
+                assertions.assertLong("node_count") { snapshot.nodes.size.toLong() }
+                assertions.assertLong("edge_count") { snapshot.edges.size.toLong() }
+                assertions.assertLong("root_count") { snapshot.roots.size.toLong() }
 
-        // type_tag vocabulary: the snapshot's tags match the asserted list and every tag is in the vocabulary.
-        val actualTags = snapshot.nodes.map { it.typeTag }.toSet()
-        assertions.assertKeyWith("type_tags") { want ->
-            assertEquals(want.jsonArray.map { it.jsonPrimitive.content }.toSet(), actualTags, "type_tags")
-        }
-        assertions.assertBoolean("all_type_tags_in_vocabulary") { actualTags.all { tag -> tag in vocab } }
+                // type_tag vocabulary: the snapshot's tags match the asserted list and every tag is in the vocabulary.
+                val actualTags = snapshot.nodes.map { it.typeTag }.toSet()
+                assertions.assertKeyWith("type_tags") { want ->
+                    assertEquals(want.jsonArray.map { it.jsonPrimitive.content }.toSet(), actualTags, "type_tags")
+                }
+                assertions.assertBoolean("all_type_tags_in_vocabulary") { actualTags.all { tag -> tag in vocab } }
 
-        // Decoded payload phases: closeout.cycle and queue.head carry a `phase`.
-        assertions.assertString("cycle_phase") {
-            val cycle = snapshot.nodes.single { it.typeTag == "agent_doc.closeout.cycle" }
-            payloadPhase(decodePayloadObject((cycle.state as NodeState.Payload).bytes))
-        }
-        assertions.assertString("queue_head_phase") {
-            val queueHead = snapshot.nodes.single { it.typeTag == "agent_doc.queue.head" }
-            payloadPhase(decodePayloadObject((queueHead.state as NodeState.Payload).bytes))
-        }
-        }
+                // Decoded payload phases: closeout.cycle and queue.head carry a `phase`.
+                assertions.assertString("cycle_phase") {
+                    val cycle = snapshot.nodes.single { it.typeTag == "agent_doc.closeout.cycle" }
+                    payloadPhase(decodePayloadObject((cycle.state as NodeState.Payload).bytes))
+                }
+                assertions.assertString("queue_head_phase") {
+                    val queueHead = snapshot.nodes.single { it.typeTag == "agent_doc.queue.head" }
+                    payloadPhase(decodePayloadObject((queueHead.state as NodeState.Payload).bytes))
+                }
+            }
 
         assertRoundTripJson(message, fixture)
     }
@@ -123,44 +129,47 @@ class AgentDocStateConformanceTest {
         val delta = assertIs<IpcMessage.DeltaMessage>(message).delta
         val vocab = typeTagVocabulary()
 
-        fixture.getValue("assertions").jsonObject
+        fixture
+            .getValue("assertions")
+            .jsonObject
             .consuming("agent-doc/delta_agent_doc_state.json assertions") { assertions ->
-        // Structural assertions.
-        assertions.assertLong("base_epoch") { delta.baseEpoch }
-        assertions.assertLong("epoch") { delta.epoch }
-        assertions.assertLong("op_count") { delta.ops.size.toLong() }
+                // Structural assertions.
+                assertions.assertLong("base_epoch") { delta.baseEpoch }
+                assertions.assertLong("epoch") { delta.epoch }
+                assertions.assertLong("op_count") { delta.ops.size.toLong() }
 
-        // added_type_tags: every NodeAdd in the delta introduces a vocabulary tag.
-        val addedTags = delta.ops
-            .filterIsInstance<DeltaOp.NodeAdd>()
-            .map { it.typeTag }
-            .toSet()
-        assertions.assertKeyWith("added_type_tags") { want ->
-            assertEquals(want.jsonArray.map { it.jsonPrimitive.content }.toSet(), addedTags, "added_type_tags")
-        }
-        assertions.assertBoolean("all_type_tags_in_vocabulary") {
-            val allTags = addedTags + delta.ops.filterIsInstance<DeltaOp.NodeAdd>().map { it.typeTag }
-            allTags.all { tag -> tag in vocab }
-        }
+                // added_type_tags: every NodeAdd in the delta introduces a vocabulary tag.
+                val addedTags =
+                    delta.ops
+                        .filterIsInstance<DeltaOp.NodeAdd>()
+                        .map { it.typeTag }
+                        .toSet()
+                assertions.assertKeyWith("added_type_tags") { want ->
+                    assertEquals(want.jsonArray.map { it.jsonPrimitive.content }.toSet(), addedTags, "added_type_tags")
+                }
+                assertions.assertBoolean("all_type_tags_in_vocabulary") {
+                    val allTags = addedTags + delta.ops.filterIsInstance<DeltaOp.NodeAdd>().map { it.typeTag }
+                    allTags.all { tag -> tag in vocab }
+                }
 
-        // Decoded payload phases after applying the delta's CellSet ops.
-        assertions.assertString("cycle_phase_after") {
-            delta.ops
-                .filterIsInstance<DeltaOp.CellSet>()
-                .single { it.node == 102L }
-                .let { payloadPhase(decodePayloadObject((it.payload as IpcValue.Inline).bytes)) }
-        }
-        assertions.assertString("queue_head_phase_after") {
-            delta.ops
-                .filterIsInstance<DeltaOp.CellSet>()
-                .single { it.node == 103L }
-                .let { payloadPhase(decodePayloadObject((it.payload as IpcValue.Inline).bytes)) }
-        }
+                // Decoded payload phases after applying the delta's CellSet ops.
+                assertions.assertString("cycle_phase_after") {
+                    delta.ops
+                        .filterIsInstance<DeltaOp.CellSet>()
+                        .single { it.node == 102L }
+                        .let { payloadPhase(decodePayloadObject((it.payload as IpcValue.Inline).bytes)) }
+                }
+                assertions.assertString("queue_head_phase_after") {
+                    delta.ops
+                        .filterIsInstance<DeltaOp.CellSet>()
+                        .single { it.node == 103L }
+                        .let { payloadPhase(decodePayloadObject((it.payload as IpcValue.Inline).bytes)) }
+                }
 
-        // The delta applies on top of the snapshot's epoch (base_epoch 3 → epoch 6, a coalesced jump).
-        assertTrue(delta.epoch > delta.baseEpoch)
-        assertFalse(delta.isNextAfter(delta.baseEpoch))
-        }
+                // The delta applies on top of the snapshot's epoch (base_epoch 3 → epoch 6, a coalesced jump).
+                assertTrue(delta.epoch > delta.baseEpoch)
+                assertFalse(delta.isNextAfter(delta.baseEpoch))
+            }
 
         assertRoundTripJson(message, fixture)
     }
@@ -230,8 +239,7 @@ class AgentDocStateConformanceTest {
         assertEquals(4, replica.nodeCount)
         assertEquals(6L, replica.epoch)
 
-        fun phaseOf(id: Long): String? =
-            payloadPhase(decodePayloadObject(replica.node(id)!!.payload!!))
+        fun phaseOf(id: Long): String? = payloadPhase(decodePayloadObject(replica.node(id)!!.payload!!))
 
         assertEquals("agent_doc.closeout.cycle", replica.node(102L)!!.typeTag)
         assertEquals("committed", phaseOf(102L))

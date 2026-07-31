@@ -22,7 +22,11 @@ class ReactiveContextTest {
         val ctx = Context()
         val src = ctx.source(1)
         var runs = 0
-        val derived = ctx.computed { runs++; get(src) * 2 }
+        val derived =
+            ctx.computed {
+                runs++
+                get(src) * 2
+            }
         assertEquals(2, ctx.get(derived))
         assertEquals(1, runs)
         // Equal set: no invalidation, no recompute on next read.
@@ -39,7 +43,11 @@ class ReactiveContextTest {
     fun slot_is_lazy_and_caches() {
         val ctx = Context()
         var calls = 0
-        val s = ctx.computed { calls++; 42 }
+        val s =
+            ctx.computed {
+                calls++
+                42
+            }
         assertFalse(ctx.isSet(s))
         assertEquals(42, ctx.get(s))
         assertEquals(1, calls)
@@ -80,9 +88,17 @@ class ReactiveContextTest {
         val ctx = Context()
         val trigger = ctx.source(1)
         // Projects to a constant regardless of trigger; memo guard keeps downstream.
-        val constant = ctx.computed { get(trigger); 7 }
+        val constant =
+            ctx.computed {
+                get(trigger)
+                7
+            }
         var leafRuns = 0
-        val leaf = ctx.computed { leafRuns++; get(constant) + 1 }
+        val leaf =
+            ctx.computed {
+                leafRuns++
+                get(constant) + 1
+            }
         assertEquals(8, ctx.get(leaf))
         assertEquals(1, leafRuns)
         trigger.set(ctx, 2) // constant recomputes to 7 (equal) → leaf must NOT recompute
@@ -95,12 +111,13 @@ class ReactiveContextTest {
         val ctx = Context()
         val src = ctx.source(0)
         val seen = mutableListOf<Int>()
-        val handle = ctx.effect {
-            val v = get(src)
-            seen.add(v)
-            val cleanup: () -> Unit = { seen.add(-1) }
-            cleanup
-        }
+        val handle =
+            ctx.effect {
+                val v = get(src)
+                seen.add(v)
+                val cleanup: () -> Unit = { seen.add(-1) }
+                cleanup
+            }
         // Initial run.
         assertEquals(listOf(0), seen)
         src.set(ctx, 1)
@@ -119,7 +136,12 @@ class ReactiveContextTest {
         val ctx = Context()
         val src = ctx.source(2)
         var sigRuns = 0
-        val sig = ctx.computed { sigRuns++; get(src) * 3 }.eager(ctx)
+        val sig =
+            ctx
+                .computed {
+                    sigRuns++
+                    get(src) * 3
+                }.eager(ctx)
         // Eager: computed at creation.
         assertEquals(1, sigRuns)
         assertEquals(6, ctx.get(sig))
@@ -129,9 +151,18 @@ class ReactiveContextTest {
         assertEquals(15, ctx.get(sig))
         // Memo guard: equal recompute (src back to 5 is no-op). Use a derived that stays equal.
         val toggle = ctx.source(true)
-        val proj = ctx.computed { get(toggle); 100 }.eager(ctx)
+        val proj =
+            ctx
+                .computed {
+                    get(toggle)
+                    100
+                }.eager(ctx)
         var downstreamRuns = 0
-        val downstream = ctx.computed { downstreamRuns++; get(proj) }
+        val downstream =
+            ctx.computed {
+                downstreamRuns++
+                get(proj)
+            }
         assertEquals(100, ctx.get(downstream))
         assertEquals(1, downstreamRuns)
         toggle.set(ctx, false) // proj recomputes to 100 (equal) → downstream not invalidated
@@ -159,7 +190,11 @@ class ReactiveContextTest {
         val b = ctx.source(1)
         val sum = ctx.computed { get(a) + get(b) }
         var effectRuns = 0
-        ctx.effect { get(sum); effectRuns++; null }
+        ctx.effect {
+            get(sum)
+            effectRuns++
+            null
+        }
         assertEquals(1, effectRuns)
         // Two sets in one batch → one combined effect rerun.
         ctx.batch {
@@ -176,9 +211,10 @@ class ReactiveContextTest {
         val branch = ctx.source(true)
         val left = ctx.source("L")
         val right = ctx.source("R")
-        val dyn = ctx.computed {
-            if (get(branch)) get(left) else get(right)
-        }
+        val dyn =
+            ctx.computed {
+                if (get(branch)) get(left) else get(right)
+            }
         assertEquals("L", ctx.get(dyn))
         // Changing the unread branch must NOT recompute (not a dependency yet).
         right.set(ctx, "R2")

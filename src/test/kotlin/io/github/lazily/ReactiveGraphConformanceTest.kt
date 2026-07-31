@@ -1,7 +1,5 @@
 package io.github.lazily
 
-import java.nio.file.Files
-import java.util.Collections
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -13,6 +11,8 @@ import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.nio.file.Files
+import java.util.Collections
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -82,6 +82,7 @@ import kotlin.test.fail
  * `scripts/check-conformance-coverage.sh` sees `reactive-graph/` in the
  * manifest and fails CI if this suite ever stops running.
  */
+
 /**
  * The failure a `fail_next`-armed compute body throws.
  *
@@ -89,8 +90,9 @@ import kotlin.test.fail
  * the library does not CACHE it, so what it is matters less than that the same
  * body throws it once per armed run and the node still re-runs afterwards.
  */
-private class ComputeFailedException(id: String) :
-    RuntimeException("reactive-graph: compute_failed (fail_next) for $id")
+private class ComputeFailedException(
+    id: String,
+) : RuntimeException("reactive-graph: compute_failed (fail_next) for $id")
 
 class ReactiveGraphConformanceTest {
     private val json = Json
@@ -103,34 +105,35 @@ class ReactiveGraphConformanceTest {
          * The canonical fixture set, asserted against the directory listing so a
          * fixture added or renamed upstream fails loudly instead of going unrun.
          */
-        val FIXTURES = listOf(
-            "churn_returns_to_baseline.json",
-            "cross_scope_teardown_hazard.json",
-            "disarm_disposes_nothing.json",
-            "disposal_does_not_run_surviving_effects.json",
-            "dispose_detaches_edges_both_directions.json",
-            "dispose_signal_reverts_to_lazy.json",
-        "failed_compute_is_never_cached.json",
-            // #lzmergefeed (lazily-spec, Step 3): the accumulate/fold write
-            // surface. Five exercise the `merge_cell` op this runner does not
-            // model (skipped as unsupported ops); the sixth uses only supported
-            // ops but asserts the novel `drain_exhausted` key (parked). All six
-            // are accounted-for skips in EXPECTED_SKIPS, not silent gaps.
-            "exact_fold_paths_stay_exact.json",
-            "feedback_drain_bound_reports_exhaustion.json",
-            "merge_cell_acquires_no_dependency_edge.json",
-            "merge_feed_through_a_formula_coalesces.json",
-            "merge_folds_synchronously_in_batch.json",
-            "merge_per_settled_cone_not_per_write.json",
-            "read_after_dispose_is_an_error.json",
-            "recycled_id_inherits_nothing.json",
-            "scope_teardown_equals_fold_of_disposals.json",
-            "scoping_bounds_teardown_not_visibility.json",
-            "signal_materializes_once_per_batch.json",
-            "signal_materializes_without_a_read.json",
-            "teardown_runs_members_in_reverse_creation_order.json",
-            "transitive_invalidation_reaches_depth.json",
-        )
+        val FIXTURES =
+            listOf(
+                "churn_returns_to_baseline.json",
+                "cross_scope_teardown_hazard.json",
+                "disarm_disposes_nothing.json",
+                "disposal_does_not_run_surviving_effects.json",
+                "dispose_detaches_edges_both_directions.json",
+                "dispose_signal_reverts_to_lazy.json",
+                "failed_compute_is_never_cached.json",
+                // #lzmergefeed (lazily-spec, Step 3): the accumulate/fold write
+                // surface. Five exercise the `merge_cell` op this runner does not
+                // model (skipped as unsupported ops); the sixth uses only supported
+                // ops but asserts the novel `drain_exhausted` key (parked). All six
+                // are accounted-for skips in EXPECTED_SKIPS, not silent gaps.
+                "exact_fold_paths_stay_exact.json",
+                "feedback_drain_bound_reports_exhaustion.json",
+                "merge_cell_acquires_no_dependency_edge.json",
+                "merge_feed_through_a_formula_coalesces.json",
+                "merge_folds_synchronously_in_batch.json",
+                "merge_per_settled_cone_not_per_write.json",
+                "read_after_dispose_is_an_error.json",
+                "recycled_id_inherits_nothing.json",
+                "scope_teardown_equals_fold_of_disposals.json",
+                "scoping_bounds_teardown_not_visibility.json",
+                "signal_materializes_once_per_batch.json",
+                "signal_materializes_without_a_read.json",
+                "teardown_runs_members_in_reverse_creation_order.json",
+                "transitive_invalidation_reaches_depth.json",
+            )
 
         /**
          * Ops this runner implements. A fixture naming anything outside this set
@@ -142,34 +145,35 @@ class ReactiveGraphConformanceTest {
          * `merge_cell`/`merges_of` here without implementing the op would fake a
          * pass.
          */
-        val SUPPORTED_OPS = setOf(
-            "batch",
-            "begin_scope",
-            "cell",
-            "churn",
-            "computed",
-            "disarm",
-            "dispose",
-            "dispose_fanout",
-            // `dispose_signal` and `signal` are the on-disk vocab; `undrive` and
-            // `drive` are the Cell-kernel names for the same ops (an eager
-            // Computed — #lzcellkernel), dual-accepted so a future
-            // spec-repo fixture emitting them does not panic as an unknown op.
-            "dispose_signal",
-            "drive",
-            "dispose_stale_handle",
-            "effect",
-            "end_scope",
-            // Arms the next N computes of an existing node to throw, so a
-            // fixture can assert on `computes_of` that a failed compute is
-            // never cached.
-            "fail_next",
-            "fanout",
-            "read",
-            "set_cell",
-            "signal",
-            "undrive",
-        )
+        val SUPPORTED_OPS =
+            setOf(
+                "batch",
+                "begin_scope",
+                "cell",
+                "churn",
+                "computed",
+                "disarm",
+                "dispose",
+                "dispose_fanout",
+                // `dispose_signal` and `signal` are the on-disk vocab; `undrive` and
+                // `drive` are the Cell-kernel names for the same ops (an eager
+                // Computed — #lzcellkernel), dual-accepted so a future
+                // spec-repo fixture emitting them does not panic as an unknown op.
+                "dispose_signal",
+                "drive",
+                "dispose_stale_handle",
+                "effect",
+                "end_scope",
+                // Arms the next N computes of an existing node to throw, so a
+                // fixture can assert on `computes_of` that a failed compute is
+                // never cached.
+                "fail_next",
+                "fanout",
+                "read",
+                "set_cell",
+                "signal",
+                "undrive",
+            )
 
         /**
          * Assertion keys this runner evaluates. An `expect` block naming
@@ -177,20 +181,21 @@ class ReactiveGraphConformanceTest {
          * the runner silently ignored is the "green while testing nothing"
          * failure mode this whole suite exists to close.
          */
-        val KNOWN_EXPECT_KEYS = setOf(
-            "cleanup_order",
-            "computes_of",
-            "dependencies_of",
-            "dependents_of",
-            "error",
-            "note",
-            "observed_by",
-            "observed_count",
-            "read",
-            "readable",
-            "scope_owned_count",
-            "value",
-        )
+        val KNOWN_EXPECT_KEYS =
+            setOf(
+                "cleanup_order",
+                "computes_of",
+                "dependencies_of",
+                "dependents_of",
+                "error",
+                "note",
+                "observed_by",
+                "observed_count",
+                "read",
+                "readable",
+                "scope_owned_count",
+                "value",
+            )
 
         /**
          * Divergences between lazily-kt and the canonical corpus, as
@@ -217,10 +222,11 @@ class ReactiveGraphConformanceTest {
          * runner (d36130b). The five `merge_cell` fixtures are NOT parked here:
          * they skip through the unsupported-op filter instead.
          */
-        val PARKED = mapOf(
-            "feedback_drain_bound_reports_exhaustion.json" to
-                "drain_exhausted/writes_own_cone (#lzmergefeed)",
-        )
+        val PARKED =
+            mapOf(
+                "feedback_drain_bound_reports_exhaustion.json" to
+                    "drain_exhausted/writes_own_cone (#lzmergefeed)",
+            )
 
         /**
          * The full skip ledger: fixture -> reason, asserted to equal the
@@ -237,15 +243,16 @@ class ReactiveGraphConformanceTest {
          * fix is upstream (#lzmergefeed), and clearing an entry means the op is
          * genuinely modelled.
          */
-        val EXPECTED_SKIPS = mapOf(
-            "exact_fold_paths_stay_exact.json" to "merge_cell",
-            "feedback_drain_bound_reports_exhaustion.json" to
-                "drain_exhausted/writes_own_cone (#lzmergefeed)",
-            "merge_cell_acquires_no_dependency_edge.json" to "merge_cell",
-            "merge_feed_through_a_formula_coalesces.json" to "merge_cell",
-            "merge_folds_synchronously_in_batch.json" to "merge_cell",
-            "merge_per_settled_cone_not_per_write.json" to "merge_cell",
-        )
+        val EXPECTED_SKIPS =
+            mapOf(
+                "exact_fold_paths_stay_exact.json" to "merge_cell",
+                "feedback_drain_bound_reports_exhaustion.json" to
+                    "drain_exhausted/writes_own_cone (#lzmergefeed)",
+                "merge_cell_acquires_no_dependency_edge.json" to "merge_cell",
+                "merge_feed_through_a_formula_coalesces.json" to "merge_cell",
+                "merge_folds_synchronously_in_batch.json" to "merge_cell",
+                "merge_per_settled_cone_not_per_write.json" to "merge_cell",
+            )
 
         /** Sentinel for a read that raised `read_after_dispose`. */
         const val READ_AFTER_DISPOSE = "read_after_dispose"
@@ -302,7 +309,10 @@ class ReactiveGraphConformanceTest {
         val armedFailures: MutableMap<String, Int>
 
         /** Arm the next [count] computes of [id] to throw. */
-        fun failNext(id: String, count: Int) {
+        fun failNext(
+            id: String,
+            count: Int,
+        ) {
             synchronized(computeCounts) {
                 armedFailures[id] = (armedFailures[id] ?: 0) + if (count > 0) count else 1
             }
@@ -317,32 +327,52 @@ class ReactiveGraphConformanceTest {
          * `computes_of` rather than on the error a caching binding also raises.
          */
         fun countCompute(id: String) {
-            val armed = synchronized(computeCounts) {
-                computeCounts[id] = (computeCounts[id] ?: 0) + 1
-                val n = armedFailures[id] ?: 0
-                if (n > 0) {
-                    armedFailures[id] = n - 1
-                    true
-                } else {
-                    false
+            val armed =
+                synchronized(computeCounts) {
+                    computeCounts[id] = (computeCounts[id] ?: 0) + 1
+                    val n = armedFailures[id] ?: 0
+                    if (n > 0) {
+                        armedFailures[id] = n - 1
+                        true
+                    } else {
+                        false
+                    }
                 }
-            }
             if (armed) throw ComputeFailedException(id)
         }
 
         /** Zero for a node that has never computed — never absent, never null. */
-        fun computesOf(id: String): Int =
-            synchronized(computeCounts) { computeCounts[id] ?: 0 }
+        fun computesOf(id: String): Int = synchronized(computeCounts) { computeCounts[id] ?: 0 }
 
-        fun defineCell(id: String, value: Int, scope: String?)
-        fun defineComputed(id: String, reads: List<String>, offset: Int, scope: String?)
-        fun defineEffect(id: String, reads: List<String>, scope: String?)
+        fun defineCell(
+            id: String,
+            value: Int,
+            scope: String?,
+        )
+
+        fun defineComputed(
+            id: String,
+            reads: List<String>,
+            offset: Int,
+            scope: String?,
+        )
+
+        fun defineEffect(
+            id: String,
+            reads: List<String>,
+            scope: String?,
+        )
 
         /**
          * An eager signal: `sum(reads) + offset`, the same compute convention as
          * [defineComputed]. Materializes once at creation (clause 1).
          */
-        fun defineSignal(id: String, reads: List<String>, offset: Int, scope: String?)
+        fun defineSignal(
+            id: String,
+            reads: List<String>,
+            offset: Int,
+            scope: String?,
+        )
 
         /**
          * Dispose the eager puller and nothing else (clause 4). NOT a node
@@ -365,15 +395,27 @@ class ReactiveGraphConformanceTest {
          */
         fun read(id: String): Int
 
-        fun set(id: String, value: Int)
+        fun set(
+            id: String,
+            value: Int,
+        )
+
         fun disposeId(id: String)
+
         fun kindOf(id: String): Kind
+
         fun isEffectActive(id: String): Boolean
+
         fun dependentsOf(id: String): Int
+
         fun dependenciesOf(id: String): Int
+
         fun beginScope(name: String)
+
         fun endScope(name: String)
+
         fun disarmScope(name: String)
+
         fun scopeOwned(name: String): Int
 
         /**
@@ -415,16 +457,29 @@ class ReactiveGraphConformanceTest {
         // so a read inside a compute/effect closure (Compute receiver) tracks and a
         // top-level read (Context receiver) does not.
         @Suppress("UNCHECKED_CAST")
-        private fun readNode(cx: ComputeOps, id: String): Int = when (val n = nodes[id]) {
-            is Cell<*> -> cx.get(n as Cell<Int>)
-            else -> error("unknown or unreadable node '$id'")
-        }
+        private fun readNode(
+            cx: ComputeOps,
+            id: String,
+        ): Int =
+            when (val n = nodes[id]) {
+                is Cell<*> -> cx.get(n as Cell<Int>)
+                else -> error("unknown or unreadable node '$id'")
+            }
 
-        override fun defineCell(id: String, value: Int, scope: String?) {
+        override fun defineCell(
+            id: String,
+            value: Int,
+            scope: String?,
+        ) {
             nodes[id] = scopes[scope]?.source(value) ?: ctx.source(value)
         }
 
-        override fun defineComputed(id: String, reads: List<String>, offset: Int, scope: String?) {
+        override fun defineComputed(
+            id: String,
+            reads: List<String>,
+            offset: Int,
+            scope: String?,
+        ) {
             val compute: Compute.() -> Int = {
                 countCompute(id)
                 var sum = offset
@@ -439,7 +494,12 @@ class ReactiveGraphConformanceTest {
             nodes[id] = scopes[scope]?.computed(compute) ?: ctx.computed(compute)
         }
 
-        override fun defineSignal(id: String, reads: List<String>, offset: Int, scope: String?) {
+        override fun defineSignal(
+            id: String,
+            reads: List<String>,
+            offset: Int,
+            scope: String?,
+        ) {
             // The eager construction: an eager Computed (`computed().eager()`).
             val compute: Compute.() -> Int = {
                 countCompute(id)
@@ -452,14 +512,17 @@ class ReactiveGraphConformanceTest {
             nodes[id] = fc
         }
 
-        override fun disposeSignal(id: String) =
-            (signals[id] ?: error("no signal '$id'")).lazy(ctx)
+        override fun disposeSignal(id: String) = (signals[id] ?: error("no signal '$id'")).lazy(ctx)
 
         override fun batchWrites(writes: List<Pair<String, Int>>) {
             ctx.batch { for ((id, v) in writes) set(id, v) }
         }
 
-        override fun defineEffect(id: String, reads: List<String>, scope: String?) {
+        override fun defineEffect(
+            id: String,
+            reads: List<String>,
+            scope: String?,
+        ) {
             val run: Compute.() -> (() -> Unit)? = {
                 runLog.add(id)
                 // Swallowed, not propagated: an effect that reads through a
@@ -479,7 +542,10 @@ class ReactiveGraphConformanceTest {
         override fun read(id: String): Int = readNode(ctx, id)
 
         @Suppress("UNCHECKED_CAST")
-        override fun set(id: String, value: Int) {
+        override fun set(
+            id: String,
+            value: Int,
+        ) {
             val cell = nodes[id] as? Source<*> ?: error("set_cell on non-cell '$id'")
             (cell as Source<Int>).set(ctx, value)
         }
@@ -488,24 +554,31 @@ class ReactiveGraphConformanceTest {
         // readable-as-an-error, and disposing it again must be a no-op.
         override fun disposeId(id: String) = ctx.disposeNode(nodes[id] ?: error("unknown '$id'"))
 
-        override fun kindOf(id: String): Kind = when (nodes[id]) {
-            is Source<*> -> Kind.CELL
-            is Effect -> Kind.EFFECT
-            else -> Kind.SLOT
-        }
+        override fun kindOf(id: String): Kind =
+            when (nodes[id]) {
+                is Source<*> -> Kind.CELL
+                is Effect -> Kind.EFFECT
+                else -> Kind.SLOT
+            }
 
-        override fun isEffectActive(id: String): Boolean =
-            ctx.isEffectActive(nodes[id] as Effect)
+        override fun isEffectActive(id: String): Boolean = ctx.isEffectActive(nodes[id] as Effect)
 
         override fun dependentsOf(id: String): Int = ctx.dependentCount(nodes[id]!!)
+
         override fun dependenciesOf(id: String): Int = ctx.dependencyCount(nodes[id]!!)
 
-        override fun beginScope(name: String) { scopes[name] = ctx.scope() }
+        override fun beginScope(name: String) {
+            scopes[name] = ctx.scope()
+        }
+
         override fun endScope(name: String) = scopes[name]!!.end()
+
         override fun disarmScope(name: String) = scopes[name]!!.disarm()
+
         override fun scopeOwned(name: String): Int = scopes[name]!!.size
 
         override fun settle() {}
+
         override fun close() {}
     }
 
@@ -524,17 +597,27 @@ class ReactiveGraphConformanceTest {
         private val signals = HashMap<String, ThreadSafeSignalHandle<Int>>()
 
         @Suppress("UNCHECKED_CAST")
-        private fun readNode(id: String): Int = when (val n = nodes[id]) {
-            is ThreadSafeSource<*> -> ctx.get(n as ThreadSafeSource<Int>)
-            is ThreadSafeComputed<*> -> ctx.get(n as ThreadSafeComputed<Int>)
-            else -> error("unknown or unreadable node '$id'")
-        }
+        private fun readNode(id: String): Int =
+            when (val n = nodes[id]) {
+                is ThreadSafeSource<*> -> ctx.get(n as ThreadSafeSource<Int>)
+                is ThreadSafeComputed<*> -> ctx.get(n as ThreadSafeComputed<Int>)
+                else -> error("unknown or unreadable node '$id'")
+            }
 
-        override fun defineCell(id: String, value: Int, scope: String?) {
+        override fun defineCell(
+            id: String,
+            value: Int,
+            scope: String?,
+        ) {
             nodes[id] = scopes[scope]?.source(value) ?: ctx.source(value)
         }
 
-        override fun defineComputed(id: String, reads: List<String>, offset: Int, scope: String?) {
+        override fun defineComputed(
+            id: String,
+            reads: List<String>,
+            offset: Int,
+            scope: String?,
+        ) {
             val compute: ThreadSafeContext.() -> Int = {
                 countCompute(id)
                 var sum = offset
@@ -544,26 +627,38 @@ class ReactiveGraphConformanceTest {
             nodes[id] = scopes[scope]?.computed(compute) ?: ctx.computed(compute)
         }
 
-        override fun defineSignal(id: String, reads: List<String>, offset: Int, scope: String?) {
-            val handle = ctx.signal {
-                countCompute(id)
-                var sum = offset
-                for (r in reads) sum += readNode(r)
-                sum
-            }
+        override fun defineSignal(
+            id: String,
+            reads: List<String>,
+            offset: Int,
+            scope: String?,
+        ) {
+            val handle =
+                ctx.signal {
+                    countCompute(id)
+                    var sum = offset
+                    for (r in reads) sum += readNode(r)
+                    sum
+                }
             signals[id] = handle
             nodes[id] = handle.slot
-            scopes[scope]?.let { it.adopt(handle.slot); it.adopt(handle.effect) }
+            scopes[scope]?.let {
+                it.adopt(handle.slot)
+                it.adopt(handle.effect)
+            }
         }
 
-        override fun disposeSignal(id: String) =
-            ctx.disposeSignal(signals[id] ?: error("no signal '$id'"))
+        override fun disposeSignal(id: String) = ctx.disposeSignal(signals[id] ?: error("no signal '$id'"))
 
         override fun batchWrites(writes: List<Pair<String, Int>>) {
             ctx.batch { for ((id, v) in writes) set(id, v) }
         }
 
-        override fun defineEffect(id: String, reads: List<String>, scope: String?) {
+        override fun defineEffect(
+            id: String,
+            reads: List<String>,
+            scope: String?,
+        ) {
             val run: ThreadSafeContext.() -> (() -> Unit)? = {
                 runLog.add(id)
                 try {
@@ -579,32 +674,43 @@ class ReactiveGraphConformanceTest {
         override fun read(id: String): Int = readNode(id)
 
         @Suppress("UNCHECKED_CAST")
-        override fun set(id: String, value: Int) {
-            val cell = nodes[id] as? ThreadSafeSource<*>
-                ?: error("set_cell on non-cell '$id'")
+        override fun set(
+            id: String,
+            value: Int,
+        ) {
+            val cell =
+                nodes[id] as? ThreadSafeSource<*>
+                    ?: error("set_cell on non-cell '$id'")
             ctx.set(cell as ThreadSafeSource<Int>, value)
         }
 
         override fun disposeId(id: String) = ctx.disposeNode(nodes[id] ?: error("unknown '$id'"))
 
-        override fun kindOf(id: String): Kind = when (nodes[id]) {
-            is ThreadSafeSource<*> -> Kind.CELL
-            is ThreadSafeEffectHandle -> Kind.EFFECT
-            else -> Kind.SLOT
-        }
+        override fun kindOf(id: String): Kind =
+            when (nodes[id]) {
+                is ThreadSafeSource<*> -> Kind.CELL
+                is ThreadSafeEffectHandle -> Kind.EFFECT
+                else -> Kind.SLOT
+            }
 
-        override fun isEffectActive(id: String): Boolean =
-            ctx.isEffectActive(nodes[id] as ThreadSafeEffectHandle)
+        override fun isEffectActive(id: String): Boolean = ctx.isEffectActive(nodes[id] as ThreadSafeEffectHandle)
 
         override fun dependentsOf(id: String): Int = ctx.dependentCount(nodes[id]!!)
+
         override fun dependenciesOf(id: String): Int = ctx.dependencyCount(nodes[id]!!)
 
-        override fun beginScope(name: String) { scopes[name] = ctx.scope() }
+        override fun beginScope(name: String) {
+            scopes[name] = ctx.scope()
+        }
+
         override fun endScope(name: String) = scopes[name]!!.end()
+
         override fun disarmScope(name: String) = scopes[name]!!.disarm()
+
         override fun scopeOwned(name: String): Int = scopes[name]!!.size
 
         override fun settle() {}
+
         override fun close() {}
     }
 
@@ -628,6 +734,7 @@ class ReactiveGraphConformanceTest {
         override val armedFailures = HashMap<String, Int>()
 
         private val ctx = AsyncContext()
+
         // Concurrent, NOT a plain HashMap: async compute/effect bodies resolve
         // node handles through [readNode] on the context's dispatcher while the
         // replay thread is still `put`ting later nodes (a fanout does 64 puts,
@@ -655,19 +762,29 @@ class ReactiveGraphConformanceTest {
             }
 
         @Suppress("UNCHECKED_CAST")
-        private suspend fun readTop(id: String): Int = when (val n = nodes[id]) {
-            is AsyncContext.AsyncSource<*> ->
-                ctx.get(n as AsyncContext.AsyncSource<Int>)
-            is AsyncContext.AsyncComputed<*> ->
-                ctx.getAsync(n as AsyncContext.AsyncComputed<Int>)
-            else -> error("unknown or unreadable node '$id'")
-        }
+        private suspend fun readTop(id: String): Int =
+            when (val n = nodes[id]) {
+                is AsyncContext.AsyncSource<*> ->
+                    ctx.get(n as AsyncContext.AsyncSource<Int>)
+                is AsyncContext.AsyncComputed<*> ->
+                    ctx.getAsync(n as AsyncContext.AsyncComputed<Int>)
+                else -> error("unknown or unreadable node '$id'")
+            }
 
-        override fun defineCell(id: String, value: Int, scope: String?) {
+        override fun defineCell(
+            id: String,
+            value: Int,
+            scope: String?,
+        ) {
             nodes[id] = scopes[scope]?.source(value) ?: ctx.source(value)
         }
 
-        override fun defineComputed(id: String, reads: List<String>, offset: Int, scope: String?) {
+        override fun defineComputed(
+            id: String,
+            reads: List<String>,
+            offset: Int,
+            scope: String?,
+        ) {
             val compute: suspend AsyncComputeContext.() -> Int = {
                 countCompute(id)
                 var sum = offset
@@ -677,30 +794,44 @@ class ReactiveGraphConformanceTest {
             nodes[id] = scopes[scope]?.computedAsync(compute) ?: ctx.computedAsync(compute)
         }
 
-        override fun defineSignal(id: String, reads: List<String>, offset: Int, scope: String?) {
-            val handle = ctx.signalAsync {
-                countCompute(id)
-                var sum = offset
-                for (r in reads) sum += readNode(r)
-                sum
-            }
+        override fun defineSignal(
+            id: String,
+            reads: List<String>,
+            offset: Int,
+            scope: String?,
+        ) {
+            val handle =
+                ctx.signalAsync {
+                    countCompute(id)
+                    var sum = offset
+                    for (r in reads) sum += readNode(r)
+                    sum
+                }
             signals[id] = handle
             nodes[id] = handle.slot
-            scopes[scope]?.let { it.adopt(handle.slot); it.adopt(handle.effect) }
+            scopes[scope]?.let {
+                it.adopt(handle.slot)
+                it.adopt(handle.effect)
+            }
         }
 
         // AsyncContext ships `disposeSignalNode` (both halves) but no
         // puller-only counterpart, so the puller effect is disposed directly.
         // That IS clause 4's operation — disposing the effect and nothing else.
-        override fun disposeSignal(id: String) = runBlocking {
-            ctx.disposeNode((signals[id] ?: error("no signal '$id'")).effect)
-        }
+        override fun disposeSignal(id: String) =
+            runBlocking {
+                ctx.disposeNode((signals[id] ?: error("no signal '$id'")).effect)
+            }
 
         override fun batchWrites(writes: List<Pair<String, Int>>) {
             ctx.batch { for ((id, v) in writes) set(id, v) }
         }
 
-        override fun defineEffect(id: String, reads: List<String>, scope: String?) {
+        override fun defineEffect(
+            id: String,
+            reads: List<String>,
+            scope: String?,
+        ) {
             val run: suspend AsyncComputeContext.() -> (suspend () -> Unit)? = {
                 runLog.add(id)
                 try {
@@ -708,7 +839,10 @@ class ReactiveGraphConformanceTest {
                 } catch (_: DisposedNodeException) {
                     // See SyncModel.defineEffect.
                 }
-                suspend { cleanupLog.add(id); Unit }
+                suspend {
+                    cleanupLog.add(id)
+                    Unit
+                }
             }
             nodes[id] = scopes[scope]?.effectAsync(run) ?: ctx.effectAsync(run)
         }
@@ -716,34 +850,46 @@ class ReactiveGraphConformanceTest {
         override fun read(id: String): Int = runBlocking { readTop(id) }
 
         @Suppress("UNCHECKED_CAST")
-        override fun set(id: String, value: Int) {
-            val cell = nodes[id] as? AsyncContext.AsyncSource<*>
-                ?: error("set_cell on non-cell '$id'")
+        override fun set(
+            id: String,
+            value: Int,
+        ) {
+            val cell =
+                nodes[id] as? AsyncContext.AsyncSource<*>
+                    ?: error("set_cell on non-cell '$id'")
             ctx.set(cell as AsyncContext.AsyncSource<Int>, value)
         }
 
-        override fun disposeId(id: String) = runBlocking {
-            ctx.disposeNode(nodes[id] ?: error("unknown '$id'"))
-        }
+        override fun disposeId(id: String) =
+            runBlocking {
+                ctx.disposeNode(nodes[id] ?: error("unknown '$id'"))
+            }
 
-        override fun kindOf(id: String): Kind = when (nodes[id]) {
-            is AsyncContext.AsyncSource<*> -> Kind.CELL
-            is AsyncContext.AsyncEffectHandle -> Kind.EFFECT
-            else -> Kind.SLOT
-        }
+        override fun kindOf(id: String): Kind =
+            when (nodes[id]) {
+                is AsyncContext.AsyncSource<*> -> Kind.CELL
+                is AsyncContext.AsyncEffectHandle -> Kind.EFFECT
+                else -> Kind.SLOT
+            }
 
-        override fun isEffectActive(id: String): Boolean =
-            !ctx.isDisposed(nodes[id] as AsyncContext.AsyncEffectHandle)
+        override fun isEffectActive(id: String): Boolean = !ctx.isDisposed(nodes[id] as AsyncContext.AsyncEffectHandle)
 
         override fun dependentsOf(id: String): Int = ctx.dependentCount(nodes[id]!!)
+
         override fun dependenciesOf(id: String): Int = ctx.dependencyCount(nodes[id]!!)
 
-        override fun beginScope(name: String) { scopes[name] = ctx.scope() }
+        override fun beginScope(name: String) {
+            scopes[name] = ctx.scope()
+        }
+
         override fun endScope(name: String) = runBlocking { scopes[name]!!.end() }
+
         override fun disarmScope(name: String) = scopes[name]!!.disarm()
+
         override fun scopeOwned(name: String): Int = scopes[name]!!.size
 
         override fun settle() = runBlocking { ctx.settle() }
+
         override fun close() = runBlocking { ctx.dispose() }
     }
 
@@ -777,14 +923,13 @@ class ReactiveGraphConformanceTest {
 
     // -- Fixture shape helpers --------------------------------------------
 
-    private fun stepsOf(node: JsonObject): List<JsonObject> =
-        node["steps"]!!.jsonArray.map { it.jsonObject }
+    private fun stepsOf(node: JsonObject): List<JsonObject> = node["steps"]!!.jsonArray.map { it.jsonObject }
 
-    private fun scenariosOf(fx: JsonObject): List<JsonObject> =
-        fx["scenarios"]!!.jsonArray.map { it.jsonObject }
+    private fun scenariosOf(fx: JsonObject): List<JsonObject> = fx["scenarios"]!!.jsonArray.map { it.jsonObject }
 
     private fun opsOf(fx: JsonObject): Set<String> {
         val out = sortedSetOf<String>()
+
         fun collect(o: JsonObject) {
             for (s in stepsOf(o)) out.add(s["op"]!!.jsonObject["type"]!!.jsonPrimitive.content)
         }
@@ -796,26 +941,32 @@ class ReactiveGraphConformanceTest {
         return out
     }
 
-    private fun strs(v: JsonElement?): List<String> =
-        v?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
+    private fun strs(v: JsonElement?): List<String> = v?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
 
     /** A top-level read: the value, or [READ_AFTER_DISPOSE] on a disposed node. */
-    private fun readOrError(model: Model, id: String): Any = try {
-        model.read(id)
-    } catch (_: DisposedNodeException) {
-        READ_AFTER_DISPOSE
-    } catch (_: ComputeFailedException) {
-        // Both are "this read failed", but they are different contracts:
-        // disposal is permanent, a `fail_next` compute failure is recoverable —
-        // the next read re-runs the body. Neither latches the id here.
-        COMPUTE_FAILED
-    }
+    private fun readOrError(
+        model: Model,
+        id: String,
+    ): Any =
+        try {
+            model.read(id)
+        } catch (_: DisposedNodeException) {
+            READ_AFTER_DISPOSE
+        } catch (_: ComputeFailedException) {
+            // Both are "this read failed", but they are different contracts:
+            // disposal is permanent, a `fail_next` compute failure is recoverable —
+            // the next read re-runs the body. Neither latches the id here.
+            COMPUTE_FAILED
+        }
 
     /**
      * `readable` is "can this node still be observed", which for an effect is
      * registration rather than a value.
      */
-    private fun alive(model: Model, id: String): Boolean =
+    private fun alive(
+        model: Model,
+        id: String,
+    ): Boolean =
         if (model.kindOf(id) == Kind.EFFECT) {
             model.isEffectActive(id)
         } else {
@@ -823,7 +974,10 @@ class ReactiveGraphConformanceTest {
         }
 
     /** Compare an observed value against a JSON scalar. */
-    private fun jsonEq(got: Any?, want: JsonElement?): Boolean {
+    private fun jsonEq(
+        got: Any?,
+        want: JsonElement?,
+    ): Boolean {
         val p = want as? JsonPrimitive ?: return false
         return when (got) {
             is Int -> runCatching { p.int }.getOrNull() == got
@@ -847,12 +1001,20 @@ class ReactiveGraphConformanceTest {
         val report = Report()
         var stepIdx = 0
 
-        fun check(key: String, got: Any?, want: JsonElement?) {
+        fun check(
+            key: String,
+            got: Any?,
+            want: JsonElement?,
+        ) {
             report.checks++
             if (!jsonEq(got, want)) report.failures.add("#$stepIdx:$key — got $got, want $want")
         }
 
-        fun checkList(key: String, got: List<String>, want: List<String>) {
+        fun checkList(
+            key: String,
+            got: List<String>,
+            want: List<String>,
+        ) {
             report.checks++
             if (got != want) report.failures.add("#$stepIdx:$key — got $got, want $want")
         }
@@ -869,52 +1031,59 @@ class ReactiveGraphConformanceTest {
             report.ops++
 
             when (type) {
-                "cell" -> model.defineCell(
-                    op["id"]!!.jsonPrimitive.content,
-                    op["value"]!!.jsonPrimitive.int,
-                    scope,
-                )
-                "computed" -> model.defineComputed(
-                    op["id"]!!.jsonPrimitive.content,
-                    strs(op["reads"]),
-                    op["offset"]?.jsonPrimitive?.int ?: 0,
-                    scope,
-                )
+                "cell" ->
+                    model.defineCell(
+                        op["id"]!!.jsonPrimitive.content,
+                        op["value"]!!.jsonPrimitive.int,
+                        scope,
+                    )
+                "computed" ->
+                    model.defineComputed(
+                        op["id"]!!.jsonPrimitive.content,
+                        strs(op["reads"]),
+                        op["offset"]?.jsonPrimitive?.int ?: 0,
+                        scope,
+                    )
                 // `signal`/`drive` both define the eager construction — a driven
                 // Computed (vocab-map: `signal(f)` ≡ `computed(f).eager()`).
-                "signal", "drive" -> model.defineSignal(
-                    op["id"]!!.jsonPrimitive.content,
-                    strs(op["reads"]),
-                    op["offset"]?.jsonPrimitive?.int ?: 0,
-                    scope,
-                )
+                "signal", "drive" ->
+                    model.defineSignal(
+                        op["id"]!!.jsonPrimitive.content,
+                        strs(op["reads"]),
+                        op["offset"]?.jsonPrimitive?.int ?: 0,
+                        scope,
+                    )
                 // `dispose_signal`/`undrive` both revert an eager value to lazy.
                 "dispose_signal", "undrive" -> model.disposeSignal(op["id"]!!.jsonPrimitive.content)
                 // A single op carrying its writes, not a begin/end pair, so the
                 // runner needs no nesting state. All writes land in ONE batch.
-                "batch" -> model.batchWrites(
-                    op["writes"]!!.jsonArray.map {
-                        val w = it.jsonObject
-                        w["id"]!!.jsonPrimitive.content to w["value"]!!.jsonPrimitive.int
-                    },
-                )
-                "effect" -> model.defineEffect(
-                    op["id"]!!.jsonPrimitive.content,
-                    strs(op["reads"]),
-                    scope,
-                )
+                "batch" ->
+                    model.batchWrites(
+                        op["writes"]!!.jsonArray.map {
+                            val w = it.jsonObject
+                            w["id"]!!.jsonPrimitive.content to w["value"]!!.jsonPrimitive.int
+                        },
+                    )
+                "effect" ->
+                    model.defineEffect(
+                        op["id"]!!.jsonPrimitive.content,
+                        strs(op["reads"]),
+                        scope,
+                    )
                 "read" -> {
                     opValue = readOrError(model, op["id"]!!.jsonPrimitive.content)
                     opError = opValue == READ_AFTER_DISPOSE || opValue == COMPUTE_FAILED
                 }
-                "fail_next" -> model.failNext(
-                    op["id"]!!.jsonPrimitive.content,
-                    op["count"]?.jsonPrimitive?.int ?: 1,
-                )
-                "set_cell" -> model.set(
-                    op["id"]!!.jsonPrimitive.content,
-                    op["value"]!!.jsonPrimitive.int,
-                )
+                "fail_next" ->
+                    model.failNext(
+                        op["id"]!!.jsonPrimitive.content,
+                        op["count"]?.jsonPrimitive?.int ?: 1,
+                    )
+                "set_cell" ->
+                    model.set(
+                        op["id"]!!.jsonPrimitive.content,
+                        op["value"]!!.jsonPrimitive.int,
+                    )
                 "dispose" -> model.disposeId(op["id"]!!.jsonPrimitive.content)
                 "fanout" -> {
                     // Subscribers are effects, not derived slots: the corpus
@@ -954,10 +1123,11 @@ class ReactiveGraphConformanceTest {
                     )
                     model.disposeId(of)
                 }
-                else -> error(
-                    "$fixture#$i: unsupported op '$type' reached the engine — the " +
-                        "runnability filter should have skipped this fixture",
-                )
+                else ->
+                    error(
+                        "$fixture#$i: unsupported op '$type' reached the engine — the " +
+                            "runnability filter should have skipped this fixture",
+                    )
             }
 
             model.settle()
@@ -1024,8 +1194,9 @@ class ReactiveGraphConformanceTest {
                                 "never compared. Either the error is authoritative and `value` " +
                                 "does not belong on this step, or the runner must assert both."
                         }
-                        val got = opValue
-                            ?: readOrError(model, op["id"]!!.jsonPrimitive.content)
+                        val got =
+                            opValue
+                                ?: readOrError(model, op["id"]!!.jsonPrimitive.content)
                         check("value", got, want)
                     }
                     "read" -> for (id in want!!.jsonObject.keys.sorted()) {
@@ -1038,11 +1209,12 @@ class ReactiveGraphConformanceTest {
                     "observed_count" -> check("observed_count", observed.size, want)
                     // Only effects run a cleanup callback, so the expected order
                     // is projected onto its effect entries.
-                    "cleanup_order" -> checkList(
-                        "cleanup_order",
-                        model.cleanupLog.toList(),
-                        strs(want).filter { model.kindOf(it) == Kind.EFFECT },
-                    )
+                    "cleanup_order" ->
+                        checkList(
+                            "cleanup_order",
+                            model.cleanupLog.toList(),
+                            strs(want).filter { model.kindOf(it) == Kind.EFFECT },
+                        )
                     "scope_owned_count" -> for (n in want!!.jsonObject.keys.sorted()) {
                         check("scope_owned_count.$n", model.scopeOwned(n), want.jsonObject[n])
                     }
@@ -1167,7 +1339,10 @@ class ReactiveGraphConformanceTest {
         return report
     }
 
-    private fun churn(model: Model, op: JsonObject) {
+    private fun churn(
+        model: Model,
+        op: JsonObject,
+    ) {
         val source = op["source"]!!.jsonPrimitive.content
         val prefix = op["id_prefix"]!!.jsonPrimitive.content
         val width = op["live_width"]!!.jsonPrimitive.int
@@ -1197,7 +1372,10 @@ class ReactiveGraphConformanceTest {
     // -- Corpus driver -----------------------------------------------------
 
     /** Replay the whole corpus against one execution model. Returns (fixtures, ops, checks). */
-    private fun runCorpus(create: () -> Model, modelName: String): Triple<Int, Int, Int> {
+    private fun runCorpus(
+        create: () -> Model,
+        modelName: String,
+    ): Triple<Int, Int, Int> {
         val executed = sortedSetOf<String>()
         val skipped = sortedMapOf<String, String>()
         val divergences = sortedSetOf<String>()
@@ -1258,11 +1436,12 @@ class ReactiveGraphConformanceTest {
                 val pair = strs(fx["expected"]?.jsonObject?.get("observationally_equal"))
                 if (pair.isNotEmpty()) {
                     val names = scenariosOf(fx).map { it["name"]!!.jsonPrimitive.content }
-                    val idx = pair.map { p ->
-                        names.indexOf(p).also {
-                            check(it >= 0) { "$name: unknown scenario '$p'" }
+                    val idx =
+                        pair.map { p ->
+                            names.indexOf(p).also {
+                                check(it >= 0) { "$name: unknown scenario '$p'" }
+                            }
                         }
-                    }
                     for (w in 1 until idx.size) {
                         val a = reports[idx[w - 1]].observation.describe()
                         val b = reports[idx[w]].observation.describe()
@@ -1349,12 +1528,14 @@ class ReactiveGraphConformanceTest {
         ConformanceFixtures.requireRoot()
 
         // (1) The fixture set on disk must match FIXTURES exactly.
-        val onDisk = Files.list(ConformanceFixtures.path(area)).use { stream ->
-            stream.map { it.fileName.toString() }
-                .filter { it.endsWith(".json") }
-                .sorted()
-                .toList()
-        }
+        val onDisk =
+            Files.list(ConformanceFixtures.path(area)).use { stream ->
+                stream
+                    .map { it.fileName.toString() }
+                    .filter { it.endsWith(".json") }
+                    .sorted()
+                    .toList()
+            }
         assertEquals(
             FIXTURES.sorted(),
             onDisk,
@@ -1363,11 +1544,12 @@ class ReactiveGraphConformanceTest {
                 "unrun (#lzspecconf).",
         )
 
-        val models: List<Pair<String, () -> Model>> = listOf(
-            "Context" to { SyncModel() },
-            "ThreadSafeContext" to { ThreadSafeModel() },
-            "AsyncContext" to { AsyncModel() },
-        )
+        val models: List<Pair<String, () -> Model>> =
+            listOf(
+                "Context" to { SyncModel() },
+                "ThreadSafeContext" to { ThreadSafeModel() },
+                "AsyncContext" to { AsyncModel() },
+            )
 
         var replayed = 0
         var ops = 0

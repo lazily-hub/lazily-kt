@@ -1,7 +1,5 @@
 package io.github.lazily
 
-import java.nio.file.Files
-import java.nio.file.Path
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -22,7 +20,10 @@ class WorkQueueConformanceTest {
         return Json.parseToJsonElement(text).jsonObject
     }
 
-    private fun assertDelivery(actual: WorkQueueDelivery<String>, expected: JsonObject) {
+    private fun assertDelivery(
+        actual: WorkQueueDelivery<String>,
+        expected: JsonObject,
+    ) {
         assertEquals(expected.getValue("delivery_id").jsonPrimitive.long, actual.deliveryId)
         assertEquals(expected.getValue("item_id").jsonPrimitive.long, actual.itemId)
         assertEquals(expected.getValue("value").jsonPrimitive.content, actual.value)
@@ -31,7 +32,11 @@ class WorkQueueConformanceTest {
         assertEquals(expected.getValue("deadline").jsonPrimitive.long, actual.deadline)
     }
 
-    private fun assertInvalidations(ctx: Context, queue: WorkQueueCell<String>, expected: JsonObject) {
+    private fun assertInvalidations(
+        ctx: Context,
+        queue: WorkQueueCell<String>,
+        expected: JsonObject,
+    ) {
         val invalidates = expected.getValue("invalidates").jsonObject
         assertEquals(invalidates.getValue("pending_len").jsonPrimitive.boolean, !ctx.isSet(queue.readers.pendingLen))
         assertEquals(invalidates.getValue("is_empty").jsonPrimitive.boolean, !ctx.isSet(queue.readers.isEmpty))
@@ -39,7 +44,10 @@ class WorkQueueConformanceTest {
         assertEquals(invalidates.getValue("dead_letter_len").jsonPrimitive.boolean, !ctx.isSet(queue.readers.deadLetterLen))
     }
 
-    private fun assertState(queue: WorkQueueCell<String>, expected: JsonObject) {
+    private fun assertState(
+        queue: WorkQueueCell<String>,
+        expected: JsonObject,
+    ) {
         val expectedPending = expected.getValue("pending").jsonArray
         assertEquals(expectedPending.size, queue.pendingItems().size)
         queue.pendingItems().zip(expectedPending).forEach { (actual, raw) ->
@@ -62,10 +70,11 @@ class WorkQueueConformanceTest {
             assertEquals(dead.getValue("item_id").jsonPrimitive.long, actual.itemId)
             assertEquals(dead.getValue("value").jsonPrimitive.content, actual.value)
             assertEquals(dead.getValue("attempts").jsonPrimitive.int, actual.attempts)
-            val reason = when (actual.reason) {
-                WorkQueueDeadLetterReason.Nack -> "nack"
-                WorkQueueDeadLetterReason.Expired -> "expired"
-            }
+            val reason =
+                when (actual.reason) {
+                    WorkQueueDeadLetterReason.Nack -> "nack"
+                    WorkQueueDeadLetterReason.Expired -> "expired"
+                }
             assertEquals(dead.getValue("reason").jsonPrimitive.content, reason)
         }
 

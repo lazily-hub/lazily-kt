@@ -1,7 +1,5 @@
 package io.github.lazily
 
-import java.nio.file.Files
-import java.nio.file.Path
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
@@ -28,19 +26,32 @@ class WindowingConformanceTest {
     }
 
     private fun steps(fx: JsonObject) = fx["steps"]!!.jsonArray
-    private fun ret(step: JsonObject) = step["returns"]!!.jsonPrimitive.longOrNull
-    private fun expOut(step: JsonObject) =
-        step["expected"]!!.jsonObject["output"]!!.jsonPrimitive.longOrNull
-    private fun inval(step: JsonObject) =
-        step["expected"]!!.jsonObject["invalidates"]!!.jsonObject["output"]!!.jsonPrimitive.boolean
 
-    private fun observe(ctx: Context, cell: Source<Any>): Computed<Any> {
+    private fun ret(step: JsonObject) = step["returns"]!!.jsonPrimitive.longOrNull
+
+    private fun expOut(step: JsonObject) = step["expected"]!!.jsonObject["output"]!!.jsonPrimitive.longOrNull
+
+    private fun inval(step: JsonObject) =
+        step["expected"]!!
+            .jsonObject["invalidates"]!!
+            .jsonObject["output"]!!
+            .jsonPrimitive.boolean
+
+    private fun observe(
+        ctx: Context,
+        cell: Source<Any>,
+    ): Computed<Any> {
         val obs = ctx.computed { get(cell) }
         ctx.get(obs)
         return obs
     }
 
-    private fun check(ctx: Context, obs: Computed<Any>, step: JsonObject, out: Long?) {
+    private fun check(
+        ctx: Context,
+        obs: Computed<Any>,
+        step: JsonObject,
+        out: Long?,
+    ) {
         assertEquals(expOut(step), out, "output")
         val wasCached = ctx.isSet(obs)
         ctx.get(obs)
@@ -73,11 +84,13 @@ class WindowingConformanceTest {
             val step = element.jsonObject
             val op = step["op"]!!.jsonObject
             val now = op["now"]!!.jsonPrimitive.long
-            val e = if (op["type"]!!.jsonPrimitive.content == "push") {
-                w.push(now, op["value"]!!.jsonPrimitive.long); null
-            } else {
-                w.tick(now)
-            }
+            val e =
+                if (op["type"]!!.jsonPrimitive.content == "push") {
+                    w.push(now, op["value"]!!.jsonPrimitive.long)
+                    null
+                } else {
+                    w.tick(now)
+                }
             assertEquals(ret(step), e, "emit")
             check(ctx, obs, step, w.output())
         }
@@ -109,11 +122,12 @@ class WindowingConformanceTest {
             val step = element.jsonObject
             val op = step["op"]!!.jsonObject
             val now = op["now"]!!.jsonPrimitive.long
-            val e = if (op["type"]!!.jsonPrimitive.content == "push") {
-                w.push(now, op["value"]!!.jsonPrimitive.long)
-            } else {
-                w.flush(now)
-            }
+            val e =
+                if (op["type"]!!.jsonPrimitive.content == "push") {
+                    w.push(now, op["value"]!!.jsonPrimitive.long)
+                } else {
+                    w.flush(now)
+                }
             assertEquals(ret(step), e, "emit")
             check(ctx, obs, step, w.output())
         }

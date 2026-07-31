@@ -3,7 +3,6 @@ package io.github.lazily
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
-import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -60,13 +59,14 @@ class CrdtRuntimeTest {
 
     @Test
     fun `watermark is the min across membership and undefined for unobserved peers`() {
-        val f = StampFrontier(
-            mapOf(
-                1L to WireStamp(200, 0, 1),
-                2L to WireStamp(150, 0, 2),
-                3L to WireStamp(300, 0, 3),
-            ),
-        )
+        val f =
+            StampFrontier(
+                mapOf(
+                    1L to WireStamp(200, 0, 1),
+                    2L to WireStamp(150, 0, 2),
+                    3L to WireStamp(300, 0, 3),
+                ),
+            )
         // min over membership {1,2,3} is the smallest (150,0,2).
         assertEquals(WireStamp(150, 0, 2), f.watermark(listOf(1L, 2L, 3L)))
         // A member the frontier has not observed -> undefined (fail closed).
@@ -77,12 +77,13 @@ class CrdtRuntimeTest {
     @Test
     fun `lww register last write wins and ignores dominated stamps`() {
         val ctx = Context()
-        val cell = ctx.replicatedCell(
-            initial = "a",
-            register = LwwRegister(CrdtCodec.string),
-            codec = CrdtCodec.string,
-            clock = CrdtClock(peer = 1),
-        )
+        val cell =
+            ctx.replicatedCell(
+                initial = "a",
+                register = LwwRegister(CrdtCodec.string),
+                codec = CrdtCodec.string,
+                clock = CrdtClock(peer = 1),
+            )
         // The register is seeded with the initial value at a pre-history stamp
         // (0,0,0), so a real remote write supersedes it.
         val op1 = CrdtOp(node = 1, key = null, stamp = WireStamp(100, 0, 2), state = IpcValue.Inline("v1".encodeToByteArray()))
@@ -107,12 +108,13 @@ class CrdtRuntimeTest {
     @Test
     fun `lww merge into backing cell is equality-guarded downstream`() {
         val ctx = Context()
-        val cell = ctx.replicatedCell(
-            initial = "v",
-            register = LwwRegister(CrdtCodec.string),
-            codec = CrdtCodec.string,
-            clock = CrdtClock(peer = 1),
-        )
+        val cell =
+            ctx.replicatedCell(
+                initial = "v",
+                register = LwwRegister(CrdtCodec.string),
+                codec = CrdtCodec.string,
+                clock = CrdtClock(peer = 1),
+            )
         val downstream = ctx.computed { get(cell.backing) }
         ctx.get(downstream) // establish dep
 
@@ -181,7 +183,11 @@ class CrdtRuntimeTest {
         val ctx = Context()
         val codec = CrdtCodec.int
         val cell = ctx.replicatedCell(0, LwwRegister(codec), codec, CrdtClock(peer = 9))
-        fun op(v: Int, s: WireStamp) = CrdtOp(1, null, s, IpcValue.Inline(codec.encode(v)))
+
+        fun op(
+            v: Int,
+            s: WireStamp,
+        ) = CrdtOp(1, null, s, IpcValue.Inline(codec.encode(v)))
 
         val s1 = WireStamp(100, 0, 1)
         val s2 = WireStamp(200, 0, 1)

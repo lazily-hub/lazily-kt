@@ -29,9 +29,11 @@ package io.github.lazily
  * Ownership is explicit: the caller owns input bytes; the host owns output
  * buffers until the paired [LazilyFfiChannel.freeBytes] is called.
  */
-data class LazilyFfiBytes(val bytes: ByteArray, val len: Int = bytes.size) {
-    override fun equals(other: Any?): Boolean =
-        other is LazilyFfiBytes && len == other.len && bytes.contentEquals(other.bytes)
+data class LazilyFfiBytes(
+    val bytes: ByteArray,
+    val len: Int = bytes.size,
+) {
+    override fun equals(other: Any?): Boolean = other is LazilyFfiBytes && len == other.len && bytes.contentEquals(other.bytes)
 
     override fun hashCode(): Int = bytes.contentHashCode()
 }
@@ -40,17 +42,19 @@ data class LazilyFfiBytes(val bytes: ByteArray, val len: Int = bytes.size) {
  * FFI operation status code. Mirrors the C `LazilyFfiStatus` enum
  * (`lazily-spec/schemas/ffi.json`): 0..5.
  */
-enum class LazilyFfiStatus(val code: Int) {
+enum class LazilyFfiStatus(
+    val code: Int,
+) {
     Ok(0),
     Empty(1),
     NullPointer(2),
     InvalidMessage(3),
     EncodeFailed(4),
-    Panic(5);
+    Panic(5),
+    ;
 
     companion object {
-        fun fromCode(code: Int): LazilyFfiStatus =
-            entries.firstOrNull { it.code == code } ?: error("unknown LazilyFfiStatus code: $code")
+        fun fromCode(code: Int): LazilyFfiStatus = entries.firstOrNull { it.code == code } ?: error("unknown LazilyFfiStatus code: $code")
     }
 }
 
@@ -60,13 +64,16 @@ enum class LazilyFfiStatus(val code: Int) {
  *
  * **`CrdtSync = 3` is required** of every conforming FFI host.
  */
-enum class LazilyFfiMessageKind(val code: Int) {
+enum class LazilyFfiMessageKind(
+    val code: Int,
+) {
     Unknown(0),
     Snapshot(1),
     Delta(2),
     CrdtSync(3),
     ResyncRequest(4),
-    OutboxAck(5);
+    OutboxAck(5),
+    ;
 
     companion object {
         fun fromCode(code: Int): LazilyFfiMessageKind =
@@ -81,7 +88,9 @@ data class LazilyFfiDecoded(
     val canonicalBytes: ByteArray,
 ) {
     override fun equals(other: Any?): Boolean =
-        other is LazilyFfiDecoded && status == other.status && message == other.message &&
+        other is LazilyFfiDecoded &&
+            status == other.status &&
+            message == other.message &&
             canonicalBytes.contentEquals(other.canonicalBytes)
 
     override fun hashCode(): Int = canonicalBytes.contentHashCode()
@@ -102,7 +111,10 @@ object LazilyFfiChannel {
      * Decode [input] (claiming it is of [kind]) as an [IpcMessage] and re-encode
      * canonical JSON bytes. Returns a failed status (never throws) on any error.
      */
-    fun decode(kind: LazilyFfiMessageKind, input: LazilyFfiBytes): LazilyFfiDecoded {
+    fun decode(
+        kind: LazilyFfiMessageKind,
+        input: LazilyFfiBytes,
+    ): LazilyFfiDecoded {
         if (input.len == 0) return LazilyFfiDecoded(LazilyFfiStatus.Empty, null, ByteArray(0))
         return try {
             val message = IpcMessage.decodeJson(input.bytes.copyOf(input.len))
@@ -110,11 +122,12 @@ object LazilyFfiChannel {
             if (kind != LazilyFfiMessageKind.Unknown && kind != actualKind) {
                 LazilyFfiDecoded(LazilyFfiStatus.InvalidMessage, null, ByteArray(0))
             } else {
-                val canonical = try {
-                    message.encodeJson()
-                } catch (e: Throwable) {
-                    return LazilyFfiDecoded(LazilyFfiStatus.EncodeFailed, null, ByteArray(0))
-                }
+                val canonical =
+                    try {
+                        message.encodeJson()
+                    } catch (e: Throwable) {
+                        return LazilyFfiDecoded(LazilyFfiStatus.EncodeFailed, null, ByteArray(0))
+                    }
                 LazilyFfiDecoded(LazilyFfiStatus.Ok, message, canonical)
             }
         } catch (e: Throwable) {
@@ -123,20 +136,22 @@ object LazilyFfiChannel {
     }
 
     /** Encode [message] to canonical JSON bytes. Returns a failed status (never throws). on error. */
-    fun encode(message: IpcMessage): LazilyFfiDecoded = try {
-        LazilyFfiDecoded(LazilyFfiStatus.Ok, message, message.encodeJson())
-    } catch (e: Throwable) {
-        LazilyFfiDecoded(LazilyFfiStatus.EncodeFailed, null, ByteArray(0))
-    }
+    fun encode(message: IpcMessage): LazilyFfiDecoded =
+        try {
+            LazilyFfiDecoded(LazilyFfiStatus.Ok, message, message.encodeJson())
+        } catch (e: Throwable) {
+            LazilyFfiDecoded(LazilyFfiStatus.EncodeFailed, null, ByteArray(0))
+        }
 
     /** The [LazilyFfiMessageKind] for [message]. */
-    fun messageKindOf(message: IpcMessage): LazilyFfiMessageKind = when (message) {
-        is IpcMessage.SnapshotMessage -> LazilyFfiMessageKind.Snapshot
-        is IpcMessage.DeltaMessage -> LazilyFfiMessageKind.Delta
-        is IpcMessage.CrdtSyncMessage -> LazilyFfiMessageKind.CrdtSync
-        is IpcMessage.ResyncRequestMessage -> LazilyFfiMessageKind.ResyncRequest
-        is IpcMessage.OutboxAckMessage -> LazilyFfiMessageKind.OutboxAck
-    }
+    fun messageKindOf(message: IpcMessage): LazilyFfiMessageKind =
+        when (message) {
+            is IpcMessage.SnapshotMessage -> LazilyFfiMessageKind.Snapshot
+            is IpcMessage.DeltaMessage -> LazilyFfiMessageKind.Delta
+            is IpcMessage.CrdtSyncMessage -> LazilyFfiMessageKind.CrdtSync
+            is IpcMessage.ResyncRequestMessage -> LazilyFfiMessageKind.ResyncRequest
+            is IpcMessage.OutboxAckMessage -> LazilyFfiMessageKind.OutboxAck
+        }
 
     /**
      * Run a host operation under a panic guard: any throwable is mapped to
@@ -144,7 +159,10 @@ object LazilyFfiChannel {
      * a panic never crosses the C ABI. The C entry functions all route through
      * this guard.
      */
-    inline fun panicGuard(onDecodeError: LazilyFfiStatus = LazilyFfiStatus.InvalidMessage, body: () -> LazilyFfiStatus): LazilyFfiStatus =
+    inline fun panicGuard(
+        onDecodeError: LazilyFfiStatus = LazilyFfiStatus.InvalidMessage,
+        body: () -> LazilyFfiStatus,
+    ): LazilyFfiStatus =
         try {
             body()
         } catch (e: Throwable) {
@@ -176,7 +194,11 @@ object LazilyFfiNative {
      * into `out`/`outLen` and returns [LazilyFfiStatus.Ok]; on failure returns
      * [LazilyFfiStatus.EncodeFailed] / [LazilyFfiStatus.Panic].
      */
-    fun lazilyFfiEncode(message: IpcMessage, out: Array<LazilyFfiBytes?>, outLen: IntArray): LazilyFfiStatus =
+    fun lazilyFfiEncode(
+        message: IpcMessage,
+        out: Array<LazilyFfiBytes?>,
+        outLen: IntArray,
+    ): LazilyFfiStatus =
         LazilyFfiChannel.panicGuard(LazilyFfiStatus.Panic) {
             val result = LazilyFfiChannel.encode(message)
             if (result.status == LazilyFfiStatus.Ok) {
@@ -196,15 +218,16 @@ object LazilyFfiNative {
         input: LazilyFfiBytes,
         out: Array<LazilyFfiBytes?>,
         outLen: IntArray,
-    ): LazilyFfiStatus = LazilyFfiChannel.panicGuard(LazilyFfiStatus.Panic) {
-        if (input.len == 0) return@panicGuard LazilyFfiStatus.Empty
-        val result = LazilyFfiChannel.decode(kind, input)
-        if (result.status == LazilyFfiStatus.Ok) {
-            out[0] = LazilyFfiBytes(result.canonicalBytes)
-            outLen[0] = result.canonicalBytes.size
+    ): LazilyFfiStatus =
+        LazilyFfiChannel.panicGuard(LazilyFfiStatus.Panic) {
+            if (input.len == 0) return@panicGuard LazilyFfiStatus.Empty
+            val result = LazilyFfiChannel.decode(kind, input)
+            if (result.status == LazilyFfiStatus.Ok) {
+                out[0] = LazilyFfiBytes(result.canonicalBytes)
+                outLen[0] = result.canonicalBytes.size
+            }
+            result.status
         }
-        result.status
-    }
 
     /** Free a buffer returned by [lazilyFfiEncode] / [lazilyFfiDecode]. */
     fun lazilyFfiFree(bytes: LazilyFfiBytes?) {

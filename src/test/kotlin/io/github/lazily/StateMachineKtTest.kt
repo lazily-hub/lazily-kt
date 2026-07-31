@@ -11,29 +11,34 @@ class StateMachineKtTest {
     @Test
     fun traffic_light_transitions() {
         val ctx = Context()
-        val m = StateMachine(ctx, Light.Red) { s, _: String ->
-            when (s) {
-                Light.Red -> Light.Green
-                Light.Green -> Light.Yellow
-                Light.Yellow -> Light.Red
+        val m =
+            StateMachine(ctx, Light.Red) { s, _: String ->
+                when (s) {
+                    Light.Red -> Light.Green
+                    Light.Green -> Light.Yellow
+                    Light.Yellow -> Light.Red
+                }
             }
-        }
         assertEquals(Light.Red, m.state)
-        assertTrue(m.send("advance")); assertEquals(Light.Green, m.state)
-        assertTrue(m.send("advance")); assertEquals(Light.Yellow, m.state)
-        assertTrue(m.send("advance")); assertEquals(Light.Red, m.state)
+        assertTrue(m.send("advance"))
+        assertEquals(Light.Green, m.state)
+        assertTrue(m.send("advance"))
+        assertEquals(Light.Yellow, m.state)
+        assertTrue(m.send("advance"))
+        assertEquals(Light.Red, m.state)
     }
 
     @Test
     fun guard_rejection() {
         val ctx = Context()
-        val m = StateMachine(ctx, "open") { s, e: String ->
-            when (s) {
-                "open" -> if (e == "close") "closed" else null
-                "closed" -> if (e == "open") "open" else null
-                else -> null
+        val m =
+            StateMachine(ctx, "open") { s, e: String ->
+                when (s) {
+                    "open" -> if (e == "close") "closed" else null
+                    "closed" -> if (e == "open") "open" else null
+                    else -> null
+                }
             }
-        }
         assertFalse(m.send("open")) // invalid from open
         assertEquals("open", m.state)
         assertTrue(m.send("close"))
@@ -71,13 +76,14 @@ class StateMachineKtTest {
     @Test
     fun state_is_signal_tracks_membership() {
         val ctx = Context()
-        val m = StateMachine(ctx, Light.Red) { s, _: String ->
-            when (s) {
-                Light.Red -> Light.Green
-                Light.Green -> Light.Yellow
-                Light.Yellow -> Light.Red
+        val m =
+            StateMachine(ctx, Light.Red) { s, _: String ->
+                when (s) {
+                    Light.Red -> Light.Green
+                    Light.Green -> Light.Yellow
+                    Light.Yellow -> Light.Red
+                }
             }
-        }
         val isGreen = m.stateIs(Light.Green)
         assertFalse(ctx.get(isGreen))
         m.send("advance")

@@ -1,7 +1,5 @@
 package io.github.lazily
 
-import java.nio.file.Files
-import java.nio.file.Path
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -21,10 +19,12 @@ import kotlin.test.assertTrue
  * Rust unit tests so both bindings agree fixture-by-fixture.
  */
 class CommandConformanceTest {
-    private fun load(name: String): JsonObject =
-        Json.parseToJsonElement(ConformanceFixtures.read("message-passing/$name")).jsonObject
+    private fun load(name: String): JsonObject = Json.parseToJsonElement(ConformanceFixtures.read("message-passing/$name")).jsonObject
 
-    private fun foldFrame(projection: CommandProjection, frame: JsonElement): CommandApplyStatus {
+    private fun foldFrame(
+        projection: CommandProjection,
+        frame: JsonElement,
+    ): CommandApplyStatus {
         val obj = frame.jsonObject
         val schema = obj.getValue("schema").jsonPrimitive.content
         val wire = obj.getValue("wire")
@@ -42,7 +42,10 @@ class CommandConformanceTest {
 
     private fun frames(obj: JsonObject): List<JsonElement> = obj.getValue("frames").jsonArray
 
-    private fun assertProjection(projection: CommandProjection, expect: JsonObject) {
+    private fun assertProjection(
+        projection: CommandProjection,
+        expect: JsonObject,
+    ) {
         val want = CommandProjectionImage.fromJson(expect.getValue("projection"))
         assertEquals(want, projection.toImage(), "projection image mismatch")
     }
@@ -59,7 +62,10 @@ class CommandConformanceTest {
         assertTrue(CommandStatus.TimedOut.isTerminal)
     }
 
-    private fun submitFixture(commandId: String, generation: Long): CommandSubmit =
+    private fun submitFixture(
+        commandId: String,
+        generation: Long,
+    ): CommandSubmit =
         CommandSubmit(
             commandId = commandId,
             causationId = commandId,
@@ -108,9 +114,10 @@ class CommandConformanceTest {
         val p = CommandProjection()
         p.submit(submitFixture("cmd-1", 42))
         p.observeReceipt(CausalReceipt.applied("rcpt-applied", "cmd-1", "project-controller", 42))
-        val status = p.observeReceipt(
-            CausalReceipt.rejected("rcpt-rejected", "cmd-1", "project-controller", 42, reason = "conflict"),
-        )
+        val status =
+            p.observeReceipt(
+                CausalReceipt.rejected("rcpt-rejected", "cmd-1", "project-controller", 42, reason = "conflict"),
+            )
         assertIs<CommandApplyStatus.TerminalConflict>(status)
         assertTrue(p.hasConflict("cmd-1"))
         assertEquals(CommandStatus.Applied, p.entry("cmd-1")!!.status)
@@ -139,13 +146,20 @@ class CommandConformanceTest {
     fun `accepted then applied receipt is terminal only at receipt`() {
         val fx = load("accepted_then_applied_receipt.json")
         val expect = fx.getValue("expect").jsonObject
-        val terminalAt = expect.getValue("terminal_after_frame_index").jsonPrimitive.content.toInt()
+        val terminalAt =
+            expect
+                .getValue("terminal_after_frame_index")
+                .jsonPrimitive.content
+                .toInt()
         val p = CommandProjection()
         frames(fx).forEachIndexed { i, frame ->
             foldFrame(p, frame)
             val isTerminal = p.terminalFor("cmd-run-1") != null
-            if (i < terminalAt) assertFalse(isTerminal, "frame $i must be non-terminal")
-            else assertTrue(isTerminal, "frame $i must be terminal")
+            if (i < terminalAt) {
+                assertFalse(isTerminal, "frame $i must be non-terminal")
+            } else {
+                assertTrue(isTerminal, "frame $i must be terminal")
+            }
         }
         assertProjection(p, expect)
     }
@@ -167,7 +181,11 @@ class CommandConformanceTest {
     fun `terminal conflict fails closed fixture`() {
         val fx = load("terminal_conflict_fail_closed.json")
         val expect = fx.getValue("expect").jsonObject
-        val conflictAt = expect.getValue("conflict_after_frame_index").jsonPrimitive.content.toInt()
+        val conflictAt =
+            expect
+                .getValue("conflict_after_frame_index")
+                .jsonPrimitive.content
+                .toInt()
         val commandId = expect.getValue("conflict_command_id").jsonPrimitive.content
         val p = CommandProjection()
         frames(fx).forEachIndexed { i, frame ->
@@ -203,7 +221,11 @@ class CommandConformanceTest {
         val expect = fx.getValue("expect").jsonObject
         val rpc = expect.getValue("rpc").jsonObject
         val commandId = rpc.getValue("command_id").jsonPrimitive.content
-        val resolvesAt = rpc.getValue("resolves_after_frame_index").jsonPrimitive.content.toInt()
+        val resolvesAt =
+            rpc
+                .getValue("resolves_after_frame_index")
+                .jsonPrimitive.content
+                .toInt()
         val unresolved = rpc.getValue("unresolved_after_frame_indices").jsonArray.map { it.jsonPrimitive.content.toInt() }
         val p = CommandProjection()
         frames(fx).forEachIndexed { i, frame ->

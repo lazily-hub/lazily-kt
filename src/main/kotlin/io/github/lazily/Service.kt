@@ -16,7 +16,11 @@ enum class Health { Healthy, Degraded, Unhealthy }
 class HealthCore {
     private val probes = sortedMapOf<String, Pair<Boolean, Boolean>>() // name -> (up, critical)
 
-    fun set(name: String, up: Boolean, critical: Boolean) {
+    fun set(
+        name: String,
+        up: Boolean,
+        critical: Boolean,
+    ) {
         probes[name] = up to critical
     }
 
@@ -31,33 +35,51 @@ class HealthCore {
 }
 
 /** Reactive health: projects the aggregate onto a `Cell` for /health. */
-class HealthCell(private val ctx: Context) {
+class HealthCell(
+    private val ctx: Context,
+) {
     private val core = HealthCore()
     val healthCell: Source<Health> = ctx.source(Health.Healthy)
 
     private fun refresh() = healthCell.set(ctx, core.health())
 
-    fun set(name: String, up: Boolean, critical: Boolean) = core.set(name, up, critical).also { refresh() }
+    fun set(
+        name: String,
+        up: Boolean,
+        critical: Boolean,
+    ) = core.set(name, up, critical).also { refresh() }
+
     fun health(): Health = core.health()
 }
 
 /** Composed readiness-probe core: ready iff every condition holds. */
 class ReadinessCore {
     private val conditions = sortedMapOf<String, Boolean>()
-    fun set(name: String, ready: Boolean) {
+
+    fun set(
+        name: String,
+        ready: Boolean,
+    ) {
         conditions[name] = ready
     }
+
     fun ready(): Boolean = conditions.values.all { it }
 }
 
 /** Reactive readiness: projects ready onto a `Cell` for /ready. */
-class ReadinessCell(private val ctx: Context) {
+class ReadinessCell(
+    private val ctx: Context,
+) {
     private val core = ReadinessCore()
     val readyCell: Source<Boolean> = ctx.source(true)
 
     private fun refresh() = readyCell.set(ctx, core.ready())
 
-    fun set(name: String, ready: Boolean) = core.set(name, ready).also { refresh() }
+    fun set(
+        name: String,
+        ready: Boolean,
+    ) = core.set(name, ready).also { refresh() }
+
     fun ready(): Boolean = core.ready()
 }
 
@@ -66,30 +88,46 @@ class ReadinessCell(private val ctx: Context) {
 class DiscoveryCore<P : Any> {
     private val entries = sortedMapOf<String, Pair<String, P>>()
 
-    fun register(service: String, endpoint: String, peer: P) {
+    fun register(
+        service: String,
+        endpoint: String,
+        peer: P,
+    ) {
         entries[service] = endpoint to peer
     }
+
     fun deregister(service: String) {
         entries.remove(service)
     }
+
     fun evict(peer: P) {
         entries.entries.removeAll { it.value.second == peer }
     }
+
     fun resolve(service: String): String? = entries[service]?.first
+
     fun discovery(): Map<String, String> = entries.mapValues { it.value.first }
 }
 
 /** Reactive service discovery. */
-class DiscoveryCell<P : Any>(private val ctx: Context) {
+class DiscoveryCell<P : Any>(
+    private val ctx: Context,
+) {
     private val core = DiscoveryCore<P>()
     val discoveryCell: Source<Any> = ctx.source<Any>(emptyMap<String, String>())
 
     private fun refresh() = discoveryCell.set(ctx, core.discovery())
 
-    fun register(service: String, endpoint: String, peer: P) =
-        core.register(service, endpoint, peer).also { refresh() }
+    fun register(
+        service: String,
+        endpoint: String,
+        peer: P,
+    ) = core.register(service, endpoint, peer).also { refresh() }
+
     fun deregister(service: String) = core.deregister(service).also { refresh() }
+
     fun evict(peer: P) = core.evict(peer).also { refresh() }
+
     fun resolve(service: String): String? = core.resolve(service)
 
     @Suppress("UNCHECKED_CAST")
@@ -98,8 +136,14 @@ class DiscoveryCell<P : Any>(private val ctx: Context) {
 
 /** A durable registry op (the ordered log entry). */
 sealed class RegistryOp {
-    data class Register(val service: String, val endpoint: String) : RegistryOp()
-    data class Deregister(val service: String) : RegistryOp()
+    data class Register(
+        val service: String,
+        val endpoint: String,
+    ) : RegistryOp()
+
+    data class Deregister(
+        val service: String,
+    ) : RegistryOp()
 }
 
 /** Durable service-registry core: an ordered log whose left-fold is the
@@ -108,40 +152,56 @@ class ServiceRegistryCore {
     private val log = mutableListOf<RegistryOp>()
     private var projection = sortedMapOf<String, String>()
 
-    private fun apply(projection: MutableMap<String, String>, op: RegistryOp) {
+    private fun apply(
+        projection: MutableMap<String, String>,
+        op: RegistryOp,
+    ) {
         when (op) {
             is RegistryOp.Register -> projection[op.service] = op.endpoint
             is RegistryOp.Deregister -> projection.remove(op.service)
         }
     }
 
-    fun register(service: String, endpoint: String) {
+    fun register(
+        service: String,
+        endpoint: String,
+    ) {
         val op = RegistryOp.Register(service, endpoint)
         apply(projection, op)
         log.add(op)
     }
+
     fun deregister(service: String) {
         val op = RegistryOp.Deregister(service)
         apply(projection, op)
         log.add(op)
     }
+
     fun replay() {
         val rebuilt = sortedMapOf<String, String>()
         for (op in log) apply(rebuilt, op)
         projection = rebuilt
     }
+
     fun projection(): Map<String, String> = projection.toMap()
 }
 
 /** Reactive durable service registry. */
-class ServiceRegistry(private val ctx: Context) {
+class ServiceRegistry(
+    private val ctx: Context,
+) {
     private val core = ServiceRegistryCore()
     val projectionCell: Source<Any> = ctx.source<Any>(emptyMap<String, String>())
 
     private fun refresh() = projectionCell.set(ctx, core.projection())
 
-    fun register(service: String, endpoint: String) = core.register(service, endpoint).also { refresh() }
+    fun register(
+        service: String,
+        endpoint: String,
+    ) = core.register(service, endpoint).also { refresh() }
+
     fun deregister(service: String) = core.deregister(service).also { refresh() }
+
     fun replay() = core.replay().also { refresh() }
 
     @Suppress("UNCHECKED_CAST")

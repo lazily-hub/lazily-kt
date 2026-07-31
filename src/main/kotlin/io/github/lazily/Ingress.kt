@@ -108,7 +108,10 @@ class IngressCell<K : Any, T : Any>(
     // -- Mutators ----------------------------------------------------------
 
     /** Open (or reopen) a keyed scope at [generation]. */
-    fun open(key: K, generation: Long) = apply(core.open(key, generation))
+    fun open(
+        key: K,
+        generation: Long,
+    ) = apply(core.open(key, generation))
 
     /** Admit one decoded envelope. */
     fun admit(envelope: IngressEnvelope<K, T>): IngressAdmission {
@@ -128,7 +131,10 @@ class IngressCell<K : Any, T : Any>(
     }
 
     /** Reconnect a scope at [generation], clearing its error streak. */
-    fun reconnect(key: K, generation: Long): ReplayRequest {
+    fun reconnect(
+        key: K,
+        generation: Long,
+    ): ReplayRequest {
         val (change, request) = core.reconnect(key, generation)
         apply(change)
         return request
@@ -138,7 +144,10 @@ class IngressCell<K : Any, T : Any>(
     fun close(key: K) = apply(core.close(key))
 
     /** Record a transport/decode failure, deepening the scope's backoff. */
-    fun fail(key: K, error: IngressError) = apply(core.fail(key, error))
+    fun fail(
+        key: K,
+        error: IngressError,
+    ) = apply(core.fail(key, error))
 
     /** Advance logical time. Only scopes that crossed the freshness horizon dirty. */
     fun tick(now: Long) = apply(core.tick(now))
@@ -182,23 +191,35 @@ class IngressCell<K : Any, T : Any>(
     // inside a compute is reactive.
 
     @Suppress("UNCHECKED_CAST")
-    private fun <V : Any> reading(ops: ComputeOps, handle: Computed<IngressReading<V>>): V? =
-        (ops.getSlotAny(handle.id) as IngressReading<V>).value
+    private fun <V : Any> reading(
+        ops: ComputeOps,
+        handle: Computed<IngressReading<V>>,
+    ): V? = (ops.getSlotAny(handle.id) as IngressReading<V>).value
 
     /** The coalesced window awaiting drain. */
-    fun value(key: K, ops: ComputeOps = ctx): T? = reading(ops, readers(key).value)
+    fun value(
+        key: K,
+        ops: ComputeOps = ctx,
+    ): T? = reading(ops, readers(key).value)
 
     /** Derived readiness. */
     @Suppress("UNCHECKED_CAST")
-    fun readiness(key: K, ops: ComputeOps = ctx): IngressReadiness =
-        ops.getSlotAny(readers(key).readiness.id) as IngressReadiness
+    fun readiness(
+        key: K,
+        ops: ComputeOps = ctx,
+    ): IngressReadiness = ops.getSlotAny(readers(key).readiness.id) as IngressReadiness
 
     /** Derived authority; `null` for a closed or unknown scope. */
-    fun authority(key: K, ops: ComputeOps = ctx): IngressAuthority? =
-        reading(ops, readers(key).authority)
+    fun authority(
+        key: K,
+        ops: ComputeOps = ctx,
+    ): IngressAuthority? = reading(ops, readers(key).authority)
 
     /** Derived retry decision; `null` while no error is outstanding. */
-    fun retry(key: K, ops: ComputeOps = ctx): IngressRetry? = reading(ops, readers(key).retry)
+    fun retry(
+        key: K,
+        ops: ComputeOps = ctx,
+    ): IngressRetry? = reading(ops, readers(key).retry)
 
     @Suppress("UNCHECKED_CAST")
     private fun receipts(

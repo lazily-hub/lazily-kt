@@ -1,8 +1,5 @@
 package io.github.lazily
 
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -13,6 +10,9 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
  * The keyed-collection ordering contract replayed against **all three** execution
@@ -28,6 +28,7 @@ import kotlinx.serialization.json.jsonPrimitive
  * compute body, not by a cache flag: a counter the library has to move is the one
  * probe that cannot be satisfied by runner bookkeeping.
  */
+
 /** Order-sensitive, so an order reader's *value* changes on a reorder. */
 private fun orderDigest(keys: List<String>): Int {
     var acc = 17
@@ -50,13 +51,30 @@ class CollectionsFamilyConformanceTest {
     private interface Flavor {
         val name: String
 
-        fun setValue(key: String, value: Int)
+        fun setValue(
+            key: String,
+            value: Int,
+        )
+
         fun remove(key: String)
-        fun moveTo(key: String, index: Int)
-        fun moveBefore(key: String, anchor: String)
-        fun moveAfter(key: String, anchor: String)
+
+        fun moveTo(
+            key: String,
+            index: Int,
+        )
+
+        fun moveBefore(
+            key: String,
+            anchor: String,
+        )
+
+        fun moveAfter(
+            key: String,
+            anchor: String,
+        )
 
         fun keysUntracked(): List<String>
+
         fun valueUntracked(key: String): Int?
 
         /**
@@ -66,7 +84,9 @@ class CollectionsFamilyConformanceTest {
         fun entryIdentity(key: String): Any?
 
         fun valueReader(key: String): () -> Int
+
         fun membershipReader(): () -> Int
+
         fun orderReader(): () -> Int
     }
 
@@ -75,7 +95,11 @@ class CollectionsFamilyConformanceTest {
         val map = SourceMap<String, Int>(ctx)
 
         override val name = "sync"
-        override fun setValue(key: String, value: Int) {
+
+        override fun setValue(
+            key: String,
+            value: Int,
+        ) {
             if (map.containsNow(key)) map.setValue(key, value) else map.insert(key, value)
         }
 
@@ -83,39 +107,47 @@ class CollectionsFamilyConformanceTest {
             map.remove(key)
         }
 
-        override fun moveTo(key: String, index: Int) {
+        override fun moveTo(
+            key: String,
+            index: Int,
+        ) {
             if (map.containsNow(key)) map.moveTo(key, index)
         }
 
-        override fun moveBefore(key: String, anchor: String) {
+        override fun moveBefore(
+            key: String,
+            anchor: String,
+        ) {
             if (map.containsNow(key) && map.containsNow(anchor)) map.moveBefore(key, anchor)
         }
 
-        override fun moveAfter(key: String, anchor: String) {
+        override fun moveAfter(
+            key: String,
+            anchor: String,
+        ) {
             if (map.containsNow(key) && map.containsNow(anchor)) map.moveAfter(key, anchor)
         }
 
         override fun keysUntracked(): List<String> = map.keysNow()
-        override fun valueUntracked(key: String): Int? =
-            if (map.containsNow(key)) map.get(key) else null
 
-        override fun entryIdentity(key: String): Any? =
-            if (map.containsNow(key)) map.value(key).id else null
+        override fun valueUntracked(key: String): Int? = if (map.containsNow(key)) map.get(key) else null
+
+        override fun entryIdentity(key: String): Any? = if (map.containsNow(key)) map.value(key).id else null
 
         private fun reader(body: ComputeOps.() -> Int): () -> Int {
             var count = 0
-            val slot = ctx.slotAny {
-                count += 1
-                body()
-            }
+            val slot =
+                ctx.slotAny {
+                    count += 1
+                    body()
+                }
             return {
                 ctx.getSlotAny(slot)
                 count
             }
         }
 
-        override fun valueReader(key: String): () -> Int =
-            reader { if (map.containsNow(key)) map.get(key, this) else -1 }
+        override fun valueReader(key: String): () -> Int = reader { if (map.containsNow(key)) map.get(key, this) else -1 }
 
         // `len()` / `keys()` ALLOCATE a Computed. Allocating inside the reader
         // body would mint a fresh node on every recompute, so the reader would
@@ -137,33 +169,50 @@ class CollectionsFamilyConformanceTest {
         val map = ThreadSafeSourceMap<String, Int>()
 
         override val name = "thread-safe"
-        override fun setValue(key: String, value: Int) = map.set(ctx, key, value)
+
+        override fun setValue(
+            key: String,
+            value: Int,
+        ) = map.set(ctx, key, value)
+
         override fun remove(key: String) {
             map.remove(ctx, key)
         }
 
-        override fun moveTo(key: String, index: Int) {
+        override fun moveTo(
+            key: String,
+            index: Int,
+        ) {
             map.moveTo(ctx, key, index)
         }
 
-        override fun moveBefore(key: String, anchor: String) {
+        override fun moveBefore(
+            key: String,
+            anchor: String,
+        ) {
             map.moveBefore(ctx, key, anchor)
         }
 
-        override fun moveAfter(key: String, anchor: String) {
+        override fun moveAfter(
+            key: String,
+            anchor: String,
+        ) {
             map.moveAfter(ctx, key, anchor)
         }
 
         override fun keysUntracked(): List<String> = map.presentKeys()
+
         override fun valueUntracked(key: String): Int? = map.get(ctx, key)
+
         override fun entryIdentity(key: String): Any? = map.handle(key)?.id
 
         private fun reader(body: () -> Int): () -> Int {
             var count = 0
-            val slot = ctx.slotAny(memo = false) {
-                count += 1
-                body()
-            }
+            val slot =
+                ctx.slotAny(memo = false) {
+                    count += 1
+                    body()
+                }
             return {
                 ctx.getSlotAny(slot)
                 count
@@ -171,7 +220,9 @@ class CollectionsFamilyConformanceTest {
         }
 
         override fun valueReader(key: String): () -> Int = reader { map.get(ctx, key) ?: -1 }
+
         override fun membershipReader(): () -> Int = reader { map.len(ctx) }
+
         override fun orderReader(): () -> Int = reader { orderDigest(map.keys(ctx)) }
     }
 
@@ -180,25 +231,41 @@ class CollectionsFamilyConformanceTest {
         val map = AsyncSourceMap<String, Int>()
 
         override val name = "async"
-        override fun setValue(key: String, value: Int) = map.set(ctx, key, value)
+
+        override fun setValue(
+            key: String,
+            value: Int,
+        ) = map.set(ctx, key, value)
+
         override fun remove(key: String) {
             map.remove(ctx, key)
         }
 
-        override fun moveTo(key: String, index: Int) {
+        override fun moveTo(
+            key: String,
+            index: Int,
+        ) {
             map.moveTo(ctx, key, index)
         }
 
-        override fun moveBefore(key: String, anchor: String) {
+        override fun moveBefore(
+            key: String,
+            anchor: String,
+        ) {
             map.moveBefore(ctx, key, anchor)
         }
 
-        override fun moveAfter(key: String, anchor: String) {
+        override fun moveAfter(
+            key: String,
+            anchor: String,
+        ) {
             map.moveAfter(ctx, key, anchor)
         }
 
         override fun keysUntracked(): List<String> = map.presentKeys()
+
         override fun valueUntracked(key: String): Int? = map.get(ctx, key)
+
         override fun entryIdentity(key: String): Any? = map.handle(key)
 
         // The async graph only recomputes through `getAsync`; the non-blocking
@@ -207,31 +274,34 @@ class CollectionsFamilyConformanceTest {
         // not, which is why the same ops drive all three flavors.
         private fun reader(body: AsyncComputeContext.() -> Int): () -> Int {
             var count = 0
-            val slot = ctx.computedAsync {
-                count += 1
-                body()
-            }
+            val slot =
+                ctx.computedAsync {
+                    count += 1
+                    body()
+                }
             return {
                 runBlocking { ctx.getAsync(slot) }
                 count
             }
         }
 
-        override fun valueReader(key: String): () -> Int =
-            reader { map.get(ctx, key, this) ?: -1 }
+        override fun valueReader(key: String): () -> Int = reader { map.get(ctx, key, this) ?: -1 }
 
         override fun membershipReader(): () -> Int = reader { map.len(ctx, this) }
+
         override fun orderReader(): () -> Int = reader { orderDigest(map.keys(ctx, this)) }
     }
 
-    private fun flavors(): List<() -> Flavor> =
-        listOf({ SyncFlavor() }, { ThreadSafeFlavor() }, { AsyncFlavor() })
+    private fun flavors(): List<() -> Flavor> = listOf({ SyncFlavor() }, { ThreadSafeFlavor() }, { AsyncFlavor() })
 
-    private fun strings(element: JsonArray): List<String> =
-        element.map { it.jsonPrimitive.content }
+    private fun strings(element: JsonArray): List<String> = element.map { it.jsonPrimitive.content }
 
-    private fun replay(flavor: Flavor, fixtureName: String) {
+    private fun replay(
+        flavor: Flavor,
+        fixtureName: String,
+    ) {
         val fixture = loadFixture(fixtureName)
+
         fun where(i: Int) = "${flavor.name} $fixtureName step $i"
 
         val initial = fixture["initial"]!!.jsonObject
@@ -425,15 +495,17 @@ class CollectionsFamilyConformanceTest {
             seed.forEachIndexed { i, key -> map.getOrInsertWith(ctx, key) { i + 1 } }
 
             var lenRecomputes = 0
-            val lenSlot = ctx.slotAny {
-                lenRecomputes += 1
-                map.len(this)
-            }
+            val lenSlot =
+                ctx.slotAny {
+                    lenRecomputes += 1
+                    map.len(this)
+                }
             var orderRecomputes = 0
-            val orderSlot = ctx.slotAny {
-                orderRecomputes += 1
-                orderDigest(map.keys(this))
-            }
+            val orderSlot =
+                ctx.slotAny {
+                    orderRecomputes += 1
+                    orderDigest(map.keys(this))
+                }
             ctx.getSlotAny(lenSlot)
             ctx.getSlotAny(orderSlot)
             val lenBase = lenRecomputes
@@ -509,18 +581,36 @@ class CollectionsFamilyConformanceTest {
         val seed = listOf("a", "b", "c", "d")
         val cases: List<Triple<String, (Flavor) -> Unit, List<String>>> =
             listOf(
-                Triple("move_before, key precedes anchor", { f: Flavor -> f.moveBefore("a", "d") },
-                    listOf("b", "c", "a", "d")),
-                Triple("move_before, key follows anchor", { f: Flavor -> f.moveBefore("d", "b") },
-                    listOf("a", "d", "b", "c")),
-                Triple("move_after, key precedes anchor", { f: Flavor -> f.moveAfter("a", "c") },
-                    listOf("b", "c", "a", "d")),
-                Triple("move_after, key follows anchor", { f: Flavor -> f.moveAfter("d", "a") },
-                    listOf("a", "d", "b", "c")),
-                Triple("move_to past the end clamps", { f: Flavor -> f.moveTo("a", 99) },
-                    listOf("b", "c", "d", "a")),
-                Triple("move_to to -1 clamps to the front", { f: Flavor -> f.moveTo("d", -1) },
-                    listOf("d", "a", "b", "c")),
+                Triple(
+                    "move_before, key precedes anchor",
+                    { f: Flavor -> f.moveBefore("a", "d") },
+                    listOf("b", "c", "a", "d"),
+                ),
+                Triple(
+                    "move_before, key follows anchor",
+                    { f: Flavor -> f.moveBefore("d", "b") },
+                    listOf("a", "d", "b", "c"),
+                ),
+                Triple(
+                    "move_after, key precedes anchor",
+                    { f: Flavor -> f.moveAfter("a", "c") },
+                    listOf("b", "c", "a", "d"),
+                ),
+                Triple(
+                    "move_after, key follows anchor",
+                    { f: Flavor -> f.moveAfter("d", "a") },
+                    listOf("a", "d", "b", "c"),
+                ),
+                Triple(
+                    "move_to past the end clamps",
+                    { f: Flavor -> f.moveTo("a", 99) },
+                    listOf("b", "c", "d", "a"),
+                ),
+                Triple(
+                    "move_to to -1 clamps to the front",
+                    { f: Flavor -> f.moveTo("d", -1) },
+                    listOf("d", "a", "b", "c"),
+                ),
                 Triple("move on an absent key is a no-op", { f: Flavor ->
                     f.moveBefore("zz", "a")
                     f.moveTo("zz", 0)

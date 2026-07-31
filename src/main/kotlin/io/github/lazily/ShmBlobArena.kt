@@ -9,17 +9,34 @@ private const val FNV_OFFSET_BASIS: ULong = 0xcbf29ce484222325uL
 private const val FNV_PRIME: ULong = 0x00000100000001b3uL
 
 /** Why an [ShmBlobArena] operation failed. Mirrors lazily-rs `ShmBlobArenaError`. */
-sealed class ShmBlobArenaError(message: String) : RuntimeException(message) {
-    data class CapacityTooSmall(val capacity: Int, val minCapacity: Int) :
-        ShmBlobArenaError("arena capacity $capacity < minimum $minCapacity")
-    data class BlobTooLarge(val len: Int, val maxLen: Int) :
-        ShmBlobArenaError("payload $len bytes exceeds arena max $maxLen")
-    data class DescriptorOutOfBounds(val offset: Long, val len: Long, val capacity: Int) :
-        ShmBlobArenaError("descriptor offset=$offset len=$len outside arena capacity=$capacity")
-    data class DescriptorMismatch(val field: String) :
-        ShmBlobArenaError("arena descriptor/header mismatch: $field")
-    data class ChecksumMismatch(val expected: ULong, val actual: ULong) :
-        ShmBlobArenaError("arena checksum mismatch: expected 0x${expected.toString(16)}, got 0x${actual.toString(16)}")
+sealed class ShmBlobArenaError(
+    message: String,
+) : RuntimeException(message) {
+    data class CapacityTooSmall(
+        val capacity: Int,
+        val minCapacity: Int,
+    ) : ShmBlobArenaError("arena capacity $capacity < minimum $minCapacity")
+
+    data class BlobTooLarge(
+        val len: Int,
+        val maxLen: Int,
+    ) : ShmBlobArenaError("payload $len bytes exceeds arena max $maxLen")
+
+    data class DescriptorOutOfBounds(
+        val offset: Long,
+        val len: Long,
+        val capacity: Int,
+    ) : ShmBlobArenaError("descriptor offset=$offset len=$len outside arena capacity=$capacity")
+
+    data class DescriptorMismatch(
+        val field: String,
+    ) : ShmBlobArenaError("arena descriptor/header mismatch: $field")
+
+    data class ChecksumMismatch(
+        val expected: ULong,
+        val actual: ULong,
+    ) : ShmBlobArenaError("arena checksum mismatch: expected 0x${expected.toString(16)}, got 0x${actual.toString(16)}")
+
     data object GenerationOverflow : ShmBlobArenaError("arena generation counter overflowed")
 }
 
@@ -64,7 +81,10 @@ class ShmBlobArena private constructor(
     fun bytes(): ByteArray = bytes
 
     /** Write [payload] tagged with [epoch] and return its wire descriptor. */
-    fun writeBlob(epoch: Long, payload: ByteArray): ShmBlobRef {
+    fun writeBlob(
+        epoch: Long,
+        payload: ByteArray,
+    ): ShmBlobRef {
         val capacity = bytes.size
         val maxLen = maxBlobLen()
         if (payload.size > maxLen) {
@@ -85,13 +105,14 @@ class ShmBlobArena private constructor(
 
         val offset = writeOffset
         val checksum = checksum(payload)
-        val descriptor = ShmBlobRef(
-            offset = offset.toLong(),
-            len = payload.size.toLong(),
-            generation = generation.toLong(),
-            epoch = epoch,
-            checksum = checksum.toLong(),
-        )
+        val descriptor =
+            ShmBlobRef(
+                offset = offset.toLong(),
+                len = payload.size.toLong(),
+                generation = generation.toLong(),
+                epoch = epoch,
+                checksum = checksum.toLong(),
+            )
 
         val payloadOffset = offset + SHM_BLOB_HEADER_LEN
         writeHeader(bytes, offset, descriptor)
@@ -109,7 +130,8 @@ class ShmBlobArena private constructor(
         val capacity = bytes.size
         val offset = descriptor.offset
         val len = descriptor.len
-        if (offset < 0 || len < 0 ||
+        if (offset < 0 ||
+            len < 0 ||
             offset.toInt() !in 0..capacity ||
             len > Int.MAX_VALUE.toLong() ||
             SHM_BLOB_HEADER_LEN.toLong() + len > (capacity - offset)
@@ -132,7 +154,10 @@ class ShmBlobArena private constructor(
         return payload
     }
 
-    private fun mismatchField(actual: ShmBlobRef, expected: ShmBlobRef): String =
+    private fun mismatchField(
+        actual: ShmBlobRef,
+        expected: ShmBlobRef,
+    ): String =
         when {
             actual.generation != expected.generation -> "generation"
             actual.epoch != expected.epoch -> "epoch"
@@ -153,7 +178,11 @@ fun checksum(payload: ByteArray): ULong {
     return hash
 }
 
-private fun writeHeader(bytes: ByteArray, offset: Int, descriptor: ShmBlobRef) {
+private fun writeHeader(
+    bytes: ByteArray,
+    offset: Int,
+    descriptor: ShmBlobRef,
+) {
     writeU32(bytes, offset, SHM_BLOB_MAGIC)
     writeU16(bytes, offset + 4, SHM_BLOB_VERSION)
     writeU16(bytes, offset + 6, SHM_BLOB_HEADER_LEN.toUInt())
@@ -163,7 +192,10 @@ private fun writeHeader(bytes: ByteArray, offset: Int, descriptor: ShmBlobRef) {
     writeU64(bytes, offset + 32, descriptor.checksum.toULong())
 }
 
-private fun readHeader(bytes: ByteArray, offset: Int): ShmBlobRef {
+private fun readHeader(
+    bytes: ByteArray,
+    offset: Int,
+): ShmBlobRef {
     val magic = readU32(bytes, offset)
     if (magic != SHM_BLOB_MAGIC) throw ShmBlobArenaError.DescriptorMismatch("magic")
     val version = readU16(bytes, offset + 4)
@@ -179,13 +211,21 @@ private fun readHeader(bytes: ByteArray, offset: Int): ShmBlobRef {
     )
 }
 
-private fun writeU16(bytes: ByteArray, offset: Int, value: UInt) {
+private fun writeU16(
+    bytes: ByteArray,
+    offset: Int,
+    value: UInt,
+) {
     val v = value.toInt()
     bytes[offset] = (v and 0xff).toByte()
     bytes[offset + 1] = ((v shr 8) and 0xff).toByte()
 }
 
-private fun writeU32(bytes: ByteArray, offset: Int, value: UInt) {
+private fun writeU32(
+    bytes: ByteArray,
+    offset: Int,
+    value: UInt,
+) {
     val v = value.toInt()
     bytes[offset] = (v and 0xff).toByte()
     bytes[offset + 1] = ((v shr 8) and 0xff).toByte()
@@ -193,7 +233,11 @@ private fun writeU32(bytes: ByteArray, offset: Int, value: UInt) {
     bytes[offset + 3] = ((v shr 24) and 0xff).toByte()
 }
 
-private fun writeU64(bytes: ByteArray, offset: Int, value: ULong) {
+private fun writeU64(
+    bytes: ByteArray,
+    offset: Int,
+    value: ULong,
+) {
     var v = value
     for (i in 0 until 8) {
         bytes[offset + i] = (v and 0xffuL).toByte()
@@ -201,17 +245,26 @@ private fun writeU64(bytes: ByteArray, offset: Int, value: ULong) {
     }
 }
 
-private fun readU16(bytes: ByteArray, offset: Int): UInt =
+private fun readU16(
+    bytes: ByteArray,
+    offset: Int,
+): UInt =
     ((bytes[offset].toInt() and 0xff).toUInt()) or
         (((bytes[offset + 1].toInt() and 0xff).toUInt()) shl 8)
 
-private fun readU32(bytes: ByteArray, offset: Int): UInt =
+private fun readU32(
+    bytes: ByteArray,
+    offset: Int,
+): UInt =
     ((bytes[offset].toInt() and 0xff).toUInt()) or
         (((bytes[offset + 1].toInt() and 0xff).toUInt()) shl 8) or
         (((bytes[offset + 2].toInt() and 0xff).toUInt()) shl 16) or
         (((bytes[offset + 3].toInt() and 0xff).toUInt()) shl 24)
 
-private fun readU64(bytes: ByteArray, offset: Int): ULong {
+private fun readU64(
+    bytes: ByteArray,
+    offset: Int,
+): ULong {
     var v = 0uL
     for (i in 0 until 8) {
         v = v or (((bytes[offset + i].toInt() and 0xff).toULong()) shl (8 * i))

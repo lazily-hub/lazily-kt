@@ -10,7 +10,8 @@ class WebRtcTransportTest {
     private fun snapshotTwoNodes(): Snapshot =
         Snapshot(
             epoch = 1,
-            nodes = listOf(
+            nodes =
+            listOf(
                 NodeSnapshot.payload(1, "t", byteArrayOf(1, 2, 3)),
                 NodeSnapshot.payload(2, "t", byteArrayOf(4, 5, 6)),
             ),
@@ -47,10 +48,11 @@ class WebRtcTransportTest {
         val perms = PeerPermissions()
         perms.allow(peer, RemoteOp.read(1))
 
-        val sync = CrdtSync(
-            frontier = listOf(1L to WireStamp(5, 0, 1)),
-            ops = listOf(CrdtOp(node = 1, key = null, stamp = WireStamp(5, 0, 1), state = IpcValue.Inline(byteArrayOf(42)))),
-        )
+        val sync =
+            CrdtSync(
+                frontier = listOf(1L to WireStamp(5, 0, 1)),
+                ops = listOf(CrdtOp(node = 1, key = null, stamp = WireStamp(5, 0, 1), state = IpcValue.Inline(byteArrayOf(42)))),
+            )
         WebRtcSink(here, perms, peer).send(IpcMessage.ofCrdtSync(sync))
         val received = WebRtcSource(there).recv() ?: error("expected a message")
         val got = assertIs<IpcMessage.CrdtSyncMessage>(received).sync

@@ -80,8 +80,7 @@ inline fun <reified T : Any> ComputeOps.getCell(handle: Source<T>): T = get(hand
 inline fun <reified T : Any> ComputeOps.source(value: T): Source<T> = computeContext.source(value)
 
 /** Create a guarded computed cell over this surface (construction; untracked). */
-inline fun <reified T : Any> ComputeOps.computed(noinline compute: Compute.() -> T): Computed<T> =
-    computeContext.computed(compute)
+inline fun <reified T : Any> ComputeOps.computed(noinline compute: Compute.() -> T): Computed<T> = computeContext.computed(compute)
 
 /** Create a guarded computed with an explicit change predicate (construction). */
 inline fun <reified T : Any> ComputeOps.computedRippleWhen(
@@ -119,14 +118,15 @@ fun ComputeOps.effect(run: Compute.() -> (() -> Unit)?): Effect = computeContext
  * own ambient engines (matching lazily-rs, which value-threads only the primary
  * single-threaded `Context`).
  */
-class Compute @PublishedApi internal constructor(
+class Compute
+@PublishedApi
+internal constructor(
     @PublishedApi internal val ctx: Context,
     /** The node being recomputed — the dependent every tracked read subscribes. */
     @PublishedApi internal val nodeId: Int,
     /** The recompute frame's generation stamp; validated on every read. */
     @PublishedApi internal val gen: Long,
 ) : ComputeOps {
-
     override val computeContext: Context get() = ctx
 
     /** The untracked escape (lazily-rs `Compute::untracked`). */
@@ -151,11 +151,16 @@ class Compute @PublishedApi internal constructor(
  * `untracked().get(x)` inside a compute is genuinely untracked, the deliberate
  * escape lazily-rs spells `Compute::untracked`.
  */
-class Untracked @PublishedApi internal constructor(
+class Untracked
+@PublishedApi
+internal constructor(
     @PublishedApi internal val ctx: Context,
 ) : ComputeOps {
     override val computeContext: Context get() = ctx
+
     override fun untracked(): ComputeOps = this
+
     override fun getCellAny(id: Int): Any = ctx.getCellRaw(id)
+
     override fun getSlotAny(id: Int): Any = ctx.getSlotRaw(id)
 }

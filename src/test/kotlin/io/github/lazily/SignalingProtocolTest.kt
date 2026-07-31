@@ -1,7 +1,5 @@
 package io.github.lazily
 
-import java.nio.file.Files
-import java.nio.file.Path
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
@@ -10,8 +8,8 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertFails
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class SignalingProtocolTest {
@@ -38,16 +36,18 @@ class SignalingProtocolTest {
             // Kebab-case tags: never snake_case.
             assertFalse(tag.contains('_'), "tag must be kebab-case, got '$tag' ($label)")
 
-            val decoded: Any = when (direction) {
-                "client" -> ClientMessage.fromJson(wire)
-                "server" -> ServerMessage.fromJson(wire)
-                else -> error("unknown direction: $direction ($label)")
-            }
-            val reencoded = when (decoded) {
-                is ClientMessage -> decoded.toJson()
-                is ServerMessage -> decoded.toJson()
-                else -> error("unreachable")
-            }
+            val decoded: Any =
+                when (direction) {
+                    "client" -> ClientMessage.fromJson(wire)
+                    "server" -> ServerMessage.fromJson(wire)
+                    else -> error("unknown direction: $direction ($label)")
+                }
+            val reencoded =
+                when (decoded) {
+                    is ClientMessage -> decoded.toJson()
+                    is ServerMessage -> decoded.toJson()
+                    else -> error("unreachable")
+                }
             assertEquals(wire, reencoded, "wire round-trip mismatch for $label")
 
             // Each frame carries an `assertions` block naming the fields it
@@ -61,7 +61,11 @@ class SignalingProtocolTest {
     }
 
     /** Evaluate one signaling frame's `assertions` block against the decoded message. */
-    private fun assertFrameAssertions(label: String, decoded: Any, a: AssertionKeys) {
+    private fun assertFrameAssertions(
+        label: String,
+        decoded: Any,
+        a: AssertionKeys,
+    ) {
         a.assertLong("peer") {
             when (decoded) {
                 is ClientMessage.Join -> decoded.peer
@@ -88,40 +92,49 @@ class SignalingProtocolTest {
             runCatching { serverFrom(label, decoded) }.isSuccess
         }
         a.assertBoolean("has_capabilities") {
-            val join = decoded as? ClientMessage.Join
-                ?: error("$label: `has_capabilities` asserted on a non-join frame")
+            val join =
+                decoded as? ClientMessage.Join
+                    ?: error("$label: `has_capabilities` asserted on a non-join frame")
             join.capabilities != null
         }
         a.assertKeyWith("capabilities") { want ->
-            val join = decoded as? ClientMessage.Join
-                ?: error("$label: `capabilities` asserted on a non-join frame")
+            val join =
+                decoded as? ClientMessage.Join
+                    ?: error("$label: `capabilities` asserted on a non-join frame")
             assertEquals(want.jsonArray.map { it.jsonPrimitive.content }, join.capabilities, "$label: capabilities")
         }
         a.assertKeyWith("peers") { want ->
-            val welcome = decoded as? ServerMessage.Welcome
-                ?: error("$label: `peers` asserted on a non-welcome frame")
+            val welcome =
+                decoded as? ServerMessage.Welcome
+                    ?: error("$label: `peers` asserted on a non-welcome frame")
             assertEquals(want.jsonArray.map { it.jsonPrimitive.long }, welcome.peers, "$label: peers")
         }
         a.assertBoolean("roster_excludes_self") {
-            val welcome = decoded as? ServerMessage.Welcome
-                ?: error("$label: `roster_excludes_self` asserted on a non-welcome frame")
+            val welcome =
+                decoded as? ServerMessage.Welcome
+                    ?: error("$label: `roster_excludes_self` asserted on a non-welcome frame")
             welcome.peer !in welcome.peers
         }
         a.assertString("code") {
-            val err = decoded as? ServerMessage.Error
-                ?: error("$label: `code` asserted on a non-error frame")
+            val err =
+                decoded as? ServerMessage.Error
+                    ?: error("$label: `code` asserted on a non-error frame")
             err.code
         }
     }
 
     /** The server-stamped sender of a forwarded frame, or an error when the frame has none. */
-    private fun serverFrom(label: String, decoded: Any): Long = when (decoded) {
-        is ServerMessage.Offer -> decoded.from
-        is ServerMessage.Answer -> decoded.from
-        is ServerMessage.Ice -> decoded.from
-        is ServerMessage.Relay -> decoded.from
-        else -> error("$label: frame carries no server-stamped `from`")
-    }
+    private fun serverFrom(
+        label: String,
+        decoded: Any,
+    ): Long =
+        when (decoded) {
+            is ServerMessage.Offer -> decoded.from
+            is ServerMessage.Answer -> decoded.from
+            is ServerMessage.Ice -> decoded.from
+            is ServerMessage.Relay -> decoded.from
+            else -> error("$label: frame carries no server-stamped `from`")
+        }
 
     @Test
     fun `signaling negative fixtures are rejected`() {
@@ -151,8 +164,26 @@ class SignalingProtocolTest {
 
     @Test
     fun `kebab-case tags for peer-joined and peer-left`() {
-        assertEquals("peer-joined", (ServerMessage.PeerJoined(5).toJson().getValue("type").jsonPrimitive.content))
-        assertEquals("peer-left", (ServerMessage.PeerLeft(5).toJson().getValue("type").jsonPrimitive.content))
+        assertEquals(
+            "peer-joined",
+            (
+                ServerMessage
+                    .PeerJoined(5)
+                    .toJson()
+                    .getValue("type")
+                    .jsonPrimitive.content
+                ),
+        )
+        assertEquals(
+            "peer-left",
+            (
+                ServerMessage
+                    .PeerLeft(5)
+                    .toJson()
+                    .getValue("type")
+                    .jsonPrimitive.content
+                ),
+        )
     }
 
     @Test
@@ -209,7 +240,9 @@ class SignalingProtocolTest {
         // *true*, but it never makes them *asserted*: it only says lazily-kt
         // emits what the fixture recorded. Stating them against the observed
         // emissions is what turns the fixture's contract into a check.
-        fixture.getValue("assertions").jsonObject
+        fixture
+            .getValue("assertions")
+            .jsonObject
             .consuming("signaling/anti_spoof_session.json assertions") { a ->
                 a.assertBoolean("roster_excludes_self") {
                     assertTrue(welcomes.isNotEmpty(), "roster_excludes_self: no welcome emitted")

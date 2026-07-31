@@ -1,7 +1,5 @@
 package io.github.lazily
 
-import java.nio.file.Files
-import java.nio.file.Path
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
@@ -28,16 +26,30 @@ class ResilienceConformanceTest {
     }
 
     private fun steps(fx: JsonObject) = fx["steps"]!!.jsonArray
-    private fun inval(step: JsonObject, reader: String) =
-        step["expected"]!!.jsonObject["invalidates"]!!.jsonObject[reader]!!.jsonPrimitive.boolean
 
-    private inline fun <reified T : Any> observe(ctx: Context, cell: Source<T>): Computed<Any> {
+    private fun inval(
+        step: JsonObject,
+        reader: String,
+    ) = step["expected"]!!
+        .jsonObject["invalidates"]!!
+        .jsonObject[reader]!!
+        .jsonPrimitive.boolean
+
+    private inline fun <reified T : Any> observe(
+        ctx: Context,
+        cell: Source<T>,
+    ): Computed<Any> {
         val obs = ctx.computed { get(cell) as Any }
         ctx.get(obs)
         return obs
     }
 
-    private fun checkInval(ctx: Context, obs: Computed<Any>, step: JsonObject, reader: String) {
+    private fun checkInval(
+        ctx: Context,
+        obs: Computed<Any>,
+        step: JsonObject,
+        reader: String,
+    ) {
         val wasCached = ctx.isSet(obs)
         ctx.get(obs)
         assertEquals(inval(step, reader), !wasCached, "$reader invalidation")
@@ -48,22 +60,24 @@ class ResilienceConformanceTest {
         val fx = loadFixture("circuit_breaker.json")
         val ctx = Context()
         val cfg = fx["config"]!!.jsonObject
-        val cb = CircuitBreakerCell(
-            ctx,
-            cfg["window"]!!.jsonPrimitive.int,
-            cfg["failure_threshold"]!!.jsonPrimitive.int,
-            cfg["reset_timeout"]!!.jsonPrimitive.long,
-        )
+        val cb =
+            CircuitBreakerCell(
+                ctx,
+                cfg["window"]!!.jsonPrimitive.int,
+                cfg["failure_threshold"]!!.jsonPrimitive.int,
+                cfg["reset_timeout"]!!.jsonPrimitive.long,
+            )
         val obs = observe(ctx, cb.stateCell)
         for (element in steps(fx)) {
             val step = element.jsonObject
             val op = step["op"]!!.jsonObject
             when (op["type"]!!.jsonPrimitive.content) {
                 "record" -> cb.record(op["success"]!!.jsonPrimitive.boolean, op["now"]!!.jsonPrimitive.long)
-                "allow" -> assertEquals(
-                    step["returns"]!!.jsonPrimitive.boolean,
-                    cb.allow(op["now"]!!.jsonPrimitive.long),
-                )
+                "allow" ->
+                    assertEquals(
+                        step["returns"]!!.jsonPrimitive.boolean,
+                        cb.allow(op["now"]!!.jsonPrimitive.long),
+                    )
             }
             assertEquals(step["expected"]!!.jsonObject["state"]!!.jsonPrimitive.content, cb.state().name)
             checkInval(ctx, obs, step, "state")
@@ -112,12 +126,14 @@ class ResilienceConformanceTest {
             val step = element.jsonObject
             val op = step["op"]!!.jsonObject
             val now = op["now"]!!.jsonPrimitive.long
-            val e = when (op["type"]!!.jsonPrimitive.content) {
-                "arm" -> {
-                    t.arm(now, op["timeout"]!!.jsonPrimitive.long); false
+            val e =
+                when (op["type"]!!.jsonPrimitive.content) {
+                    "arm" -> {
+                        t.arm(now, op["timeout"]!!.jsonPrimitive.long)
+                        false
+                    }
+                    else -> t.tick(now)
                 }
-                else -> t.tick(now)
-            }
             assertEquals(step["returns"]!!.jsonPrimitive.boolean, e, "edge")
             assertEquals(step["expected"]!!.jsonObject["is_timed_out"]!!.jsonPrimitive.boolean, t.isTimedOut())
             checkInval(ctx, obs, step, "is_timed_out")

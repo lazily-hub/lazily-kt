@@ -30,12 +30,13 @@ class ComputeFortificationTest {
         val a = ctx.source(1)
 
         var calls = 0
-        val b = ctx.computed {
-            calls++
-            // Tracked read: the edge must attribute to `b`, the node being
-            // recomputed — not to any ambient frame.
-            get(a) * 10
-        }
+        val b =
+            ctx.computed {
+                calls++
+                // Tracked read: the edge must attribute to `b`, the node being
+                // recomputed — not to any ambient frame.
+                get(a) * 10
+            }
 
         assertEquals(10, ctx.get(b))
         assertEquals(1, calls, "first read computes once")
@@ -56,12 +57,13 @@ class ComputeFortificationTest {
         val a = ctx.source(1)
 
         var calls = 0
-        val d = ctx.computed {
-            calls++
-            // The explicit untracked escape: read `a` through the owning Context,
-            // which forms no dependency edge.
-            untracked().get(a) * 10
-        }
+        val d =
+            ctx.computed {
+                calls++
+                // The explicit untracked escape: read `a` through the owning Context,
+                // which forms no dependency edge.
+                untracked().get(a) * 10
+            }
 
         assertEquals(10, ctx.get(d))
         assertEquals(1, calls)
@@ -103,10 +105,11 @@ class ComputeFortificationTest {
         // Smuggle the view out of its recompute (the non-escapable contract
         // lazily-rs enforces at compile time; here it is a runtime guard).
         var escaped: Compute? = null
-        val b = ctx.computed {
-            escaped = this
-            get(a)
-        }
+        val b =
+            ctx.computed {
+                escaped = this
+                get(a)
+            }
         assertEquals(1, ctx.get(b)) // force one recompute so `escaped` is populated
 
         val stale = escaped

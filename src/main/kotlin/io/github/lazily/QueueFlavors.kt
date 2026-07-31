@@ -38,11 +38,14 @@ class ThreadSafeQueueCell<T : Any, S : QueueStorage<T>>(
         fun <T : Any> bounded(
             ctx: ThreadSafeContext,
             capacity: Int,
-        ): ThreadSafeQueueCell<T, VecDequeStorage<T>> =
-            ThreadSafeQueueCell(ctx, VecDequeStorage(capacity))
+        ): ThreadSafeQueueCell<T, VecDequeStorage<T>> = ThreadSafeQueueCell(ctx, VecDequeStorage(capacity))
     }
 
-    private fun invalidateReaders(lenBefore: Int, lenAfter: Int, headChanged: Boolean) {
+    private fun invalidateReaders(
+        lenBefore: Int,
+        lenAfter: Int,
+        headChanged: Boolean,
+    ) {
         val roots = ArrayList<Int>(4)
         roots += lenSlot.id
         if ((lenBefore == 0) != (lenAfter == 0)) roots += isEmptySlot.id
@@ -74,7 +77,9 @@ class ThreadSafeQueueCell<T : Any, S : QueueStorage<T>>(
     fun close() {
         val changed =
             lock.withLock {
-                if (storage.isClosed()) false else {
+                if (storage.isClosed()) {
+                    false
+                } else {
                     storage.close()
                     true
                 }
@@ -89,19 +94,21 @@ class ThreadSafeQueueCell<T : Any, S : QueueStorage<T>>(
     }
 
     fun len(): Int = ctx.get(lenSlot)
+
     fun isEmpty(): Boolean = ctx.get(isEmptySlot)
+
     fun isFull(): Boolean = ctx.get(isFullSlot)
+
     fun isClosed(): Boolean = ctx.get(closedCell)
+
     fun capacity(): Int? = cap
 
-    fun readerHandles(): ThreadSafeQueueReaderHandles =
-        ThreadSafeQueueReaderHandles(headSlot, lenSlot, isEmptySlot, isFullSlot, closedCell)
+    fun readerHandles(): ThreadSafeQueueReaderHandles = ThreadSafeQueueReaderHandles(headSlot, lenSlot, isEmptySlot, isFullSlot, closedCell)
 
     internal fun <R> withStorage(read: (S) -> R): R = lock.withLock { read(storage) }
 }
 
-fun <T : Any> ThreadSafeQueueCell<T, VecDequeStorage<T>>.elements(): List<T> =
-    withStorage { it.elements() }
+fun <T : Any> ThreadSafeQueueCell<T, VecDequeStorage<T>>.elements(): List<T> = withStorage { it.elements() }
 
 /** Reader-kind handles owned by an [AsyncQueueCell]'s graph. */
 data class AsyncQueueReaderHandles(
@@ -133,17 +140,19 @@ class AsyncQueueCell<T : Any, S : QueueStorage<T>>(
     private val closedCell = ctx.source(lock.withLock { storage.isClosed() })
 
     companion object {
-        fun <T : Any> unbounded(ctx: AsyncContext): AsyncQueueCell<T, VecDequeStorage<T>> =
-            AsyncQueueCell(ctx, VecDequeStorage())
+        fun <T : Any> unbounded(ctx: AsyncContext): AsyncQueueCell<T, VecDequeStorage<T>> = AsyncQueueCell(ctx, VecDequeStorage())
 
         fun <T : Any> bounded(
             ctx: AsyncContext,
             capacity: Int,
-        ): AsyncQueueCell<T, VecDequeStorage<T>> =
-            AsyncQueueCell(ctx, VecDequeStorage(capacity))
+        ): AsyncQueueCell<T, VecDequeStorage<T>> = AsyncQueueCell(ctx, VecDequeStorage(capacity))
     }
 
-    private fun invalidateReaders(lenBefore: Int, lenAfter: Int, headChanged: Boolean) {
+    private fun invalidateReaders(
+        lenBefore: Int,
+        lenAfter: Int,
+        headChanged: Boolean,
+    ) {
         val roots = ArrayList<Int>(4)
         roots += lenSlot.id
         if ((lenBefore == 0) != (lenAfter == 0)) roots += isEmptySlot.id
@@ -175,7 +184,9 @@ class AsyncQueueCell<T : Any, S : QueueStorage<T>>(
     fun close() {
         val changed =
             lock.withLock {
-                if (storage.isClosed()) false else {
+                if (storage.isClosed()) {
+                    false
+                } else {
                     storage.close()
                     true
                 }
@@ -196,22 +207,28 @@ class AsyncQueueCell<T : Any, S : QueueStorage<T>>(
     }
 
     fun len(): Int = requireNotNull(ctx.get(lenSlot))
+
     fun len(compute: AsyncComputeContext): Int = requireNotNull(compute.get(lenSlot))
+
     fun isEmpty(): Boolean = requireNotNull(ctx.get(isEmptySlot))
+
     fun isEmpty(compute: AsyncComputeContext): Boolean = requireNotNull(compute.get(isEmptySlot))
+
     fun isFull(): Boolean = requireNotNull(ctx.get(isFullSlot))
+
     fun isFull(compute: AsyncComputeContext): Boolean = requireNotNull(compute.get(isFullSlot))
+
     fun isClosed(): Boolean = ctx.get(closedCell)
+
     fun isClosed(compute: AsyncComputeContext): Boolean = compute.get(closedCell)
+
     fun capacity(): Int? = cap
 
-    fun readerHandles(): AsyncQueueReaderHandles =
-        AsyncQueueReaderHandles(headSlot, lenSlot, isEmptySlot, isFullSlot, closedCell)
+    fun readerHandles(): AsyncQueueReaderHandles = AsyncQueueReaderHandles(headSlot, lenSlot, isEmptySlot, isFullSlot, closedCell)
 
     internal fun <R> withStorage(read: (S) -> R): R = lock.withLock { read(storage) }
 }
 
-fun <T : Any> AsyncQueueCell<T, VecDequeStorage<T>>.elements(): List<T> =
-    withStorage { it.elements() }
+fun <T : Any> AsyncQueueCell<T, VecDequeStorage<T>>.elements(): List<T> = withStorage { it.elements() }
 
 private object NO_QUEUE_HEAD

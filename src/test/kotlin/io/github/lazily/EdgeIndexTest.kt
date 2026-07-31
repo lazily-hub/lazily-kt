@@ -113,7 +113,10 @@ class EdgeIndexTest {
         val width = EDGE_INDEX_THRESHOLD * 3
         val expected = HashSet<Int>()
         // Ids spaced to force probe collisions rather than a tidy sequence.
-        for (i in 0 until width) { edges.add(i * 7); expected.add(i * 7) }
+        for (i in 0 until width) {
+            edges.add(i * 7)
+            expected.add(i * 7)
+        }
         val rng = java.util.Random(20260719)
         repeat(5_000) {
             val victim = rng.nextInt(width) * 7
@@ -176,7 +179,13 @@ class EdgeIndexTest {
         // ids go back on the free list.
         val topic = ctx.source(0)
         val seen = IntArray(width)
-        val effects = (0 until width).map { i -> ctx.effect { seen[i] = get(topic); null } }
+        val effects =
+            (0 until width).map { i ->
+                ctx.effect {
+                    seen[i] = get(topic)
+                    null
+                }
+            }
         topic.set(ctx, 7)
         for (i in 0 until width) assertEquals(7, seen[i])
         for (e in effects) ctx.disposeEffect(e)
@@ -223,13 +232,19 @@ class EdgeIndexTest {
         // The frontier pops LIFO, so the *last* registered effect runs first.
         // The disposer must therefore be registered last for the victim to still
         // be queued when the dispose happens.
-        val victim = ctx.effect { get(c); victimRuns++; null }
-        val disposer = ctx.effect {
-            get(c)
-            disposerRan = true
-            ctx.disposeEffect(victim)
-            null
-        }
+        val victim =
+            ctx.effect {
+                get(c)
+                victimRuns++
+                null
+            }
+        val disposer =
+            ctx.effect {
+                get(c)
+                disposerRan = true
+                ctx.disposeEffect(victim)
+                null
+            }
         assertEquals(1, victimRuns, "victim runs once at registration")
 
         c.set(ctx, 1)
@@ -249,7 +264,14 @@ class EdgeIndexTest {
         val ctx = Context()
         val c = ctx.source(0)
         val runs = IntArray(3)
-        val hs = (0 until 3).map { i -> ctx.effect { get(c); runs[i]++; null } }
+        val hs =
+            (0 until 3).map { i ->
+                ctx.effect {
+                    get(c)
+                    runs[i]++
+                    null
+                }
+            }
         ctx.disposeEffect(hs[1])
         c.set(ctx, 1)
         assertEquals(2, runs[0])
@@ -267,7 +289,14 @@ class EdgeIndexTest {
         val width = EDGE_INDEX_THRESHOLD * 8
         val topic = ctx.source(0)
         val runs = IntArray(width)
-        val hs = (0 until width).map { i -> ctx.effect { get(topic); runs[i]++; null } }
+        val hs =
+            (0 until width).map { i ->
+                ctx.effect {
+                    get(topic)
+                    runs[i]++
+                    null
+                }
+            }
         topic.set(ctx, 1)
         for (i in 0 until width) assertEquals(2, runs[i], "effect $i should have rerun once")
 
@@ -283,8 +312,18 @@ class EdgeIndexTest {
         val c = ctx.source(0)
         var victimRuns = 0
         var disposerRan = false
-        val victim = ctx.effect { get(c); victimRuns++; null }
-        ctx.effect { get(c); disposerRan = true; ctx.disposeEffect(victim); null }
+        val victim =
+            ctx.effect {
+                get(c)
+                victimRuns++
+                null
+            }
+        ctx.effect {
+            get(c)
+            disposerRan = true
+            ctx.disposeEffect(victim)
+            null
+        }
         assertEquals(1, victimRuns)
         ctx.set(c, 1)
         assertTrue(disposerRan, "disposer must have run")
@@ -386,7 +425,10 @@ class EdgeIndexTest {
         // unrelated flush — a write to a cell it does not even read — as a
         // spurious rerun no publish asked for.
         val unrelated = ctx.source(0)
-        ctx.effect { get(unrelated); null }
+        ctx.effect {
+            get(unrelated)
+            null
+        }
         unrelated.set(ctx, 1)
         assertEquals(1, runs, "a publish the effect does not observe must not flush it")
         assertFalse(sawDisposed)
@@ -423,7 +465,10 @@ class EdgeIndexTest {
         assertEquals(1, runs, "the effect reached by the disposal walk must not rerun")
 
         val unrelated = ctx.source(0)
-        ctx.effect { get(unrelated); null }
+        ctx.effect {
+            get(unrelated)
+            null
+        }
         ctx.set(unrelated, 1)
         assertEquals(1, runs, "a publish the effect does not observe must not flush it")
 
@@ -447,8 +492,14 @@ class EdgeIndexTest {
         val scope = ctx.scope()
         val a = scope.computed { get(topic) + 1 }
         val b = scope.computed { get(a) + 2 }
-        scope.effect { get(b); { cleanups.add("watch_b") } }
-        scope.effect { get(b); { cleanups.add("watch_b2") } }
+        scope.effect {
+            get(b);
+            { cleanups.add("watch_b") }
+        }
+        scope.effect {
+            get(b);
+            { cleanups.add("watch_b2") }
+        }
 
         assertEquals(4, ctx.get(b))
         assertEquals(4, scope.size)
@@ -470,13 +521,17 @@ class EdgeIndexTest {
             val topic = ctx.source(1)
             val cleanups = mutableListOf<String>()
             val scope = ctx.scope()
-            val a = if (useScope) {
-                scope.computed { get(topic) + 1 }
-            } else {
-                ctx.computed { get(topic) + 1 }
-            }
+            val a =
+                if (useScope) {
+                    scope.computed { get(topic) + 1 }
+                } else {
+                    ctx.computed { get(topic) + 1 }
+                }
             val b = if (useScope) scope.computed { get(a) + 2 } else ctx.computed { get(a) + 2 }
-            val run: Compute.() -> (() -> Unit)? = { get(b); { cleanups.add("watch") } }
+            val run: Compute.() -> (() -> Unit)? = {
+                get(b);
+                { cleanups.add("watch") }
+            }
             val w = if (useScope) scope.effect(run) else ctx.effect(run)
             assertEquals(4, ctx.get(b))
 
@@ -511,7 +566,10 @@ class EdgeIndexTest {
         assertFailsWith<IllegalStateException> {
             ctx.scope().use { scope ->
                 member = scope.computed { get(topic) + 1 }
-                scope.effect { get(member!!); { cleanups.add("watch") } }
+                scope.effect {
+                    get(member!!);
+                    { cleanups.add("watch") }
+                }
                 assertEquals(2, ctx.get(member!!))
                 assertEquals(1, ctx.dependentCount(topic))
                 error("boom")
@@ -530,7 +588,10 @@ class EdgeIndexTest {
         val cleanups = mutableListOf<String>()
         val scope = ctx.scope()
         val escaped = scope.computed { get(topic) + 1 }
-        scope.effect { get(escaped); { cleanups.add("watch") } }
+        scope.effect {
+            get(escaped);
+            { cleanups.add("watch") }
+        }
 
         assertEquals(2, ctx.get(escaped))
         assertEquals(2, scope.size)
@@ -570,13 +631,24 @@ class EdgeIndexTest {
     fun `subscribe unsubscribe churn returns to baseline`() {
         val ctx = Context()
         val topic = ctx.source(0)
-        val subs = (0 until 8).map { ctx.effect { get(topic); null } }.toMutableList()
+        val subs =
+            (0 until 8)
+                .map {
+                    ctx.effect {
+                        get(topic)
+                        null
+                    }
+                }.toMutableList()
         assertEquals(8, ctx.dependentCount(topic))
 
         for (c in 0 until 200) {
             val at = c % 8
             ctx.disposeEffect(subs[at])
-            subs[at] = ctx.effect { get(topic); null }
+            subs[at] =
+                ctx.effect {
+                    get(topic)
+                    null
+                }
         }
         assertEquals(
             8,
@@ -631,16 +703,25 @@ class EdgeIndexTest {
         runBlocking {
             AsyncContext().use { ctx ->
                 val topic = ctx.source(0)
-                val subs = (0 until 8)
-                    .map { ctx.effectAsync { get(topic); null } }
-                    .toMutableList()
+                val subs =
+                    (0 until 8)
+                        .map {
+                            ctx.effectAsync {
+                                get(topic)
+                                null
+                            }
+                        }.toMutableList()
                 ctx.settle()
                 assertEquals(8, ctx.dependentCount(topic))
 
                 for (c in 0 until 64) {
                     val at = c % 8
                     ctx.disposeEffect(subs[at])
-                    subs[at] = ctx.effectAsync { get(topic); null }
+                    subs[at] =
+                        ctx.effectAsync {
+                            get(topic)
+                            null
+                        }
                 }
                 ctx.settle()
                 assertEquals(

@@ -19,15 +19,18 @@ package io.github.lazily
  */
 class GraphView {
     /** A tracked node: its id, `type_tag`, and the producer's raw published payload bytes. */
-    data class Node(val id: NodeId, val typeTag: String, val payload: ByteArray?) {
+    data class Node(
+        val id: NodeId,
+        val typeTag: String,
+        val payload: ByteArray?,
+    ) {
         override fun equals(other: Any?): Boolean =
             other is Node &&
                 id == other.id &&
                 typeTag == other.typeTag &&
                 payload.contentEqualsOrBothNull(other.payload)
 
-        override fun hashCode(): Int =
-            (31 * (31 * id.hashCode() + typeTag.hashCode())) + (payload?.contentHashCode() ?: 0)
+        override fun hashCode(): Int = (31 * (31 * id.hashCode() + typeTag.hashCode())) + (payload?.contentHashCode() ?: 0)
     }
 
     private val nodes = LinkedHashMap<NodeId, Node>()
@@ -93,15 +96,17 @@ class GraphView {
     fun allEdges(): List<Pair<NodeId, NodeId>> = edges.toList()
 
     /** Inline payload bytes → raw bytes; `Opaque`/`SharedBlob` carry no inline payload. */
-    private fun payloadOf(state: NodeState): ByteArray? = when (state) {
-        is NodeState.Payload -> state.toByteArray()
-        else -> null
-    }
+    private fun payloadOf(state: NodeState): ByteArray? =
+        when (state) {
+            is NodeState.Payload -> state.toByteArray()
+            else -> null
+        }
 
-    private fun payloadOf(value: IpcValue): ByteArray? = when (value) {
-        is IpcValue.Inline -> value.toByteArray()
-        else -> null
-    }
+    private fun payloadOf(value: IpcValue): ByteArray? =
+        when (value) {
+            is IpcValue.Inline -> value.toByteArray()
+            else -> null
+        }
 }
 
 private fun ByteArray?.contentEqualsOrBothNull(other: ByteArray?): Boolean =

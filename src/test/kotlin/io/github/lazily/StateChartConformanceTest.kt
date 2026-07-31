@@ -1,7 +1,5 @@
 package io.github.lazily
 
-import java.nio.file.Files
-import java.nio.file.Path
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -9,10 +7,10 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.booleanOrNull
-import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -46,13 +44,22 @@ class StateChartConformanceTest {
             else -> error("active must be a string or array")
         }.sorted()
 
-    private fun assertActive(ctx: Context, chart: StateChart, expected: JsonElement, msg: String) {
+    private fun assertActive(
+        ctx: Context,
+        chart: StateChart,
+        expected: JsonElement,
+        msg: String,
+    ) {
         val want = activeExpected(expected)
         val got = chart.activeLeaves(ctx)
         assertEquals(want, got, "$msg: active leaves $got ≠ expected $want")
     }
 
-    private fun assertMatches(ctx: Context, chart: StateChart, step: JsonObject) {
+    private fun assertMatches(
+        ctx: Context,
+        chart: StateChart,
+        step: JsonObject,
+    ) {
         val obj = step["matches"] as? JsonObject ?: return
         for ((id, expected) in obj) {
             val want = expected.jsonPrimitive.boolean
@@ -60,8 +67,7 @@ class StateChartConformanceTest {
         }
     }
 
-    private fun actionsOf(element: JsonElement?): List<String> =
-        (element as? JsonArray)?.map { it.jsonPrimitive.content } ?: emptyList()
+    private fun actionsOf(element: JsonElement?): List<String> = (element as? JsonArray)?.map { it.jsonPrimitive.content } ?: emptyList()
 
     private fun runFixture(name: String) {
         val fixture = loadFixture(name)
@@ -100,11 +106,17 @@ class StateChartConformanceTest {
     }
 
     @Test fun conformance_flat_cycle() = runFixture("flat_cycle.json")
+
     @Test fun conformance_hierarchical_player() = runFixture("hierarchical_player.json")
+
     @Test fun conformance_guarded_door() = runFixture("guarded_door.json")
+
     @Test fun conformance_parallel_regions() = runFixture("parallel_regions.json")
+
     @Test fun conformance_history_shallow() = runFixture("history_shallow.json")
+
     @Test fun conformance_history_deep() = runFixture("history_deep.json")
+
     @Test fun conformance_entry_exit_actions() = runFixture("entry_exit_actions.json")
 
     @Test fun `all statechart fixtures replay identically`() {

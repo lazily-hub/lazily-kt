@@ -35,20 +35,21 @@ class AsyncMapConformanceTest {
      * until driven with [AsyncComputedMap.observeAsync].
      */
     @Test
-    fun slotMapDefersAndResolvesOnDrive() = runBlocking {
-        val ctx = AsyncContext()
-        val map = AsyncComputedMap<Int, Int>()
-        assertEquals(0, map.presentCount)
-        // Materialize but do not drive → pending, non-blocking observe is null.
-        map.getOrInsertWith(ctx, 4) { it * 10 }
-        assertTrue(map.isPresent(4))
-        assertEquals(1, map.presentCount)
-        assertNull(map.observe(ctx, 4))
-        // Drive to resolution.
-        assertEquals(40, map.observeAsync(ctx, 4))
-        // Eventual transparency: once resolved, the non-blocking read sees it too.
-        assertEquals(40, map.observe(ctx, 4))
-    }
+    fun slotMapDefersAndResolvesOnDrive() =
+        runBlocking {
+            val ctx = AsyncContext()
+            val map = AsyncComputedMap<Int, Int>()
+            assertEquals(0, map.presentCount)
+            // Materialize but do not drive → pending, non-blocking observe is null.
+            map.getOrInsertWith(ctx, 4) { it * 10 }
+            assertTrue(map.isPresent(4))
+            assertEquals(1, map.presentCount)
+            assertNull(map.observe(ctx, 4))
+            // Drive to resolution.
+            assertEquals(40, map.observeAsync(ctx, 4))
+            // Eventual transparency: once resolved, the non-blocking read sees it too.
+            assertEquals(40, map.observe(ctx, 4))
+        }
 
     /** Input cells materialize at build regardless of strategy. */
     @Test
@@ -62,17 +63,18 @@ class AsyncMapConformanceTest {
 
     /** A driven async slot resolves to the same canonical value under either strategy. */
     @Test
-    fun eventualTransparencyEagerEqualsLazy() = runBlocking {
-        val ctxE = AsyncContext()
-        val eager = AsyncComputedMap<Int, Int>()
-        eager.materializeAll(ctxE, listOf(1, 2, 3)) { it * 2 }
-        val ctxL = AsyncContext()
-        val lazy = AsyncComputedMap<Int, Int>()
-        for (k in listOf(1, 2, 3)) {
-            lazy.getOrInsertWith(ctxL, k) { it * 2 }
-            assertEquals(eager.observeAsync(ctxE, k), lazy.observeAsync(ctxL, k))
+    fun eventualTransparencyEagerEqualsLazy() =
+        runBlocking {
+            val ctxE = AsyncContext()
+            val eager = AsyncComputedMap<Int, Int>()
+            eager.materializeAll(ctxE, listOf(1, 2, 3)) { it * 2 }
+            val ctxL = AsyncContext()
+            val lazy = AsyncComputedMap<Int, Int>()
+            for (k in listOf(1, 2, 3)) {
+                lazy.getOrInsertWith(ctxL, k) { it * 2 }
+                assertEquals(eager.observeAsync(ctxE, k), lazy.observeAsync(ctxL, k))
+            }
         }
-    }
 
     /** Re-getting a key does not grow the present set. */
     @Test

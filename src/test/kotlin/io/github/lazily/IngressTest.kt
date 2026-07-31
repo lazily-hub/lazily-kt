@@ -1,9 +1,9 @@
 package io.github.lazily
 
+import kotlinx.coroutines.runBlocking
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
-import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -421,8 +421,10 @@ class IngressTest {
 
     // -- The single-threaded shell ----------------------------------------
 
-    private fun cell(ctx: Context, policy: IngressPolicy = IngressPolicy()) =
-        IngressCell<String, Long>(ctx, policy, sum())
+    private fun cell(
+        ctx: Context,
+        policy: IngressPolicy = IngressPolicy(),
+    ) = IngressCell<String, Long>(ctx, policy, sum())
 
     @Test
     fun `delivery is visible through the value reader`() {
@@ -462,7 +464,11 @@ class IngressTest {
         val ingress = cell(ctx)
         ingress.open("a", 1)
         val observed = mutableListOf<Long?>()
-        val effect = ctx.effect { observed += ingress.value("a", this); null }
+        val effect =
+            ctx.effect {
+                observed += ingress.value("a", this)
+                null
+            }
         assertEquals(1, observed.size)
 
         // Out of order: nothing observable moved, so the value effect must not run.
@@ -482,7 +488,12 @@ class IngressTest {
         val ingress = cell(ctx, IngressPolicy(freshnessHorizon = 100))
         ingress.admit(env("a", 1, 0, 0, 1))
         var runs = 0
-        val effect = ctx.effect { runs += 1; ingress.readiness("a", this); null }
+        val effect =
+            ctx.effect {
+                runs += 1
+                ingress.readiness("a", this)
+                null
+            }
         assertEquals(1, runs)
 
         ingress.tick(50)
@@ -498,7 +509,12 @@ class IngressTest {
         val ingress = cell(ctx)
         ingress.admit(env("a", 1, 0, 0, 9))
         var valueRuns = 0
-        val effect = ctx.effect { valueRuns += 1; ingress.value("a", this); null }
+        val effect =
+            ctx.effect {
+                valueRuns += 1
+                ingress.value("a", this)
+                null
+            }
         ingress.fail("a", IngressError.TransportClosed)
         assertEquals(1, valueRuns)
         assertEquals(1, assertNotNull(ingress.retry("a")).attempt)
@@ -582,7 +598,12 @@ class IngressTest {
         val ingress = cell(ctx)
         ingress.admit(env("a", 1, 0, 0, 1))
         var runs = 0
-        val effect = ctx.effect { runs += 1; ingress.value("a", this); null }
+        val effect =
+            ctx.effect {
+                runs += 1
+                ingress.value("a", this)
+                null
+            }
         assertEquals(1, runs)
         ingress.admit(env("b", 1, 0, 0, 2))
         ingress.close("b")

@@ -14,9 +14,7 @@ import com.sun.jna.Pointer
  */
 interface LazilyFFI : Library {
     companion object {
-        fun load(libName: String = "agent_doc"): LazilyFFI {
-            return Native.load(libName, LazilyFFI::class.java)
-        }
+        fun load(libName: String = "agent_doc"): LazilyFFI = Native.load(libName, LazilyFFI::class.java)
     }
 
     /**
@@ -44,7 +42,10 @@ interface LazilyFFI : Library {
      * Returns a NUL-terminated JSON string (or `"null"` on hash/ledger failure).
      * Caller MUST free the returned pointer with [agent_doc_free_string].
      */
-    fun agent_doc_state_subscribe(documentHash: String, lastEpoch: Long): Pointer
+    fun agent_doc_state_subscribe(
+        documentHash: String,
+        lastEpoch: Long,
+    ): Pointer
 
     /**
      * Record a lazily state-backbone event from a plugin.
@@ -52,7 +53,10 @@ interface LazilyFFI : Library {
      * `factJson` must be a JSON object deserializable as a `StateEvent`.
      * Returns 1 on success, 0 on failure.
      */
-    fun agent_doc_record_state_event(documentHash: String, factJson: String): Int
+    fun agent_doc_record_state_event(
+        documentHash: String,
+        factJson: String,
+    ): Int
 
     /** Free a string pointer returned by [agent_doc_state_projection]. */
     fun agent_doc_free_string(ptr: Pointer)

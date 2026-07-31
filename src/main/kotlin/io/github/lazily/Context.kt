@@ -7,7 +7,11 @@ package io.github.lazily
 // here: it is a sink, outside the `Cell` hierarchy.
 
 /** Reference to a registered side-effecting observer. Dispose to stop reruns. */
-class Effect @PublishedApi internal constructor(val id: Int) : GraphNode {
+class Effect
+@PublishedApi
+internal constructor(
+    val id: Int,
+) : GraphNode {
     override val nodeId: Int get() = id
 }
 
@@ -44,7 +48,11 @@ private const val INITIAL_NODE_CAPACITY = 16
  */
 class Context : ComputeOps {
     private sealed interface Node {
-        class Cell(var value: Any?, val dependents: SmallEdgeList = SmallEdgeList()) : Node
+        class Cell(
+            var value: Any?,
+            val dependents: SmallEdgeList = SmallEdgeList(),
+        ) : Node
+
         class Slot(
             var value: Any? = null,
             var hasValue: Boolean = false,
@@ -67,6 +75,7 @@ class Context : ComputeOps {
             // pays nothing.
             var eager: Boolean = false,
         ) : Node
+
         class Effect(
             val run: Compute.() -> (() -> Unit)?,
             val dependencies: SmallEdgeList = SmallEdgeList(),
@@ -105,6 +114,7 @@ class Context : ComputeOps {
     private val pendingEffects: ArrayDeque<Int> = ArrayDeque()
     private val scheduledEffects: MutableSet<Int> = HashSet()
     private var flushingEffects: Boolean = false
+
     @PublishedApi
     internal var batchDepth: Int = 0
     private val batchedCells: MutableSet<Int> = HashSet()
@@ -168,8 +178,7 @@ class Context : ComputeOps {
      * form), and `computed` — which historically named the *unguarded* form in
      * these bindings — is now the guarded default.
      */
-    inline fun <reified T : Any> computed(noinline compute: Compute.() -> T): Computed<T> =
-        Computed(slotAny { compute() })
+    inline fun <reified T : Any> computed(noinline compute: Compute.() -> T): Computed<T> = Computed(slotAny { compute() })
 
     /** @suppress Renamed to [computed]. */
     @Deprecated("Renamed to computed (guarded by default; v2 Cell kernel — #lzcellkernel).", ReplaceWith("computed(compute)"))
@@ -330,7 +339,10 @@ class Context : ComputeOps {
      * (which the JVM cannot forbid at compile time) throws here rather than
      * registering an edge against the wrong or a disposed node.
      */
-    internal fun assertComputeValid(nodeId: Int, gen: Long) {
+    internal fun assertComputeValid(
+        nodeId: Int,
+        gen: Long,
+    ) {
         check(liveGenerations.isNotEmpty() && gen in liveGenerations) {
             "lazily: a Compute view was used outside its recompute (escaped or stale); " +
                 "tracked reads must go through the view handed to the closure while it runs"
@@ -341,20 +353,32 @@ class Context : ComputeOps {
     }
 
     /** Value-threaded edge registration used by [Compute] (`#lzcellkernel`). */
-    internal fun registerDependencyInternal(dependencyId: Int, dependentId: Int) =
-        registerDependency(dependencyId, dependentId)
+    internal fun registerDependencyInternal(
+        dependencyId: Int,
+        dependentId: Int,
+    ) = registerDependency(dependencyId, dependentId)
 
     // -- Write -------------------------------------------------------------
 
     /** @suppress Writes are kind-restricted extensions — use `sourceCell.set(ctx, value)` (Cell.kt). */
+
     /** Write a [Source]; a no-op when the new value is equal to the old value. */
-    fun <T : Any> set(handle: Source<T>, value: T) = setCellAny(handle.id, value)
+    fun <T : Any> set(
+        handle: Source<T>,
+        value: T,
+    ) = setCellAny(handle.id, value)
 
     @Deprecated("Writes are unified — use `set` (#lzcellkernel).", ReplaceWith("set(handle, value)"))
-    fun <T : Any> setCell(handle: Source<T>, value: T) = set(handle, value)
+    fun <T : Any> setCell(
+        handle: Source<T>,
+        value: T,
+    ) = set(handle, value)
 
     @PublishedApi
-    internal fun setCellAny(id: Int, value: Any) {
+    internal fun setCellAny(
+        id: Int,
+        value: Any,
+    ) {
         // A write that silently vanishes is the same failure mode as a read that
         // silently returns stale.
         val node = nodes[id] as? Node.Cell ?: throw DisposedNodeException(id, "cell")
@@ -399,10 +423,16 @@ class Context : ComputeOps {
         val forceStack = ArrayDeque<Boolean>()
         for (cellId in batchedCells) {
             val cell = nodes[cellId] as? Node.Cell ?: continue
-            for (dep in cell.dependents) { stack.addLast(dep); forceStack.addLast(true) }
+            for (dep in cell.dependents) {
+                stack.addLast(dep)
+                forceStack.addLast(true)
+            }
         }
         batchedCells.clear()
-        for (slotId in batchedSlots) { stack.addLast(slotId); forceStack.addLast(true) }
+        for (slotId in batchedSlots) {
+            stack.addLast(slotId)
+            forceStack.addLast(true)
+        }
         batchedSlots.clear()
         runFrontier(stack, forceStack)
         flushEffects()
@@ -425,7 +455,10 @@ class Context : ComputeOps {
         }
         val stack = ArrayDeque<Int>()
         val forceStack = ArrayDeque<Boolean>()
-        for (id in ids) { stack.addLast(id); forceStack.addLast(true) }
+        for (id in ids) {
+            stack.addLast(id)
+            forceStack.addLast(true)
+        }
         val scheduled = runFrontier(stack, forceStack)
         if (scheduled) flushEffects()
     }
@@ -478,11 +511,12 @@ class Context : ComputeOps {
      *
      * `0` for a disposed node, and for effects, which are pure sinks.
      */
-    fun dependentCount(node: GraphNode): Int = when (val n = resolve(node)) {
-        is Node.Cell -> n.dependents.size
-        is Node.Slot -> n.dependents.size
-        else -> 0
-    }
+    fun dependentCount(node: GraphNode): Int =
+        when (val n = resolve(node)) {
+            is Node.Cell -> n.dependents.size
+            is Node.Slot -> n.dependents.size
+            else -> 0
+        }
 
     /**
      * How many nodes [node] currently depends on — the size of its forward edge
@@ -492,11 +526,12 @@ class Context : ComputeOps {
      *
      * `0` for a disposed node, and for cells, which are pure sources.
      */
-    fun dependencyCount(node: GraphNode): Int = when (val n = resolve(node)) {
-        is Node.Slot -> n.dependencies.size
-        is Node.Effect -> n.dependencies.size
-        else -> 0
-    }
+    fun dependencyCount(node: GraphNode): Int =
+        when (val n = resolve(node)) {
+            is Node.Slot -> n.dependencies.size
+            is Node.Effect -> n.dependencies.size
+            else -> 0
+        }
 
     /** Whether [node] has been torn down. A disposed node reads as a [DisposedNodeException]. */
     fun isDisposed(node: GraphNode): Boolean = resolve(node) == null
@@ -555,7 +590,10 @@ class Context : ComputeOps {
      * The id is recycled at step 1 and effect cleanups run last, after the node
      * is fully detached, so a cleanup observes a consistent graph.
      */
-    private fun disposeResolved(id: Int, node: Node) {
+    private fun disposeResolved(
+        id: Int,
+        node: Node,
+    ) {
         nodes[id] = null
         freeIds.addLast(id)
         when (node) {
@@ -602,7 +640,10 @@ class Context : ComputeOps {
      * than a second traversal, so "transitively reached" has exactly one
      * definition in this library and the two cannot drift.
      */
-    private fun detachDependents(id: Int, dependents: SmallEdgeList) {
+    private fun detachDependents(
+        id: Int,
+        dependents: SmallEdgeList,
+    ) {
         if (dependents.isEmpty()) return
         val snapshot = dependents.toList()
         dependents.clear()
@@ -611,7 +652,10 @@ class Context : ComputeOps {
         try {
             val stack = ArrayDeque<Int>()
             val forceStack = ArrayDeque<Boolean>()
-            for (parent in snapshot) { stack.addLast(parent); forceStack.addLast(true) }
+            for (parent in snapshot) {
+                stack.addLast(parent)
+                forceStack.addLast(true)
+            }
             runFrontier(stack, forceStack)
         } finally {
             disposalDepth--
@@ -619,7 +663,10 @@ class Context : ComputeOps {
     }
 
     /** Remove [depId] from [parentId]'s forward (dependency) edge set. */
-    private fun removeDependencyEdge(parentId: Int, depId: Int) {
+    private fun removeDependencyEdge(
+        parentId: Int,
+        depId: Int,
+    ) {
         when (val parent = nodes[parentId]) {
             is Node.Slot -> removeEdge(parent.dependencies, depId)
             is Node.Effect -> removeEdge(parent.dependencies, depId)
@@ -653,7 +700,11 @@ class Context : ComputeOps {
     internal fun makeEager(id: Int) {
         val node = nodes[id] as? Node.Slot ?: throw DisposedNodeException(id, "formula")
         if (node.eager) return
-        val effect = effectAny { getSlotAny(id); null }
+        val effect =
+            effectAny {
+                getSlotAny(id)
+                null
+            }
         node.eager = true
         eagerBy[id] = effect
     }
@@ -692,15 +743,24 @@ class Context : ComputeOps {
     // promotes to a hash index above EDGE_INDEX_THRESHOLD (#lzspecedgeindex) so
     // that a wide fan-out registers in amortized O(1) per edge instead of
     // degrading to O(n^2). Dedup is built into SmallEdgeList.add.
-    private fun addEdge(edges: SmallEdgeList, id: Int) {
+    private fun addEdge(
+        edges: SmallEdgeList,
+        id: Int,
+    ) {
         edges.add(id)
     }
 
-    private fun removeEdge(edges: SmallEdgeList, id: Int) {
+    private fun removeEdge(
+        edges: SmallEdgeList,
+        id: Int,
+    ) {
         edges.remove(id)
     }
 
-    private fun registerDependency(depId: Int, parentId: Int) {
+    private fun registerDependency(
+        depId: Int,
+        parentId: Int,
+    ) {
         when (val dep = nodes[depId]) {
             is Node.Cell -> addEdge(dep.dependents, parentId)
             is Node.Slot -> addEdge(dep.dependents, parentId)
@@ -713,7 +773,10 @@ class Context : ComputeOps {
         }
     }
 
-    private fun removeDependentEdge(depId: Int, parentId: Int) {
+    private fun removeDependentEdge(
+        depId: Int,
+        parentId: Int,
+    ) {
         when (val dep = nodes[depId]) {
             is Node.Cell -> removeEdge(dep.dependents, parentId)
             is Node.Slot -> removeEdge(dep.dependents, parentId)
@@ -759,7 +822,10 @@ class Context : ComputeOps {
         }
     }
 
-    private fun recomputeSlotNow(id: Int, node: Node.Slot): Boolean {
+    private fun recomputeSlotNow(
+        id: Int,
+        node: Node.Slot,
+    ): Boolean {
         for (dep in node.dependencies) removeDependentEdge(dep, id)
         node.dependencies.clear()
         val compute = node.compute
@@ -770,14 +836,16 @@ class Context : ComputeOps {
         val gen = ++computeGenCounter
         executingStack.addLast(id)
         liveGenerations.addLast(gen)
-        val result: Any? = try {
-            Compute(this, id, gen).compute()
-        } finally {
-            liveGenerations.removeLast()
-            executingStack.removeLast()
-        }
-        val unchanged = node.hasValue &&
-            (node.equalsFn?.invoke(node.value, result) ?: (node.value == result))
+        val result: Any? =
+            try {
+                Compute(this, id, gen).compute()
+            } finally {
+                liveGenerations.removeLast()
+                executingStack.removeLast()
+            }
+        val unchanged =
+            node.hasValue &&
+                (node.equalsFn?.invoke(node.value, result) ?: (node.value == result))
         node.dirty = false
         node.forceRecompute = false
         if (unchanged) return false
@@ -799,7 +867,8 @@ class Context : ComputeOps {
             // re-run it (glitch-free guarantee). This matters when a demand-driven
             // reader Slot recomputes inside the very Effect reading it.
             if (d in executingStack) continue
-            stack.addLast(d); forceStack.addLast(true)
+            stack.addLast(d)
+            forceStack.addLast(true)
         }
         runFrontier(stack, forceStack)
     }
@@ -815,7 +884,10 @@ class Context : ComputeOps {
      * snapshot copy is needed. Effects are scheduled inline; returns true iff at
      * least one Effect was scheduled (store-without-cascade gate).
      */
-    private fun runFrontier(stack: ArrayDeque<Int>, forceStack: ArrayDeque<Boolean>): Boolean {
+    private fun runFrontier(
+        stack: ArrayDeque<Int>,
+        forceStack: ArrayDeque<Boolean>,
+    ): Boolean {
         var scheduled = false
         while (stack.isNotEmpty()) {
             val id = stack.removeLast()
@@ -827,7 +899,8 @@ class Context : ComputeOps {
                     if (force) node.forceRecompute = true
                     if (shouldPropagate) {
                         for (dep in node.dependents) {
-                            stack.addLast(dep); forceStack.addLast(false)
+                            stack.addLast(dep)
+                            forceStack.addLast(false)
                         }
                     }
                 }
@@ -847,13 +920,19 @@ class Context : ComputeOps {
         val deps = (nodes[id] as? Node.Cell)?.dependents ?: return false
         val stack = ArrayDeque<Int>()
         val forceStack = ArrayDeque<Boolean>()
-        for (d in deps) { stack.addLast(d); forceStack.addLast(true) }
+        for (d in deps) {
+            stack.addLast(d)
+            forceStack.addLast(true)
+        }
         return runFrontier(stack, forceStack)
     }
 
     // -- Internals: effect scheduling / flush ------------------------------
 
-    private fun scheduleEffect(id: Int, force: Boolean) {
+    private fun scheduleEffect(
+        id: Int,
+        force: Boolean,
+    ) {
         // Disposal is not a publish — see [disposalDepth]. Dropped entirely, not
         // deferred: leaving the effect *queued* only postpones the damage, since
         // it would then fire on the next unrelated flush as a spurious rerun no
@@ -892,15 +971,19 @@ class Context : ComputeOps {
         val gen = ++computeGenCounter
         executingStack.addLast(id)
         liveGenerations.addLast(gen)
-        val nextCleanup = try {
-            Compute(this, id, gen).run()
-        } finally {
-            liveGenerations.removeLast()
-            executingStack.removeLast()
-        }
+        val nextCleanup =
+            try {
+                Compute(this, id, gen).run()
+            } finally {
+                liveGenerations.removeLast()
+                executingStack.removeLast()
+            }
         val current = nodes[id] as? Node.Effect
-        if (current != null) current.cleanup = nextCleanup
-        else nextCleanup?.invoke()
+        if (current != null) {
+            current.cleanup = nextCleanup
+        } else {
+            nextCleanup?.invoke()
+        }
     }
 
     private fun effectShouldRun(id: Int): Boolean {
@@ -998,8 +1081,7 @@ class TeardownScope internal constructor(
     inline fun <reified T : Any> cell(value: T): Source<T> = source(value)
 
     /** A guarded [Computed] owned by this scope. */
-    inline fun <reified T : Any> computed(noinline compute: Compute.() -> T): Computed<T> =
-        adopt(ctx.computed(compute))
+    inline fun <reified T : Any> computed(noinline compute: Compute.() -> T): Computed<T> = adopt(ctx.computed(compute))
 
     /**
      * A [Computed] owned by this scope, guarded by a custom change predicate.
@@ -1013,8 +1095,7 @@ class TeardownScope internal constructor(
 
     /** @suppress Renamed to [computed]. */
     @Deprecated("Renamed to computed (#lzcellkernel).", ReplaceWith("computed(compute)"))
-    inline fun <reified T : Any> slot(noinline compute: Compute.() -> T): Computed<T> =
-        computed(compute)
+    inline fun <reified T : Any> slot(noinline compute: Compute.() -> T): Computed<T> = computed(compute)
 
     /** An effect owned by this scope. */
     fun effect(run: Compute.() -> (() -> Unit)?): Effect = adopt(ctx.effect(run))
@@ -1023,8 +1104,7 @@ class TeardownScope internal constructor(
      * An eager [Computed] owned by this scope — the eager construction. Owns the
      * computed; disposing it tears down the puller too (via the eager bit).
      */
-    inline fun <reified T : Any> eagerComputed(noinline compute: Compute.() -> T): Computed<T> =
-        adopt(ctx.computed(compute).eager(ctx))
+    inline fun <reified T : Any> eagerComputed(noinline compute: Compute.() -> T): Computed<T> = adopt(ctx.computed(compute).eager(ctx))
 
     /**
      * Cancel this scope's teardown: ending it afterwards disposes nothing, and
@@ -1059,6 +1139,5 @@ class TeardownScope internal constructor(
     /** [end], so `ctx.scope().use { ... }` is the lexical form. */
     override fun close() = end()
 
-    override fun toString(): String =
-        if (ended) "TeardownScope(ended)" else "TeardownScope(${owned.size} owned)"
+    override fun toString(): String = if (ended) "TeardownScope(ended)" else "TeardownScope(${owned.size} owned)"
 }

@@ -1,13 +1,13 @@
 package io.github.lazily
 
-import java.nio.file.Files
-import java.nio.file.Path
-import java.util.concurrent.ConcurrentSkipListSet
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
+import java.nio.file.Files
+import java.nio.file.Path
+import java.util.concurrent.ConcurrentSkipListSet
 
 /**
  * Runtime per-scenario replay ledger (`#lzscenariocoverage`) — rung 4 of the
@@ -53,15 +53,19 @@ import kotlinx.serialization.json.jsonObject
  */
 object ConformanceScenarios {
     /** Where the positive "these scenarios actually replayed" ledger is written. */
-    val ledgerPath: Path = Path.of(
-        System.getenv("LAZILY_CONFORMANCE_SCENARIO_LEDGER")
-            ?: "build/conformance-scenarios-replayed.txt",
-    )
+    val ledgerPath: Path =
+        Path.of(
+            System.getenv("LAZILY_CONFORMANCE_SCENARIO_LEDGER")
+                ?: "build/conformance-scenarios-replayed.txt",
+        )
 
     /** How a scenario's id was resolved — reported so a positional fallback is visible. */
     enum class IdSource { ID, NAME, POSITIONAL }
 
-    data class ScenarioId(val value: String, val source: IdSource)
+    data class ScenarioId(
+        val value: String,
+        val source: IdSource,
+    )
 
     private val replayed = ConcurrentSkipListSet<String>()
 
@@ -81,10 +85,17 @@ object ConformanceScenarios {
      * than silently accepted, because that visibility is what makes the corpus
      * gap fixable upstream later.
      */
-    fun idOf(scenario: JsonObject, index: Int): ScenarioId {
-        (scenario["id"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+    fun idOf(
+        scenario: JsonObject,
+        index: Int,
+    ): ScenarioId {
+        (scenario["id"] as? JsonPrimitive)
+            ?.contentOrNull
+            ?.takeIf { it.isNotBlank() }
             ?.let { return ScenarioId(it, IdSource.ID) }
-        (scenario["name"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+        (scenario["name"] as? JsonPrimitive)
+            ?.contentOrNull
+            ?.takeIf { it.isNotBlank() }
             ?.let { return ScenarioId(it, IdSource.NAME) }
         return ScenarioId("#$index", IdSource.POSITIONAL)
     }
@@ -94,13 +105,19 @@ object ConformanceScenarios {
      * yielded. Lazy on purpose: the record happens when the loop actually takes
      * the scenario, not when the sequence is built.
      */
-    fun of(fixture: String, fx: JsonObject): Sequence<JsonObject> =
-        indexed(fixture, fx).map { it.value }
+    fun of(
+        fixture: String,
+        fx: JsonObject,
+    ): Sequence<JsonObject> = indexed(fixture, fx).map { it.value }
 
     /** [of], keeping the positional index for runners that label by it. */
-    fun indexed(fixture: String, fx: JsonObject): Sequence<IndexedValue<JsonObject>> {
-        val scenarios = fx["scenarios"] as? JsonArray
-            ?: error("$fixture: fixture carries no `scenarios` array")
+    fun indexed(
+        fixture: String,
+        fx: JsonObject,
+    ): Sequence<IndexedValue<JsonObject>> {
+        val scenarios =
+            fx["scenarios"] as? JsonArray
+                ?: error("$fixture: fixture carries no `scenarios` array")
         return scenarios.asSequence().mapIndexed { i, el ->
             val sc = el.jsonObject
             record(fixture, sc, i)
@@ -115,9 +132,14 @@ object ConformanceScenarios {
      * the shape where a skipped scenario is easiest to not notice, because
      * nothing enumerates the ones you did not name.
      */
-    fun pick(fixture: String, fx: JsonObject, id: String): JsonObject {
-        val scenarios = fx["scenarios"] as? JsonArray
-            ?: error("$fixture: fixture carries no `scenarios` array")
+    fun pick(
+        fixture: String,
+        fx: JsonObject,
+        id: String,
+    ): JsonObject {
+        val scenarios =
+            fx["scenarios"] as? JsonArray
+                ?: error("$fixture: fixture carries no `scenarios` array")
         scenarios.forEachIndexed { i, el ->
             val sc = el.jsonObject
             if (idOf(sc, i).value == id) {
@@ -132,7 +154,11 @@ object ConformanceScenarios {
     }
 
     /** Record [scenario] at [index] of [fixture] as replayed; returns its resolved id. */
-    fun record(fixture: String, scenario: JsonObject, index: Int): String {
+    fun record(
+        fixture: String,
+        scenario: JsonObject,
+        index: Int,
+    ): String {
         val sid = idOf(scenario, index)
         replayed.add("$fixture\t${sid.value}\t${sid.source.name.lowercase()}")
         return sid.value

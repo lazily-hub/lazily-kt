@@ -1,7 +1,5 @@
 package io.github.lazily
 
-import java.nio.file.Files
-import java.nio.file.Path
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.int
@@ -29,8 +27,15 @@ class ShmBlobArenaTest {
         return json.parseToJsonElement(text).jsonObject
     }
 
-    private fun bytesOf(element: JsonObject, key: String): ByteArray =
-        element.getValue(key).jsonArray.map { it.jsonPrimitive.int.toByte() }.toByteArray()
+    private fun bytesOf(
+        element: JsonObject,
+        key: String,
+    ): ByteArray =
+        element
+            .getValue(key)
+            .jsonArray
+            .map { it.jsonPrimitive.int.toByte() }
+            .toByteArray()
 
     @Test
     fun `conformance arena blob descriptor header and round trip`() {
@@ -54,7 +59,10 @@ class ShmBlobArenaTest {
         assertEquals(expectedDescriptor.getValue("epoch").jsonPrimitive.long, descriptor.epoch)
         // Checksum is a u64 on the wire; compare in unsigned space.
         assertEquals(
-            expectedDescriptor.getValue("checksum").jsonPrimitive.content.toULong(),
+            expectedDescriptor
+                .getValue("checksum")
+                .jsonPrimitive.content
+                .toULong(),
             descriptor.checksum.toULong(),
         )
 
@@ -88,7 +96,10 @@ class ShmBlobArenaTest {
                 )
                 assertEquals(d.getValue("epoch").jsonPrimitive.long, descriptor.epoch, "assertions.descriptor.epoch")
                 assertEquals(
-                    d.getValue("checksum").jsonPrimitive.content.toULong(),
+                    d
+                        .getValue("checksum")
+                        .jsonPrimitive.content
+                        .toULong(),
                     descriptor.checksum.toULong(),
                     "assertions.descriptor.checksum",
                 )
@@ -103,8 +114,10 @@ class ShmBlobArenaTest {
 
         // Payload region immediately follows the header.
         val expectedRegion = bytesOf(expected, "payload_region")
-        val actualRegion = arena.bytes()
-            .copyOfRange(SHM_BLOB_HEADER_LEN, SHM_BLOB_HEADER_LEN + payload.size)
+        val actualRegion =
+            arena
+                .bytes()
+                .copyOfRange(SHM_BLOB_HEADER_LEN, SHM_BLOB_HEADER_LEN + payload.size)
         assertEquals(expectedRegion.toList(), actualRegion.toList())
 
         // Round-trip read validates the header + checksum and returns the payload.
@@ -117,8 +130,15 @@ class ShmBlobArenaTest {
         // Independent recomputation of FNV-1a-64 over the fixture payload.
         val fixture = loadArenaFixture()
         val payload = bytesOf(fixture.getValue("input").jsonObject, "payload")
-        val expected = fixture.getValue("expected").jsonObject
-            .getValue("descriptor").jsonObject.getValue("checksum").jsonPrimitive.content.toULong()
+        val expected =
+            fixture
+                .getValue("expected")
+                .jsonObject
+                .getValue("descriptor")
+                .jsonObject
+                .getValue("checksum")
+                .jsonPrimitive.content
+                .toULong()
 
         var hash = 0xcbf29ce484222325uL
         val prime = 0x00000100000001b3uL

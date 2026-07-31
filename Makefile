@@ -6,6 +6,8 @@ LEAN_FORMAL_DIR ?= ../lazily-formal
 
 .PHONY: \
 	check \
+	fmt \
+	fmt-fix \
 	test \
 	test-interop-peer \
 	benchmark \
@@ -14,7 +16,20 @@ LEAN_FORMAL_DIR ?= ../lazily-formal
 	test-lazily-formal \
 	ci-reach
 
-check: test test-interop-peer test-lean-formal test-lazily-formal ci-reach
+check: fmt test test-interop-peer test-lean-formal test-lazily-formal ci-reach
+
+# The formatting GATE (#lazilyformattinggate). spotless + ktlint, both versions
+# pinned exactly in build.gradle.kts — see the comment there for why pinning the
+# plugin alone would leave the style free to move.
+#
+# spotlessCheck is the gate; spotlessApply writes and is deliberately not in
+# `check`. A formatter that rewrites the tree it is judging exits 0 whatever it
+# found, which is a gate that cannot fail (#lzruffautofixvacuity).
+fmt:
+	./gradlew spotlessCheck
+
+fmt-fix:
+	./gradlew spotlessApply
 
 # Conformance fixtures are read only from the canonical ../lazily-spec sibling
 # (#lzspecconf) — there is no bundled fallback, because a fallback is exactly

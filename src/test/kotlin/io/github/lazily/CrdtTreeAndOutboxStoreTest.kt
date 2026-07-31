@@ -1,46 +1,58 @@
 package io.github.lazily
 
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertFalse
-import kotlin.test.assertTrue
 import io.github.lazily.outbox.Outbox
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class CrdtTreeAndOutboxStoreTest {
     private class FakeRoomDao : RoomOutboxDao {
         private val frames = sortedMapOf<Pair<String, Long>, ByteArray>(compareBy({ it.first }, { it.second }))
         private val cursors = mutableMapOf<String, Long>()
 
-        override fun upsert(channel: String, epoch: Long, frame: ByteArray) {
+        override fun upsert(
+            channel: String,
+            epoch: Long,
+            frame: ByteArray,
+        ) {
             frames[channel to epoch] = frame.copyOf()
         }
 
-        override fun deleteThrough(channel: String, epoch: Long) {
+        override fun deleteThrough(
+            channel: String,
+            epoch: Long,
+        ) {
             frames.keys.removeAll { (storedChannel, storedEpoch) ->
                 storedChannel == channel && storedEpoch <= epoch
             }
         }
 
-        override fun scanAfter(channel: String, epoch: Long): List<Pair<Long, ByteArray>> =
+        override fun scanAfter(
+            channel: String,
+            epoch: Long,
+        ): List<Pair<Long, ByteArray>> =
             frames
                 .filterKeys { (storedChannel, storedEpoch) -> storedChannel == channel && storedEpoch > epoch }
                 .map { (key, frame) -> key.second to frame.copyOf() }
 
         override fun loadCursor(channel: String): Long? = cursors[channel]
 
-        override fun saveCursor(channel: String, epoch: Long) {
+        override fun saveCursor(
+            channel: String,
+            epoch: Long,
+        ) {
             cursors[channel] = maxOf(cursors[channel] ?: 0L, epoch)
         }
     }
 
     /** Spec-relative fixture path, e.g. `crdt-tree/algebra.json` (#lzspecconf). */
-    private fun fixture(rel: String) =
-        Json.parseToJsonElement(ConformanceFixtures.read(rel)).jsonObject
+    private fun fixture(rel: String) = Json.parseToJsonElement(ConformanceFixtures.read(rel)).jsonObject
 
     @Test
     fun crdtTreeDeltaAndMergeLaws() {
@@ -119,19 +131,21 @@ class CrdtTreeAndOutboxStoreTest {
             )
         val seed = mergeScenario["seed"]!!.jsonObject
         val base = TextCrdt(seed["peer"]!!.jsonPrimitive.long, seed["text"]!!.jsonPrimitive.content)
-        val replicas = mergeScenario["replicas"]!!.jsonArray.associate { definitionElement ->
-            val definition = definitionElement.jsonObject
-            val replica = base.fork(definition["peer"]!!.jsonPrimitive.long)
-            replica.insertString(replica.len(), definition["insert"]!!.jsonPrimitive.content)
-            definition["name"]!!.jsonPrimitive.content to replica
-        }
-        val folds = mergeScenario["merge_orders"]!!.jsonArray.mapIndexed { index, orderElement ->
-            base.fork(100L + index).also { folded ->
-                for (name in orderElement.jsonArray) {
-                    folded.mergeFrom(replicas.getValue(name.jsonPrimitive.content))
+        val replicas =
+            mergeScenario["replicas"]!!.jsonArray.associate { definitionElement ->
+                val definition = definitionElement.jsonObject
+                val replica = base.fork(definition["peer"]!!.jsonPrimitive.long)
+                replica.insertString(replica.len(), definition["insert"]!!.jsonPrimitive.content)
+                definition["name"]!!.jsonPrimitive.content to replica
+            }
+        val folds =
+            mergeScenario["merge_orders"]!!.jsonArray.mapIndexed { index, orderElement ->
+                base.fork(100L + index).also { folded ->
+                    for (name in orderElement.jsonArray) {
+                        folded.mergeFrom(replicas.getValue(name.jsonPrimitive.content))
+                    }
                 }
             }
-        }
         // The `expect` blocks were hand-mirrored by the assertions below and read
         // by nothing, so the fixture could rename or flip a claim and this replay
         // would keep reporting green (#lzassertunknownkeys).
@@ -153,10 +167,11 @@ class CrdtTreeAndOutboxStoreTest {
                 "empty frontier snapshot preserves lineage",
             )
         val snapshotSeed = snapshotScenario["seed"]!!.jsonObject
-        val canonical = TextCrdt(
-            snapshotSeed["peer"]!!.jsonPrimitive.long,
-            snapshotSeed["text"]!!.jsonPrimitive.content,
-        )
+        val canonical =
+            TextCrdt(
+                snapshotSeed["peer"]!!.jsonPrimitive.long,
+                snapshotSeed["text"]!!.jsonPrimitive.content,
+            )
         val snapshot = canonical.deltaSince(emptyMap())
         val restored = TextCrdt(snapshotScenario["restore_peer"]!!.jsonPrimitive.long)
         assertTrue(restored.applyDelta(snapshot))
@@ -221,7 +236,8 @@ class CrdtTreeAndOutboxStoreTest {
                 val handles = mapOf("stale" to Outbox(store), "current" to Outbox(store))
                 for (writeElement in writes) {
                     val write = writeElement.jsonObject
-                    handles.getValue(write["handle"]!!.jsonPrimitive.content)
+                    handles
+                        .getValue(write["handle"]!!.jsonPrimitive.content)
                         .ackThrough(write["epoch"]!!.jsonPrimitive.long)
                 }
                 scenario["expect"]!!.jsonObject.consuming("outbox_store_protocol.json[save_cursor] expect") { e ->

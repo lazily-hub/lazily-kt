@@ -1,15 +1,11 @@
 package io.github.lazily
 
-import java.nio.file.Files
-import java.nio.file.Path
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.int
-import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -88,11 +84,12 @@ class CollectionsCrdtConformanceTest {
             val alignment = align(oldBlocks, newBlocks)
             expect["matches"]?.jsonArray?.forEachIndexed { ni, mEl ->
                 val want = mEl.jsonPrimitive.content
-                val got = when (val m = alignment.newMatches[ni]) {
-                    is Match.Same -> "Same:${m.old}"
-                    is Match.Edited -> "Edited:${m.old}"
-                    is Match.Inserted -> "Inserted"
-                }
+                val got =
+                    when (val m = alignment.newMatches[ni]) {
+                        is Match.Same -> "Same:${m.old}"
+                        is Match.Edited -> "Edited:${m.old}"
+                        is Match.Inserted -> "Inserted"
+                    }
                 assertEquals(want, got, "$name: match[$ni]")
                 if (want.startsWith("Edited")) {
                     val sim = (alignment.newMatches[ni] as Match.Edited).similarity
@@ -112,20 +109,29 @@ class CollectionsCrdtConformanceTest {
 
     // -- TextCrdt -----------------------------------------------------------
 
-    private class TextRepl(val crdt: TextCrdt)
+    private class TextRepl(
+        val crdt: TextCrdt,
+    )
 
     private fun seedTextCrdt(scenario: JsonObject): Pair<String, TextRepl> {
-        val replicaPeer = scenario["replica"]?.jsonObject?.get("peer")?.jsonPrimitive?.long ?: 1L
+        val replicaPeer =
+            scenario["replica"]
+                ?.jsonObject
+                ?.get("peer")
+                ?.jsonPrimitive
+                ?.long ?: 1L
         val seedEl = scenario["seed"]
-        val crdt = when {
-            seedEl == null -> TextCrdt(replicaPeer)
-            seedEl is JsonPrimitive && seedEl.isString -> TextCrdt(replicaPeer, seedEl.content)
-            seedEl is JsonObject -> TextCrdt(
-                seedEl["peer"]?.jsonPrimitive?.long ?: replicaPeer,
-                seedEl.getValue("text").jsonPrimitive.content,
-            )
-            else -> error("unexpected text-crdt seed: $seedEl")
-        }
+        val crdt =
+            when {
+                seedEl == null -> TextCrdt(replicaPeer)
+                seedEl is JsonPrimitive && seedEl.isString -> TextCrdt(replicaPeer, seedEl.content)
+                seedEl is JsonObject ->
+                    TextCrdt(
+                        seedEl["peer"]?.jsonPrimitive?.long ?: replicaPeer,
+                        seedEl.getValue("text").jsonPrimitive.content,
+                    )
+                else -> error("unexpected text-crdt seed: $seedEl")
+            }
         return "a" to TextRepl(crdt)
     }
 
@@ -278,9 +284,10 @@ class CollectionsCrdtConformanceTest {
                 )
             }
             expect["version_vector_on"]?.jsonObject?.forEach { (repl, vvEl) ->
-                val want = vvEl.jsonObject.entries.associate { (peer, counter) ->
-                    peer.toLong() to counter.jsonPrimitive.long
-                }
+                val want =
+                    vvEl.jsonObject.entries.associate { (peer, counter) ->
+                        peer.toLong() to counter.jsonPrimitive.long
+                    }
                 assertEquals(
                     want,
                     replicas.getValue(repl).crdt.versionVector(),
@@ -290,9 +297,19 @@ class CollectionsCrdtConformanceTest {
         }
     }
 
-    private fun applyTextOp(crdt: TextCrdt, step: JsonObject) {
+    private fun applyTextOp(
+        crdt: TextCrdt,
+        step: JsonObject,
+    ) {
         when (step.getValue("op").jsonPrimitive.content) {
-            "insert" -> crdt.insert(step.getValue("index").jsonPrimitive.int, step.getValue("ch").jsonPrimitive.content.first())
+            "insert" ->
+                crdt.insert(
+                    step.getValue("index").jsonPrimitive.int,
+                    step
+                        .getValue("ch")
+                        .jsonPrimitive.content
+                        .first(),
+                )
             "insert_str" -> crdt.insertString(step.getValue("index").jsonPrimitive.int, step.getValue("str").jsonPrimitive.content)
             "delete" -> crdt.delete(step.getValue("index").jsonPrimitive.int)
             "gc" -> {
@@ -306,7 +323,9 @@ class CollectionsCrdtConformanceTest {
 
     // -- SeqCrdt ------------------------------------------------------------
 
-    private class SeqRepl(val crdt: SeqCrdt<String, Any>)
+    private class SeqRepl(
+        val crdt: SeqCrdt<String, Any>,
+    )
 
     private fun seqValue(el: kotlinx.serialization.json.JsonElement): Any =
         if (el.jsonPrimitive.isString) el.jsonPrimitive.content else el.jsonPrimitive.int
@@ -317,18 +336,28 @@ class CollectionsCrdtConformanceTest {
         for (s in ConformanceScenarios.of("collections/seqcrdt_convergence.json", fixture)) {
             val name = s.getValue("name").jsonPrimitive.content
             val replicas = LinkedHashMap<String, SeqRepl>()
-            val defaultPeer = s["replica"]?.jsonObject?.get("peer")?.jsonPrimitive?.long
+            val defaultPeer =
+                s["replica"]
+                    ?.jsonObject
+                    ?.get("peer")
+                    ?.jsonPrimitive
+                    ?.long
             val seedEl = s["seed"]
-            val basePeer = when {
-                defaultPeer != null -> defaultPeer
-                seedEl is JsonObject -> seedEl["peer"]?.jsonPrimitive?.long ?: 1L
-                else -> 1L
-            }
+            val basePeer =
+                when {
+                    defaultPeer != null -> defaultPeer
+                    seedEl is JsonObject -> seedEl["peer"]?.jsonPrimitive?.long ?: 1L
+                    else -> 1L
+                }
             val base = SeqCrdt<String, Any>(basePeer)
             if (seedEl is JsonObject) {
                 for (ins in seedEl.getValue("inserts").jsonArray) {
                     val o = ins.jsonObject
-                    base.insertBack(o.getValue("id").jsonPrimitive.content, seqValue(o.getValue("value")), o.getValue("now").jsonPrimitive.long)
+                    base.insertBack(
+                        o.getValue("id").jsonPrimitive.content,
+                        seqValue(o.getValue("value")),
+                        o.getValue("now").jsonPrimitive.long,
+                    )
                 }
             }
             replicas["a"] = SeqRepl(base)
@@ -364,12 +393,19 @@ class CollectionsCrdtConformanceTest {
             val expect = s.getValue("expect").jsonObject
             // Default target: an explicit `on`, else the first orders_equal
             // replica (the merged result), else the main replica "a".
-            val defaultTarget = when {
-                expect["on"] != null -> expect.getValue("on").jsonPrimitive.content
-                expect["orders_equal"] != null ->
-                    expect.getValue("orders_equal").jsonArray.first().jsonArray.first().jsonPrimitive.content
-                else -> "a"
-            }
+            val defaultTarget =
+                when {
+                    expect["on"] != null -> expect.getValue("on").jsonPrimitive.content
+                    expect["orders_equal"] != null ->
+                        expect
+                            .getValue("orders_equal")
+                            .jsonArray
+                            .first()
+                            .jsonArray
+                            .first()
+                            .jsonPrimitive.content
+                    else -> "a"
+                }
             val primary = replicas.getValue(defaultTarget).crdt
             expect["order"]?.jsonArray?.let {
                 assertEquals(it.map { e -> e.jsonPrimitive.content }, primary.order(), "$name: order")
@@ -412,7 +448,10 @@ class CollectionsCrdtConformanceTest {
         }
     }
 
-    private fun applySeqOp(crdt: SeqCrdt<String, Any>, step: JsonObject) {
+    private fun applySeqOp(
+        crdt: SeqCrdt<String, Any>,
+        step: JsonObject,
+    ) {
         val now = step["now"]?.jsonPrimitive?.long ?: 0L
         when (step.getValue("op").jsonPrimitive.content) {
             "insert_back" -> crdt.insertBack(step.getValue("id").jsonPrimitive.content, seqValue(step.getValue("value")), now)
@@ -454,10 +493,11 @@ class CollectionsCrdtConformanceTest {
                 // downstream consumer (memo equality guard). Wire an instrumented
                 // observer BEFORE the edit, then assert its call count is unchanged.
                 var calls = 0
-                val observer = ctx.computed {
-                    calls++
-                    sums.value(ctx)
-                }
+                val observer =
+                    ctx.computed {
+                        calls++
+                        sums.value(ctx)
+                    }
                 assertEquals(
                     expectInitial.getValue("root").jsonPrimitive.int,
                     ctx.get(observer),
@@ -479,10 +519,11 @@ class CollectionsCrdtConformanceTest {
                 tree.setValue(edit.getValue("id").jsonPrimitive.content, edit.getValue("value").jsonPrimitive.int)
                 for ((node, v) in expectAfter!!) {
                     when (node) {
-                        "sibling_a_cached" -> if (v.jsonPrimitive.boolean) {
-                            assertNotNull(siblingA)
-                            assertTrue(ctx.isSet(siblingA), "$name: sibling 'a' derived slot stayed cached")
-                        }
+                        "sibling_a_cached" ->
+                            if (v.jsonPrimitive.boolean) {
+                                assertNotNull(siblingA)
+                                assertTrue(ctx.isSet(siblingA), "$name: sibling 'a' derived slot stayed cached")
+                            }
                         else -> assertEquals(v.jsonPrimitive.int, sums.nodeValue(ctx, node), "$name: after $node")
                     }
                 }
@@ -499,11 +540,12 @@ class CollectionsCrdtConformanceTest {
         }
     }
 
-    private fun semFold(name: String): SemFold<Int, Int> = when (name) {
-        "sum" -> SemFold { v, kids -> v + kids.sum() }
-        "count_positive" -> SemFold { v, kids -> (if (v < 0) 1 else 0) + kids.sum() }
-        else -> error("unknown semtree fold: $name")
-    }
+    private fun semFold(name: String): SemFold<Int, Int> =
+        when (name) {
+            "sum" -> SemFold { v, kids -> v + kids.sum() }
+            "count_positive" -> SemFold { v, kids -> (if (v < 0) 1 else 0) + kids.sum() }
+            else -> error("unknown semtree fold: $name")
+        }
 
     /** Build a [SourceTree] node from a fixture tree object, attaching it under [parent] (or as a root). */
     private fun buildTree(

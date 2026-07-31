@@ -23,14 +23,21 @@ package io.github.lazily
  * everything observed on merge), so a causally-later insert sorts higher and a
  * concurrent insert tiebreaks deterministically by peer.
  */
-data class OpId(val counter: Long, val peer: Long) : Comparable<OpId> {
+data class OpId(
+    val counter: Long,
+    val peer: Long,
+) : Comparable<OpId> {
     override fun compareTo(other: OpId): Int {
-        var c = counter.compareTo(other.counter); if (c != 0) return c
+        var c = counter.compareTo(other.counter)
+        if (c != 0) return c
         return peer.compareTo(other.peer)
     }
 }
 
-private class Elem(val ch: Char, val origin: OpId?) {
+private class Elem(
+    val ch: Char,
+    val origin: OpId?,
+) {
     // `null` while live; `Some(deleteOp)` once tombstoned. Carrying the delete's
     // own OpId (not a bare flag) lets GC test whether the *deletion* is causally
     // stable. Tombstones are sticky; concurrent deletes converge to the min id.
@@ -44,7 +51,12 @@ private class Elem(val ch: Char, val origin: OpId?) {
  * preserves each character's [OpId] identity so later concurrent edits still merge
  * conflict-free.
  */
-data class TextOp(val id: OpId, val ch: Char, val origin: OpId?, val deleted: OpId?)
+data class TextOp(
+    val id: OpId,
+    val ch: Char,
+    val origin: OpId?,
+    val deleted: OpId?,
+)
 
 /**
  * A character-granular, mergeable text buffer for concurrent free-text edits.
@@ -66,7 +78,9 @@ class TextCrdt private constructor(
     constructor(peer: Long) : this(LinkedHashMap(), peer, 0L)
 
     /** A buffer owned by [peer] seeded with [s] (a linear chain of characters). */
-    constructor(peer: Long, s: String) : this(peer) { insertString(0, s) }
+    constructor(peer: Long, s: String) : this(peer) {
+        insertString(0, s)
+    }
 
     /** Fork this buffer's state to a new replica [peer] (deep copy, new identity). */
     fun fork(peer: Long): TextCrdt = TextCrdt(copyElems(), peer, counter)
@@ -94,7 +108,10 @@ class TextCrdt private constructor(
     fun clock(): OpId = OpId(counter, peer)
 
     /** Insert [ch] at visible index [index] (0 = start, `len` = end). */
-    fun insert(index: Int, ch: Char) {
+    fun insert(
+        index: Int,
+        ch: Char,
+    ) {
         val visible = orderedIds(includeDeleted = false)
         val origin = if (index == 0) null else visible.getOrNull(index - 1)
         val id = nextId()
@@ -110,7 +127,10 @@ class TextCrdt private constructor(
      * order (counter strictly increases under one peer). Concurrent inserts at
      * the same point still sort by peer tiebreak (standard CRDT convergence).
      */
-    fun insertString(index: Int, s: String) {
+    fun insertString(
+        index: Int,
+        s: String,
+    ) {
         val visible = orderedIds(includeDeleted = false)
         var origin: OpId? = if (index == 0) null else visible.getOrNull(index - 1)
         for (ch in s) {
@@ -212,11 +232,12 @@ class TextCrdt private constructor(
                 // delete id is smaller so concurrent deletes converge
                 // (commutative/associative) instead of depending on merge order.
                 val prevDeleted = e.deleted
-                e.deleted = when {
-                    e.deleted != null && oe.deleted != null -> minOf(e.deleted!!, oe.deleted!!)
-                    e.deleted != null -> e.deleted
-                    else -> oe.deleted
-                }
+                e.deleted =
+                    when {
+                        e.deleted != null && oe.deleted != null -> minOf(e.deleted!!, oe.deleted!!)
+                        e.deleted != null -> e.deleted
+                        else -> oe.deleted
+                    }
                 if (e.deleted != prevDeleted) anyChange = true
             } else {
                 elems[id] = Elem(oe.ch, oe.origin).apply { deleted = oe.deleted }
@@ -236,7 +257,10 @@ class TextCrdt private constructor(
      */
     override fun versionVector(): Map<Long, Long> {
         val vv = HashMap<Long, Long>()
-        fun bump(id: OpId) { vv[id.peer] = maxOf(vv[id.peer] ?: 0L, id.counter) }
+
+        fun bump(id: OpId) {
+            vv[id.peer] = maxOf(vv[id.peer] ?: 0L, id.counter)
+        }
         for ((id, e) in elems) {
             bump(id)
             e.deleted?.let { bump(it) }
@@ -275,11 +299,12 @@ class TextCrdt private constructor(
             val e = elems[op.id]
             if (e != null) {
                 val prevDeleted = e.deleted
-                e.deleted = when {
-                    e.deleted != null && op.deleted != null -> minOf(e.deleted!!, op.deleted!!)
-                    e.deleted != null -> e.deleted
-                    else -> op.deleted
-                }
+                e.deleted =
+                    when {
+                        e.deleted != null && op.deleted != null -> minOf(e.deleted!!, op.deleted!!)
+                        e.deleted != null -> e.deleted
+                        else -> op.deleted
+                    }
                 if (e.deleted != prevDeleted) anyChange = true
             } else {
                 elems[op.id] = Elem(op.ch, op.origin).apply { deleted = op.deleted }
@@ -308,9 +333,10 @@ class TextCrdt private constructor(
         while (true) {
             val referenced = HashSet<OpId>()
             for (e in elems.values) e.origin?.let { referenced.add(it) }
-            val collectable = elems.entries
-                .filter { (id, e) -> e.deleted != null && isStable(e.deleted!!) && id !in referenced }
-                .map { it.key }
+            val collectable =
+                elems.entries
+                    .filter { (id, e) -> e.deleted != null && isStable(e.deleted!!) && id !in referenced }
+                    .map { it.key }
             if (collectable.isEmpty()) break
             for (id in collectable) {
                 elems.remove(id)
@@ -328,4 +354,8 @@ class TextCrdt private constructor(
  * the keyed tree.
  */
 fun parseBlocks(text: String): List<Block> =
-    text.split("\n\n").map { it.trim() }.filter { it.isNotEmpty() }.map { Block.text(it) }
+    text
+        .split("\n\n")
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .map { Block.text(it) }

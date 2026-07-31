@@ -10,7 +10,6 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import kotlinx.serialization.json.put
@@ -32,33 +31,28 @@ import kotlinx.serialization.json.put
 
 private val commandJson = Json { prettyPrint = false }
 
-private fun JsonElement.commandObject(name: String): JsonObject =
-    this as? JsonObject ?: error("$name must be a JSON object")
+private fun JsonElement.commandObject(name: String): JsonObject = this as? JsonObject ?: error("$name must be a JSON object")
 
-private fun JsonObject.commandRequired(name: String): JsonElement =
-    this[name] ?: error("missing required field: $name")
+private fun JsonObject.commandRequired(name: String): JsonElement = this[name] ?: error("missing required field: $name")
 
-private fun JsonObject.commandString(name: String): String =
-    commandRequired(name).jsonPrimitive.content
+private fun JsonObject.commandString(name: String): String = commandRequired(name).jsonPrimitive.content
 
-private fun JsonObject.commandLong(name: String): Long =
-    commandRequired(name).jsonPrimitive.long
+private fun JsonObject.commandLong(name: String): Long = commandRequired(name).jsonPrimitive.long
 
-private fun JsonObject.commandBool(name: String): Boolean =
-    commandRequired(name).jsonPrimitive.boolean
+private fun JsonObject.commandBool(name: String): Boolean = commandRequired(name).jsonPrimitive.boolean
 
-private fun JsonObject.commandOptionalString(name: String): String? =
-    this[name]?.jsonPrimitive?.contentOrNull
+private fun JsonObject.commandOptionalString(name: String): String? = this[name]?.jsonPrimitive?.contentOrNull
 
-enum class DedupePolicy(val wireName: String) {
+enum class DedupePolicy(
+    val wireName: String,
+) {
     None("none"),
     SameIdempotencyKey("same_idempotency_key"),
     SameCommandId("same_command_id"),
     ;
 
     companion object {
-        fun fromWire(value: String): DedupePolicy =
-            entries.firstOrNull { it.wireName == value } ?: error("unknown dedupe policy: $value")
+        fun fromWire(value: String): DedupePolicy = entries.firstOrNull { it.wireName == value } ?: error("unknown dedupe policy: $value")
     }
 }
 
@@ -67,11 +61,12 @@ data class CommandPolicy(
     val supersede: Boolean,
     val cancelOnPreempt: Boolean,
 ) {
-    fun toJson(): JsonObject = buildJsonObject {
-        put("dedupe", dedupe.wireName)
-        put("supersede", supersede)
-        put("cancel_on_preempt", cancelOnPreempt)
-    }
+    fun toJson(): JsonObject =
+        buildJsonObject {
+            put("dedupe", dedupe.wireName)
+            put("supersede", supersede)
+            put("cancel_on_preempt", cancelOnPreempt)
+        }
 
     companion object {
         fun fromJson(element: JsonElement): CommandPolicy {
@@ -101,22 +96,23 @@ data class CommandSubmit(
     val payload: IpcValue,
     val requiredFeatures: List<String>,
 ) {
-    fun toJson(): JsonObject = buildJsonObject {
-        put("command_id", commandId)
-        put("causation_id", causationId)
-        put("source", source)
-        put("target", target)
-        put("namespace", namespace)
-        put("name", name)
-        put("authority_generation", authorityGeneration)
-        put("idempotency_key", idempotencyKey)
-        put("deadline_ms", deadlineMs)
-        put("policy", policy.toJson())
-        put("payload_type", payloadType)
-        put("payload_hash", payloadHash)
-        put("payload", payload.toJson())
-        put("required_features", buildJsonArray { requiredFeatures.forEach { add(JsonPrimitive(it)) } })
-    }
+    fun toJson(): JsonObject =
+        buildJsonObject {
+            put("command_id", commandId)
+            put("causation_id", causationId)
+            put("source", source)
+            put("target", target)
+            put("namespace", namespace)
+            put("name", name)
+            put("authority_generation", authorityGeneration)
+            put("idempotency_key", idempotencyKey)
+            put("deadline_ms", deadlineMs)
+            put("policy", policy.toJson())
+            put("payload_type", payloadType)
+            put("payload_hash", payloadHash)
+            put("payload", payload.toJson())
+            put("required_features", buildJsonArray { requiredFeatures.forEach { add(JsonPrimitive(it)) } })
+        }
 
     companion object {
         fun fromJson(element: JsonElement): CommandSubmit {
@@ -148,13 +144,14 @@ data class CommandCancel(
     val authorityGeneration: Long,
     val reason: String? = null,
 ) {
-    fun toJson(): JsonObject = buildJsonObject {
-        put("command_id", commandId)
-        put("causation_id", causationId)
-        put("source", source)
-        put("authority_generation", authorityGeneration)
-        put("reason", reason?.let { JsonPrimitive(it) } ?: JsonNull)
-    }
+    fun toJson(): JsonObject =
+        buildJsonObject {
+            put("command_id", commandId)
+            put("causation_id", causationId)
+            put("source", source)
+            put("authority_generation", authorityGeneration)
+            put("reason", reason?.let { JsonPrimitive(it) } ?: JsonNull)
+        }
 
     companion object {
         fun fromJson(element: JsonElement): CommandCancel {
@@ -170,7 +167,9 @@ data class CommandCancel(
     }
 }
 
-enum class CommandEventKind(val wireName: String) {
+enum class CommandEventKind(
+    val wireName: String,
+) {
     Observed("observed"),
     Accepted("accepted"),
     Started("started"),
@@ -193,13 +192,14 @@ data class CommandEvent(
     val generation: Long,
     val detail: String? = null,
 ) {
-    fun toJson(): JsonObject = buildJsonObject {
-        put("event_id", eventId)
-        put("command_id", commandId)
-        put("kind", kind.wireName)
-        put("generation", generation)
-        put("detail", detail?.let { JsonPrimitive(it) } ?: JsonNull)
-    }
+    fun toJson(): JsonObject =
+        buildJsonObject {
+            put("event_id", eventId)
+            put("command_id", commandId)
+            put("kind", kind.wireName)
+            put("generation", generation)
+            put("detail", detail?.let { JsonPrimitive(it) } ?: JsonNull)
+        }
 
     companion object {
         fun fromJson(element: JsonElement): CommandEvent {
@@ -215,10 +215,13 @@ data class CommandEvent(
     }
 }
 
-data class CommandEvents(val events: List<CommandEvent>) {
-    fun toJson(): JsonObject = buildJsonObject {
-        put("events", buildJsonArray { events.forEach { add(it.toJson()) } })
-    }
+data class CommandEvents(
+    val events: List<CommandEvent>,
+) {
+    fun toJson(): JsonObject =
+        buildJsonObject {
+            put("events", buildJsonArray { events.forEach { add(it.toJson()) } })
+        }
 
     companion object {
         fun fromJson(element: JsonElement): CommandEvents {
@@ -228,7 +231,9 @@ data class CommandEvents(val events: List<CommandEvent>) {
     }
 }
 
-enum class CommandStatus(val wireName: String) {
+enum class CommandStatus(
+    val wireName: String,
+) {
     Submitted("submitted"),
     Accepted("accepted"),
     Running("running"),
@@ -240,12 +245,15 @@ enum class CommandStatus(val wireName: String) {
     ;
 
     val isTerminal: Boolean
-        get() = this == Applied || this == Rejected || this == Cancelled ||
-            this == Superseded || this == TimedOut
+        get() =
+            this == Applied ||
+                this == Rejected ||
+                this == Cancelled ||
+                this == Superseded ||
+                this == TimedOut
 
     companion object {
-        fun fromWire(value: String): CommandStatus =
-            entries.firstOrNull { it.wireName == value } ?: error("unknown command status: $value")
+        fun fromWire(value: String): CommandStatus = entries.firstOrNull { it.wireName == value } ?: error("unknown command status: $value")
     }
 }
 
@@ -258,15 +266,16 @@ data class CommandProjectionEntry(
     val terminalReceiptId: String? = null,
     val lastEventId: String? = null,
 ) {
-    fun toJson(): JsonObject = buildJsonObject {
-        put("command_id", commandId)
-        put("status", status.wireName)
-        put("terminal", terminal)
-        put("generation", generation)
-        put("reason", reason?.let { JsonPrimitive(it) } ?: JsonNull)
-        put("terminal_receipt_id", terminalReceiptId?.let { JsonPrimitive(it) } ?: JsonNull)
-        put("last_event_id", lastEventId?.let { JsonPrimitive(it) } ?: JsonNull)
-    }
+    fun toJson(): JsonObject =
+        buildJsonObject {
+            put("command_id", commandId)
+            put("status", status.wireName)
+            put("terminal", terminal)
+            put("generation", generation)
+            put("reason", reason?.let { JsonPrimitive(it) } ?: JsonNull)
+            put("terminal_receipt_id", terminalReceiptId?.let { JsonPrimitive(it) } ?: JsonNull)
+            put("last_event_id", lastEventId?.let { JsonPrimitive(it) } ?: JsonNull)
+        }
 
     companion object {
         fun fromJson(element: JsonElement): CommandProjectionEntry {
@@ -288,10 +297,11 @@ data class CommandProjectionImage(
     val generation: Long,
     val commands: List<CommandProjectionEntry>,
 ) {
-    fun toJson(): JsonObject = buildJsonObject {
-        put("generation", generation)
-        put("commands", buildJsonArray { commands.forEach { add(it.toJson()) } })
-    }
+    fun toJson(): JsonObject =
+        buildJsonObject {
+            put("generation", generation)
+            put("commands", buildJsonArray { commands.forEach { add(it.toJson()) } })
+        }
 
     companion object {
         fun fromJson(element: JsonElement): CommandProjectionImage {
@@ -307,31 +317,36 @@ data class CommandProjectionImage(
 sealed interface CommandMessage {
     fun toJson(): JsonObject
 
-    data class Submit(val submit: CommandSubmit) : CommandMessage {
+    data class Submit(
+        val submit: CommandSubmit,
+    ) : CommandMessage {
         override fun toJson(): JsonObject = buildJsonObject { put("CommandSubmit", submit.toJson()) }
     }
 
-    data class Cancel(val cancel: CommandCancel) : CommandMessage {
+    data class Cancel(
+        val cancel: CommandCancel,
+    ) : CommandMessage {
         override fun toJson(): JsonObject = buildJsonObject { put("CommandCancel", cancel.toJson()) }
     }
 
-    data class Events(val events: CommandEvents) : CommandMessage {
+    data class Events(
+        val events: CommandEvents,
+    ) : CommandMessage {
         override fun toJson(): JsonObject = buildJsonObject { put("CommandEvents", events.toJson()) }
     }
 
-    data class Projection(val image: CommandProjectionImage) : CommandMessage {
+    data class Projection(
+        val image: CommandProjectionImage,
+    ) : CommandMessage {
         override fun toJson(): JsonObject = buildJsonObject { put("CommandProjection", image.toJson()) }
     }
 
-    fun encodeJson(): ByteArray =
-        commandJson.encodeToString(JsonElement.serializer(), toJson()).encodeToByteArray()
+    fun encodeJson(): ByteArray = commandJson.encodeToString(JsonElement.serializer(), toJson()).encodeToByteArray()
 
     companion object {
-        fun decodeJson(data: ByteArray): CommandMessage =
-            fromJson(commandJson.parseToJsonElement(data.decodeToString()))
+        fun decodeJson(data: ByteArray): CommandMessage = fromJson(commandJson.parseToJsonElement(data.decodeToString()))
 
-        fun decodeJson(data: String): CommandMessage =
-            fromJson(commandJson.parseToJsonElement(data))
+        fun decodeJson(data: String): CommandMessage = fromJson(commandJson.parseToJsonElement(data))
 
         fun fromJson(element: JsonElement): CommandMessage {
             val obj = element.commandObject("CommandMessage")
@@ -350,9 +365,16 @@ sealed interface CommandMessage {
 
 sealed interface CommandApplyStatus {
     data object Recorded : CommandApplyStatus
+
     data object Duplicate : CommandApplyStatus
+
     data object Unknown : CommandApplyStatus
-    data class StaleGeneration(val expected: Long, val actual: Long) : CommandApplyStatus
+
+    data class StaleGeneration(
+        val expected: Long,
+        val actual: Long,
+    ) : CommandApplyStatus
+
     data class TerminalConflict(
         val commandId: String,
         val existing: CommandStatus,
@@ -361,15 +383,19 @@ sealed interface CommandApplyStatus {
 }
 
 /** Map a terminal receipt outcome + reason to a folded [CommandStatus]. */
-private fun terminalStatusOf(outcome: ReceiptOutcome, reason: String?): CommandStatus =
+private fun terminalStatusOf(
+    outcome: ReceiptOutcome,
+    reason: String?,
+): CommandStatus =
     when (outcome) {
         ReceiptOutcome.Applied -> CommandStatus.Applied
-        ReceiptOutcome.Rejected -> when (reason) {
-            "cancelled" -> CommandStatus.Cancelled
-            "superseded" -> CommandStatus.Superseded
-            "timed_out" -> CommandStatus.TimedOut
-            else -> CommandStatus.Rejected
-        }
+        ReceiptOutcome.Rejected ->
+            when (reason) {
+                "cancelled" -> CommandStatus.Cancelled
+                "superseded" -> CommandStatus.Superseded
+                "timed_out" -> CommandStatus.TimedOut
+                else -> CommandStatus.Rejected
+            }
         // Non-terminal outcomes never reach here (guarded by isTerminal).
         ReceiptOutcome.Observed, ReceiptOutcome.Accepted -> CommandStatus.Accepted
     }
@@ -415,12 +441,13 @@ class CommandProjection {
     fun submit(submit: CommandSubmit): CommandApplyStatus {
         if (entries.containsKey(submit.commandId)) return CommandApplyStatus.Duplicate
         generation = maxOf(generation, submit.authorityGeneration)
-        entries[submit.commandId] = CommandProjectionEntry(
-            commandId = submit.commandId,
-            status = CommandStatus.Submitted,
-            terminal = false,
-            generation = submit.authorityGeneration,
-        )
+        entries[submit.commandId] =
+            CommandProjectionEntry(
+                commandId = submit.commandId,
+                status = CommandStatus.Submitted,
+                terminal = false,
+                generation = submit.authorityGeneration,
+            )
         return CommandApplyStatus.Recorded
     }
 
@@ -474,12 +501,13 @@ class CommandProjection {
             return CommandApplyStatus.TerminalConflict(receipt.causationId, entry.status, incoming)
         }
         seenReceiptIds.add(receipt.receiptId)
-        entries[receipt.causationId] = entry.copy(
-            terminal = true,
-            status = incoming,
-            reason = receipt.reason,
-            terminalReceiptId = receipt.receiptId,
-        )
+        entries[receipt.causationId] =
+            entry.copy(
+                terminal = true,
+                status = incoming,
+                reason = receipt.reason,
+                terminalReceiptId = receipt.receiptId,
+            )
         return CommandApplyStatus.Recorded
     }
 
@@ -495,8 +523,7 @@ class CommandProjection {
 
     fun entry(commandId: String): CommandProjectionEntry? = entries[commandId]
 
-    fun terminalFor(commandId: String): CommandProjectionEntry? =
-        entries[commandId]?.takeIf { it.terminal }
+    fun terminalFor(commandId: String): CommandProjectionEntry? = entries[commandId]?.takeIf { it.terminal }
 
     fun hasConflict(commandId: String): Boolean = commandId in conflicts
 
@@ -515,7 +542,11 @@ fun interface CommandTransport {
 /** Resolution state of an RPC `call`. */
 sealed interface CallState {
     data object Pending : CallState
-    data class Resolved(val entry: CommandProjectionEntry) : CallState
+
+    data class Resolved(
+        val entry: CommandProjectionEntry,
+    ) : CallState
+
     data object Conflict : CallState
 }
 
@@ -525,7 +556,9 @@ sealed interface CallState {
  * only when the projection reaches a terminal outcome — never on an ACK or an
  * `accepted` event.
  */
-class CommandRpcClient(private val transport: CommandTransport) {
+class CommandRpcClient(
+    private val transport: CommandTransport,
+) {
     val projection: CommandProjection = CommandProjection()
 
     fun submit(submit: CommandSubmit): String {
@@ -541,11 +574,9 @@ class CommandRpcClient(private val transport: CommandTransport) {
         projection.applyMessage(message)
     }
 
-    fun ingestCommand(message: CommandMessage): CommandApplyStatus =
-        projection.applyMessage(message)
+    fun ingestCommand(message: CommandMessage): CommandApplyStatus = projection.applyMessage(message)
 
-    fun ingestReceipt(receipt: CausalReceipt): CommandApplyStatus =
-        projection.observeReceipt(receipt)
+    fun ingestReceipt(receipt: CausalReceipt): CommandApplyStatus = projection.observeReceipt(receipt)
 
     fun pollCall(commandId: String): CallState =
         when {

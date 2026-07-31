@@ -1,7 +1,5 @@
 package io.github.lazily
 
-import java.nio.file.Files
-import java.nio.file.Path
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
@@ -31,12 +29,13 @@ class MembershipConformanceTest {
     fun membershipLifecycle() {
         val fx = loadFixture("membership_lifecycle.json")
         val cfg = fx["config"]!!.jsonObject
-        val config = MembershipConfig(
-            phiThreshold = cfg["phi_threshold"]!!.jsonPrimitive.double,
-            suspectTimeout = cfg["suspect_timeout"]!!.jsonPrimitive.long,
-            maxSamples = cfg["max_samples"]!!.jsonPrimitive.int,
-            minStd = cfg["min_std"]!!.jsonPrimitive.double,
-        )
+        val config =
+            MembershipConfig(
+                phiThreshold = cfg["phi_threshold"]!!.jsonPrimitive.double,
+                suspectTimeout = cfg["suspect_timeout"]!!.jsonPrimitive.long,
+                maxSamples = cfg["max_samples"]!!.jsonPrimitive.int,
+                minStd = cfg["min_std"]!!.jsonPrimitive.double,
+            )
         val ctx = Context()
         val m = MembershipCell<Long>(ctx, config)
         val observed = ctx.computed { get(m.peerSetCell) }

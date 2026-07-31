@@ -2,7 +2,10 @@ package io.github.lazily
 
 /** Dumb byte storage. [Outbox] owns all reliable-sync protocol semantics. */
 interface OutboxStore {
-    fun put(epoch: Long, frame: ByteArray)
+    fun put(
+        epoch: Long,
+        frame: ByteArray,
+    )
 
     fun deleteThrough(epoch: Long)
 
@@ -17,7 +20,10 @@ class InMemoryStore : OutboxStore {
     private val entries = sortedMapOf<Long, ByteArray>()
     private var cursor = 0L
 
-    override fun put(epoch: Long, frame: ByteArray) {
+    override fun put(
+        epoch: Long,
+        frame: ByteArray,
+    ) {
         entries[epoch] = frame.copyOf()
     }
 
@@ -44,11 +50,21 @@ class InMemoryOutbox : io.github.lazily.outbox.Outbox<InMemoryStore>(InMemorySto
  * dependencies into the portable lazily JVM artifact.
  */
 interface RoomOutboxDao {
-    fun upsert(channel: String, epoch: Long, frame: ByteArray)
+    fun upsert(
+        channel: String,
+        epoch: Long,
+        frame: ByteArray,
+    )
 
-    fun deleteThrough(channel: String, epoch: Long)
+    fun deleteThrough(
+        channel: String,
+        epoch: Long,
+    )
 
-    fun scanAfter(channel: String, epoch: Long): List<Pair<Long, ByteArray>>
+    fun scanAfter(
+        channel: String,
+        epoch: Long,
+    ): List<Pair<Long, ByteArray>>
 
     fun loadCursor(channel: String): Long?
 
@@ -57,7 +73,10 @@ interface RoomOutboxDao {
      * replace/upsert is invalid because a stale Room handle could overwrite a
      * newer acknowledgement committed by another handle.
      */
-    fun saveCursor(channel: String, epoch: Long)
+    fun saveCursor(
+        channel: String,
+        epoch: Long,
+    )
 }
 
 /** Room/SQLite adapter; storage only, with protocol behavior inherited from [Outbox]. */
@@ -65,7 +84,10 @@ class RoomStore(
     private val dao: RoomOutboxDao,
     private val channel: String,
 ) : OutboxStore {
-    override fun put(epoch: Long, frame: ByteArray) = dao.upsert(channel, epoch, frame)
+    override fun put(
+        epoch: Long,
+        frame: ByteArray,
+    ) = dao.upsert(channel, epoch, frame)
 
     override fun deleteThrough(epoch: Long) = dao.deleteThrough(channel, epoch)
 

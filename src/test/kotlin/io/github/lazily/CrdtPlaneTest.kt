@@ -1,7 +1,5 @@
 package io.github.lazily
 
-import java.nio.file.Files
-import java.nio.file.Path
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -38,7 +36,9 @@ class CrdtPlaneTest {
             val message = IpcMessage.fromJson(wire)
             val sync = assertIs<IpcMessage.CrdtSyncMessage>(message).sync
 
-            frame.getValue("assertions").jsonObject
+            frame
+                .getValue("assertions")
+                .jsonObject
                 .consuming("distributed/crdt_sync_frames.json[$label]") { a ->
                     a.assertInt("frontier_len") { sync.frontier.size }
                     // The claim is about the WIRE, not about the decode: the key
@@ -78,17 +78,22 @@ class CrdtPlaneTest {
         val inner = wire["CrdtSync"]?.jsonObject ?: return wire
         if ("frontier" in inner) return wire
         return buildJsonObject {
-            put("CrdtSync", buildJsonObject {
-                put("frontier", JsonArray(emptyList()))
-                inner.forEach { (k, v) -> put(k, v) }
-            })
+            put(
+                "CrdtSync",
+                buildJsonObject {
+                    put("frontier", JsonArray(emptyList()))
+                    inner.forEach { (k, v) -> put(k, v) }
+                },
+            )
         }
     }
 
-    private fun parseOps(scenario: JsonObject): List<CrdtOp> =
-        scenario.getValue("ops").jsonArray.map { CrdtOp.fromJson(it) }
+    private fun parseOps(scenario: JsonObject): List<CrdtOp> = scenario.getValue("ops").jsonArray.map { CrdtOp.fromJson(it) }
 
-    private fun assertConverged(runtime: CrdtPlaneRuntime, converged: JsonArray) {
+    private fun assertConverged(
+        runtime: CrdtPlaneRuntime,
+        converged: JsonArray,
+    ) {
         for (entryEl in converged) {
             val entry = entryEl.jsonObject
             val node = entry.getValue("node").jsonPrimitive.long
@@ -98,7 +103,10 @@ class CrdtPlaneTest {
     }
 
     /** The same convergence check as a predicate, for keys that assert whether it holds. */
-    private fun hasConverged(runtime: CrdtPlaneRuntime, converged: JsonArray): Boolean =
+    private fun hasConverged(
+        runtime: CrdtPlaneRuntime,
+        converged: JsonArray,
+    ): Boolean =
         converged.all { entryEl ->
             val entry = entryEl.jsonObject
             IpcValue.fromJson(entry.getValue("state")) ==
@@ -119,12 +127,16 @@ class CrdtPlaneTest {
             val name = scenario.getValue("name").jsonPrimitive.content
             val ops = parseOps(scenario)
 
-            scenario.getValue("expect").jsonObject
+            scenario
+                .getValue("expect")
+                .jsonObject
                 .consuming("distributed/anti_entropy_converge.json[$name] expect") { a ->
-                    val converged = a.array("converged")
-                        ?: error("$name: `converged` is required")
-                    val expectedApplied = a.int("applied_count")
-                        ?: error("$name: `applied_count` is required")
+                    val converged =
+                        a.array("converged")
+                            ?: error("$name: `converged` is required")
+                    val expectedApplied =
+                        a.int("applied_count")
+                            ?: error("$name: `applied_count` is required")
 
                     val runtime = CrdtPlaneRuntime(peer = 99)
                     val frame = CrdtSync(frontier = emptyList(), ops = ops)
@@ -144,10 +156,14 @@ class CrdtPlaneTest {
                         val rule = el.jsonPrimitive.content
                         assertEquals("max_stamp", rule, "$name: unsupported resolution rule '$rule'")
                         for (entryEl in converged) {
-                            val node = entryEl.jsonObject.getValue("node").jsonPrimitive.long
-                            val winner = ops.filter { it.node == node }.maxWithOrNull(
-                                compareBy(stampOrder) { it.stamp },
-                            ) ?: error("$name: no op targets node $node")
+                            val node =
+                                entryEl.jsonObject
+                                    .getValue("node")
+                                    .jsonPrimitive.long
+                            val winner =
+                                ops.filter { it.node == node }.maxWithOrNull(
+                                    compareBy(stampOrder) { it.stamp },
+                                ) ?: error("$name: no op targets node $node")
                             assertEquals(
                                 winner.state,
                                 runtime.value(node),

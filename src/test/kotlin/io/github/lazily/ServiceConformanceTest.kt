@@ -1,7 +1,5 @@
 package io.github.lazily
 
-import java.nio.file.Files
-import java.nio.file.Path
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
@@ -27,23 +25,39 @@ class ServiceConformanceTest {
     }
 
     private fun steps(fx: JsonObject) = fx["steps"]!!.jsonArray
-    private fun inval(step: JsonObject, reader: String) =
-        step["expected"]!!.jsonObject["invalidates"]!!.jsonObject[reader]!!.jsonPrimitive.boolean
 
-    private inline fun <reified T : Any> observe(ctx: Context, cell: Source<T>): Computed<Any> {
+    private fun inval(
+        step: JsonObject,
+        reader: String,
+    ) = step["expected"]!!
+        .jsonObject["invalidates"]!!
+        .jsonObject[reader]!!
+        .jsonPrimitive.boolean
+
+    private inline fun <reified T : Any> observe(
+        ctx: Context,
+        cell: Source<T>,
+    ): Computed<Any> {
         val obs = ctx.computed { get(cell) as Any }
         ctx.get(obs)
         return obs
     }
 
-    private fun checkInval(ctx: Context, obs: Computed<Any>, step: JsonObject, reader: String) {
+    private fun checkInval(
+        ctx: Context,
+        obs: Computed<Any>,
+        step: JsonObject,
+        reader: String,
+    ) {
         val wasCached = ctx.isSet(obs)
         ctx.get(obs)
         assertEquals(inval(step, reader), !wasCached, "$reader invalidation")
     }
 
-    private fun wantMap(step: JsonObject, key: String): Map<String, String> =
-        step["expected"]!!.jsonObject[key]!!.jsonObject.mapValues { it.value.jsonPrimitive.content }
+    private fun wantMap(
+        step: JsonObject,
+        key: String,
+    ): Map<String, String> = step["expected"]!!.jsonObject[key]!!.jsonObject.mapValues { it.value.jsonPrimitive.content }
 
     @Test
     fun health() {
@@ -89,17 +103,19 @@ class ServiceConformanceTest {
             val step = element.jsonObject
             val op = step["op"]!!.jsonObject
             when (op["type"]!!.jsonPrimitive.content) {
-                "register" -> d.register(
-                    op["service"]!!.jsonPrimitive.content,
-                    op["endpoint"]!!.jsonPrimitive.content,
-                    op["peer"]!!.jsonPrimitive.long,
-                )
+                "register" ->
+                    d.register(
+                        op["service"]!!.jsonPrimitive.content,
+                        op["endpoint"]!!.jsonPrimitive.content,
+                        op["peer"]!!.jsonPrimitive.long,
+                    )
                 "deregister" -> d.deregister(op["service"]!!.jsonPrimitive.content)
                 "evict" -> d.evict(op["peer"]!!.jsonPrimitive.long)
-                "resolve" -> assertEquals(
-                    step["returns"]!!.jsonPrimitive.contentOrNull,
-                    d.resolve(op["service"]!!.jsonPrimitive.content),
-                )
+                "resolve" ->
+                    assertEquals(
+                        step["returns"]!!.jsonPrimitive.contentOrNull,
+                        d.resolve(op["service"]!!.jsonPrimitive.content),
+                    )
             }
             assertEquals(wantMap(step, "discovery"), d.discovery())
             checkInval(ctx, obs, step, "discovery")
@@ -116,10 +132,11 @@ class ServiceConformanceTest {
             val step = element.jsonObject
             val op = step["op"]!!.jsonObject
             when (op["type"]!!.jsonPrimitive.content) {
-                "register" -> reg.register(
-                    op["service"]!!.jsonPrimitive.content,
-                    op["endpoint"]!!.jsonPrimitive.content,
-                )
+                "register" ->
+                    reg.register(
+                        op["service"]!!.jsonPrimitive.content,
+                        op["endpoint"]!!.jsonPrimitive.content,
+                    )
                 "deregister" -> reg.deregister(op["service"]!!.jsonPrimitive.content)
                 "replay" -> reg.replay()
             }

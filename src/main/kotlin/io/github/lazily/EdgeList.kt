@@ -102,7 +102,9 @@ internal val EDGE_FORCE_SCAN_REMOVE: Boolean =
  * buckets. `EMPTY` (-1) is the vacant-slot sentinel, which no id can collide
  * with.
  */
-private class EdgeIndexMap(expected: Int) {
+private class EdgeIndexMap(
+    expected: Int,
+) {
     private var keys: IntArray
     private var values: IntArray
     private var mask: Int
@@ -138,7 +140,10 @@ private class EdgeIndexMap(expected: Int) {
         }
     }
 
-    fun put(key: Int, value: Int) {
+    fun put(
+        key: Int,
+        value: Int,
+    ) {
         var i = mix(key)
         while (true) {
             val k = keys[i]
@@ -319,8 +324,14 @@ internal class SmallEdgeList : MutableIterable<Int> {
         }
         if (contains(element)) return false
         when (count) {
-            0 -> { a = element; count = 1 }
-            1 -> { b = element; count = 2 }
+            0 -> {
+                a = element
+                count = 1
+            }
+            1 -> {
+                b = element
+                count = 2
+            }
             else -> {
                 // count == 2 → promote to ArrayList on the 3rd add.
                 val newList = ArrayList<Int>(4)
@@ -432,16 +443,19 @@ internal class SmallEdgeList : MutableIterable<Int> {
     /** Whether this list currently carries a hash index (testing). */
     internal fun isIndexed(): Boolean = index != null
 
-    override fun iterator(): MutableIterator<Int> = object : MutableIterator<Int> {
-        private var index = 0
-        override fun hasNext(): Boolean = index < count
-        override fun next(): Int {
-            if (index >= count) throw NoSuchElementException("SmallEdgeList iterator exhausted")
-            val v = this@SmallEdgeList[index]
-            index++
-            return v
+    override fun iterator(): MutableIterator<Int> =
+        object : MutableIterator<Int> {
+            private var index = 0
+
+            override fun hasNext(): Boolean = index < count
+
+            override fun next(): Int {
+                if (index >= count) throw NoSuchElementException("SmallEdgeList iterator exhausted")
+                val v = this@SmallEdgeList[index]
+                index++
+                return v
+            }
+
+            override fun remove() = throw UnsupportedOperationException("SmallEdgeList iterator.remove is not supported")
         }
-        override fun remove() =
-            throw UnsupportedOperationException("SmallEdgeList iterator.remove is not supported")
-    }
 }

@@ -1,6 +1,5 @@
 package io.github.lazily
 
-import java.util.concurrent.locks.ReentrantLock
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -13,6 +12,7 @@ import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
+import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
 /**
@@ -54,6 +54,7 @@ class AsyncContext(
     dispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
+
     // #lzktasynccontextmodernize: ReentrantLock + flat Array arena, mirroring
     // ThreadSafeContext (ReentrantLock) and Context (dense `Array<Node?>`). The
     // former `synchronized(Any())` + `HashMap<Int, AsyncNode>` paid both a JVM
@@ -101,23 +102,33 @@ class AsyncContext(
     // -- Handles ----------------------------------------------------------
 
     /** A mutable input cell — the synchronous input layer. */
-    open inner class AsyncSource<T> internal constructor(internal val id: Int) : AsyncGraphNode {
+    open inner class AsyncSource<T> internal constructor(
+        internal val id: Int,
+    ) : AsyncGraphNode {
         override val nodeId: Int get() = id
     }
 
     /** A computed/memoized async slot. */
-    open inner class AsyncComputed<T> internal constructor(internal val id: Int) : AsyncGraphNode {
+    open inner class AsyncComputed<T> internal constructor(
+        internal val id: Int,
+    ) : AsyncGraphNode {
         override val nodeId: Int get() = id
     }
 
     @Deprecated("Use AsyncSource", ReplaceWith("AsyncSource<T>"))
-    inner class AsyncCellHandle<T> internal constructor(id: Int) : AsyncSource<T>(id)
+    inner class AsyncCellHandle<T> internal constructor(
+        id: Int,
+    ) : AsyncSource<T>(id)
 
     @Deprecated("Use AsyncComputed", ReplaceWith("AsyncComputed<T>"))
-    inner class AsyncSlotHandle<T> internal constructor(id: Int) : AsyncComputed<T>(id)
+    inner class AsyncSlotHandle<T> internal constructor(
+        id: Int,
+    ) : AsyncComputed<T>(id)
 
     /** An async effect handle. */
-    inner class AsyncEffectHandle internal constructor(internal val id: Int) : AsyncGraphNode {
+    inner class AsyncEffectHandle internal constructor(
+        internal val id: Int,
+    ) : AsyncGraphNode {
         override val nodeId: Int get() = id
     }
 
@@ -172,11 +183,17 @@ class AsyncContext(
             freeIds.clear()
         }
         for (cleanup in cleanups) {
-            try { cleanup() } catch (_: Throwable) {}
+            try {
+                cleanup()
+            } catch (_: Throwable) {
+            }
         }
         scope.coroutineContext.job.cancelAndJoin()
         for (job in jobs) {
-            try { job.join() } catch (_: Throwable) {}
+            try {
+                job.join()
+            } catch (_: Throwable) {
+            }
         }
     }
 
@@ -199,13 +216,17 @@ class AsyncContext(
      */
     suspend fun settle() {
         repeat(SETTLE_ROUNDS) {
-            val jobs = locked {
-                nodes.filterIsInstance<AsyncNode.Effect>().mapNotNull { it.runJob }
-            }
+            val jobs =
+                locked {
+                    nodes.filterIsInstance<AsyncNode.Effect>().mapNotNull { it.runJob }
+                }
             val queued = locked { pendingEffects.isNotEmpty() }
             if (!queued && jobs.none { it.isActive }) return
             for (job in jobs) {
-                try { job.join() } catch (_: Throwable) {}
+                try {
+                    job.join()
+                } catch (_: Throwable) {
+                }
             }
             yield()
         }
@@ -233,11 +254,12 @@ class AsyncContext(
     // -- Cells (synchronous input layer) ----------------------------------
 
     fun <T : Any> source(value: T): AsyncSource<T> {
-        val id = locked {
-            val id = allocId()
-            nodes[id] = AsyncNode.Cell(value, LinkedHashSet())
-            id
-        }
+        val id =
+            locked {
+                val id = allocId()
+                nodes[id] = AsyncNode.Cell(value, LinkedHashSet())
+                id
+            }
         return AsyncSource(id)
     }
 
@@ -247,8 +269,9 @@ class AsyncContext(
     @Suppress("UNCHECKED_CAST")
     fun <T : Any> get(handle: AsyncSource<T>): T {
         locked {
-            val node = nodes[handle.id] as? AsyncNode.Cell
-                ?: throw DisposedNodeException(handle.id, "cell")
+            val node =
+                nodes[handle.id] as? AsyncNode.Cell
+                    ?: throw DisposedNodeException(handle.id, "cell")
             return node.value as T
         }
     }
@@ -256,25 +279,33 @@ class AsyncContext(
     @Deprecated("Reads are unified — use get (#lzcellkernel).", ReplaceWith("get(handle)"))
     fun <T : Any> getCell(handle: AsyncSource<T>): T = get(handle)
 
-    fun <T : Any> set(handle: AsyncSource<T>, value: T) {
-        val dependents: List<Int> = locked {
-            val node = nodes[handle.id] as? AsyncNode.Cell
-                ?: throw DisposedNodeException(handle.id, "cell")
-            @Suppress("UNCHECKED_CAST")
-            if (node.value == value) return
-            node.value = value
-            if (batchDepth > 0) {
-                batchedCells.add(handle.id)
-                return
+    fun <T : Any> set(
+        handle: AsyncSource<T>,
+        value: T,
+    ) {
+        val dependents: List<Int> =
+            locked {
+                val node =
+                    nodes[handle.id] as? AsyncNode.Cell
+                        ?: throw DisposedNodeException(handle.id, "cell")
+                @Suppress("UNCHECKED_CAST")
+                if (node.value == value) return
+                node.value = value
+                if (batchDepth > 0) {
+                    batchedCells.add(handle.id)
+                    return
+                }
+                node.dependents.toList()
             }
-            node.dependents.toList()
-        }
         invalidateDependents(dependents)
         flushEffects()
     }
 
     @Deprecated("Writes are unified — use set (#lzcellkernel).", ReplaceWith("set(handle, value)"))
-    fun <T : Any> setCell(handle: AsyncSource<T>, value: T) = set(handle, value)
+    fun <T : Any> setCell(
+        handle: AsyncSource<T>,
+        value: T,
+    ) = set(handle, value)
 
     // -- Async slots ------------------------------------------------------
 
@@ -282,9 +313,8 @@ class AsyncContext(
      * Create an async computed slot. [compute] returns the value; it is
      * re-resolved on the next [getAsync] after a dependency invalidates.
      */
-    fun <T : Any> computedAsync(
-        compute: suspend AsyncComputeContext.() -> T,
-    ): AsyncComputed<T> = slotAsyncWithEquals(compute, equals = null)
+    fun <T : Any> computedAsync(compute: suspend AsyncComputeContext.() -> T): AsyncComputed<T> =
+        slotAsyncWithEquals(compute, equals = null)
 
     /**
      * Create a guarded computed whose body is synchronous, while its node lives
@@ -292,26 +322,25 @@ class AsyncContext(
      * and have nothing to await, so they resolve inline on [get] just like the
      * equivalent readers on [Context] and [ThreadSafeContext].
      */
-    fun <T : Any> computed(
-        compute: AsyncComputeContext.() -> T,
-    ): AsyncComputed<T> {
-        val id = locked {
-            val id = allocId()
-            nodes[id] =
-                AsyncNode.Slot(
-                    state = SlotState.Empty,
-                    value = null,
-                    revision = 0L,
-                    compute = { error("synchronous computed reached async compute path") },
-                    syncCompute = { compute(it) },
-                    equals = { a, b -> a == b },
-                    dependencies = LinkedHashSet(),
-                    dependents = LinkedHashSet(),
-                    inFlight = null,
-                    job = null,
-                )
-            id
-        }
+    fun <T : Any> computed(compute: AsyncComputeContext.() -> T): AsyncComputed<T> {
+        val id =
+            locked {
+                val id = allocId()
+                nodes[id] =
+                    AsyncNode.Slot(
+                        state = SlotState.Empty,
+                        value = null,
+                        revision = 0L,
+                        compute = { error("synchronous computed reached async compute path") },
+                        syncCompute = { compute(it) },
+                        equals = { a, b -> a == b },
+                        dependencies = LinkedHashSet(),
+                        dependents = LinkedHashSet(),
+                        inFlight = null,
+                        job = null,
+                    )
+                id
+            }
         return AsyncComputed(id)
     }
 
@@ -328,22 +357,24 @@ class AsyncContext(
         compute: suspend AsyncComputeContext.() -> T,
         equals: ((Any?, Any?) -> Boolean)?,
     ): AsyncComputed<T> {
-        val id = locked {
-            val id = allocId()
-            nodes[id] = AsyncNode.Slot(
-                state = SlotState.Empty,
-                value = null,
-                revision = 0L,
-                compute = { compute() },
-                syncCompute = null,
-                equals = equals,
-                dependencies = LinkedHashSet(),
-                dependents = LinkedHashSet(),
-                inFlight = null,
-                job = null,
-            )
-            id
-        }
+        val id =
+            locked {
+                val id = allocId()
+                nodes[id] =
+                    AsyncNode.Slot(
+                        state = SlotState.Empty,
+                        value = null,
+                        revision = 0L,
+                        compute = { compute() },
+                        syncCompute = null,
+                        equals = equals,
+                        dependencies = LinkedHashSet(),
+                        dependents = LinkedHashSet(),
+                        inFlight = null,
+                        job = null,
+                    )
+                id
+            }
         return AsyncComputed(id)
     }
 
@@ -353,23 +384,25 @@ class AsyncContext(
 
     private fun doGet(slotId: Int): Any? {
         while (true) {
-            val pending = locked {
-                val slot = nodes[slotId] as? AsyncNode.Slot ?: return null
-                if (slot.state is SlotState.Resolved) return slot.value
-                val compute = slot.syncCompute ?: return null
-                compute to slot.revision
-            }
+            val pending =
+                locked {
+                    val slot = nodes[slotId] as? AsyncNode.Slot ?: return null
+                    if (slot.state is SlotState.Resolved) return slot.value
+                    val compute = slot.syncCompute ?: return null
+                    compute to slot.revision
+                }
             val dependencies = LinkedHashSet<Int>()
             val value = pending.first(AsyncComputeContext(this, slotId, dependencies))
-            val published = locked {
-                val slot = nodes[slotId] as? AsyncNode.Slot ?: return null
-                if (slot.state is SlotState.Resolved) return@locked slot.value
-                if (slot.revision != pending.second) return@locked RETRY_SYNC_COMPUTE
-                updateDependenciesLocked(slotId, dependencies)
-                slot.value = value
-                slot.state = SlotState.Resolved
-                value
-            }
+            val published =
+                locked {
+                    val slot = nodes[slotId] as? AsyncNode.Slot ?: return null
+                    if (slot.state is SlotState.Resolved) return@locked slot.value
+                    if (slot.revision != pending.second) return@locked RETRY_SYNC_COMPUTE
+                    updateDependenciesLocked(slotId, dependencies)
+                    slot.value = value
+                    slot.state = SlotState.Resolved
+                    value
+                }
             if (published !== RETRY_SYNC_COMPUTE) return published
         }
     }
@@ -398,8 +431,9 @@ class AsyncContext(
 
             var recv: CompletableDeferred<Outcome>? = null
             locked {
-                val slot = nodes[slotId] as? AsyncNode.Slot
-                    ?: throw DisposedNodeException(slotId, "slot")
+                val slot =
+                    nodes[slotId] as? AsyncNode.Slot
+                        ?: throw DisposedNodeException(slotId, "slot")
                 when (val state = slot.state) {
                     is SlotState.Computing -> recv = slot.inFlight
                     SlotState.Empty, SlotState.Error -> recv = spawnComputeLocked(slotId)
@@ -437,43 +471,44 @@ class AsyncContext(
         val completion = CompletableDeferred<Outcome>()
         slot.inFlight = completion
         slot.state = SlotState.Computing(spawnRevision)
-        val job = scope.launch {
-            val deps = LinkedHashSet<Int>()
-            val computeCtx = AsyncComputeContext(this@AsyncContext, slotId, deps)
-            val result: Result<Any?> = try {
-                Result.success(compute(computeCtx))
-            } catch (e: Throwable) {
-                Result.failure(e)
-            }
-            locked {
-                val current = nodes[slotId] as? AsyncNode.Slot
-                if (current == null) {
-                    // Slot removed during compute — discard, signal retry.
-                    if (!completion.isCompleted) completion.complete(Outcome.Retry)
-                    return@launch
-                }
-                if (current.revision != spawnRevision) {
-                    // Stale completion (Computing -> Computing): discard, retry.
-                    if (!completion.isCompleted) completion.complete(Outcome.Retry)
-                    return@launch
-                }
-                updateDependenciesLocked(slotId, deps)
-                result
-                    .onSuccess { value ->
-                        current.state = SlotState.Resolved
-                        current.value = value
-                        current.inFlight = null
-                        current.job = null
-                        completion.complete(Outcome.Resolved(value))
+        val job =
+            scope.launch {
+                val deps = LinkedHashSet<Int>()
+                val computeCtx = AsyncComputeContext(this@AsyncContext, slotId, deps)
+                val result: Result<Any?> =
+                    try {
+                        Result.success(compute(computeCtx))
+                    } catch (e: Throwable) {
+                        Result.failure(e)
                     }
-                    .onFailure { err ->
-                        current.state = SlotState.Error
-                        current.inFlight = null
-                        current.job = null
-                        completion.complete(Outcome.Failed(err))
+                locked {
+                    val current = nodes[slotId] as? AsyncNode.Slot
+                    if (current == null) {
+                        // Slot removed during compute — discard, signal retry.
+                        if (!completion.isCompleted) completion.complete(Outcome.Retry)
+                        return@launch
                     }
+                    if (current.revision != spawnRevision) {
+                        // Stale completion (Computing -> Computing): discard, retry.
+                        if (!completion.isCompleted) completion.complete(Outcome.Retry)
+                        return@launch
+                    }
+                    updateDependenciesLocked(slotId, deps)
+                    result
+                        .onSuccess { value ->
+                            current.state = SlotState.Resolved
+                            current.value = value
+                            current.inFlight = null
+                            current.job = null
+                            completion.complete(Outcome.Resolved(value))
+                        }.onFailure { err ->
+                            current.state = SlotState.Error
+                            current.inFlight = null
+                            current.job = null
+                            completion.complete(Outcome.Failed(err))
+                        }
+                }
             }
-        }
         // Attach the in-flight job for cancellation, but only if the slot is
         // still Computing (under an inline dispatcher the compute may already
         // have resolved by the time launch returns).
@@ -491,21 +526,21 @@ class AsyncContext(
      * the cleanup completes before the next body starts and on [disposeEffect].
      * Reruns are serialized per effect and executor-scheduled.
      */
-    fun effectAsync(
-        effect: suspend AsyncComputeContext.() -> (suspend () -> Unit)?,
-    ): AsyncEffectHandle {
-        val id = locked {
-            val id = allocId()
-            nodes[id] = AsyncNode.Effect(
-                effectFn = effect,
-                cleanup = null,
-                dependencies = LinkedHashSet(),
-                runJob = null,
-                forceRun = true,
-            )
-            scheduleEffectLocked(id)
-            id
-        }
+    fun effectAsync(effect: suspend AsyncComputeContext.() -> (suspend () -> Unit)?): AsyncEffectHandle {
+        val id =
+            locked {
+                val id = allocId()
+                nodes[id] =
+                    AsyncNode.Effect(
+                        effectFn = effect,
+                        cleanup = null,
+                        dependencies = LinkedHashSet(),
+                        runJob = null,
+                        forceRun = true,
+                    )
+                scheduleEffectLocked(id)
+                id
+            }
         flushEffects()
         return AsyncEffectHandle(id)
     }
@@ -540,22 +575,24 @@ class AsyncContext(
     }
 
     /** Size of [node]'s reverse edge set. See `Context.dependentCount`. */
-    fun dependentCount(node: AsyncGraphNode): Int = locked {
-        when (val n = resolveLocked(node)) {
-            is AsyncNode.Cell -> n.dependents.size
-            is AsyncNode.Slot -> n.dependents.size
-            else -> 0
+    fun dependentCount(node: AsyncGraphNode): Int =
+        locked {
+            when (val n = resolveLocked(node)) {
+                is AsyncNode.Cell -> n.dependents.size
+                is AsyncNode.Slot -> n.dependents.size
+                else -> 0
+            }
         }
-    }
 
     /** Size of [node]'s forward edge set. See `Context.dependencyCount`. */
-    fun dependencyCount(node: AsyncGraphNode): Int = locked {
-        when (val n = resolveLocked(node)) {
-            is AsyncNode.Slot -> n.dependencies.size
-            is AsyncNode.Effect -> n.dependencies.size
-            else -> 0
+    fun dependencyCount(node: AsyncGraphNode): Int =
+        locked {
+            when (val n = resolveLocked(node)) {
+                is AsyncNode.Slot -> n.dependencies.size
+                is AsyncNode.Effect -> n.dependencies.size
+                else -> 0
+            }
         }
-    }
 
     /** Whether [node] has been torn down. See `Context.isDisposed`. */
     fun isDisposed(node: AsyncGraphNode): Boolean = locked { resolveLocked(node) == null }
@@ -572,12 +609,18 @@ class AsyncContext(
      * cleanup happen after it is released.
      */
     suspend fun disposeNode(node: AsyncGraphNode) {
-        val plan = locked {
-            val resolved = resolveLocked(node) ?: return@locked null
-            disposeLocked(node.nodeId, resolved)
-        } ?: return
+        val plan =
+            locked {
+                val resolved = resolveLocked(node) ?: return@locked null
+                disposeLocked(node.nodeId, resolved)
+            } ?: return
         plan.runJob?.cancelAndJoin()
-        plan.cleanup?.let { c -> try { c() } catch (_: Throwable) {} }
+        plan.cleanup?.let { c ->
+            try {
+                c()
+            } catch (_: Throwable) {
+            }
+        }
     }
 
     /** Tear down an async slot. See [disposeNode]. */
@@ -597,35 +640,39 @@ class AsyncContext(
      * `Context.disposeResolved`: vacate the arena slot, detach upstream, detach
      * downstream, then dirty the surviving cone mark-only.
      */
-    private fun disposeLocked(id: Int, node: AsyncNode): DisposePlan {
+    private fun disposeLocked(
+        id: Int,
+        node: AsyncNode,
+    ): DisposePlan {
         nodes[id] = null
         freeIds.addLast(id)
         var cleanup: (suspend () -> Unit)? = null
         var runJob: Job? = null
-        val dependents: List<Int> = when (node) {
-            is AsyncNode.Cell -> node.dependents.toList()
-            is AsyncNode.Slot -> {
-                for (dep in node.dependencies) detachDependentLocked(dep, id)
-                // Supersede anyone awaiting this slot: they re-resolve, find the
-                // arena slot empty, and get the DisposedNodeException.
-                node.job?.cancel()
-                node.inFlight?.complete(Outcome.Retry)
-                node.dependents.toList()
+        val dependents: List<Int> =
+            when (node) {
+                is AsyncNode.Cell -> node.dependents.toList()
+                is AsyncNode.Slot -> {
+                    for (dep in node.dependencies) detachDependentLocked(dep, id)
+                    // Supersede anyone awaiting this slot: they re-resolve, find the
+                    // arena slot empty, and get the DisposedNodeException.
+                    node.job?.cancel()
+                    node.inFlight?.complete(Outcome.Retry)
+                    node.dependents.toList()
+                }
+                is AsyncNode.Effect -> {
+                    pendingEffects.remove(id)
+                    scheduledEffects.remove(id)
+                    // The upstream detach the pre-disposal `disposeEffect` skipped
+                    // for cells and slots alike. Leaving it out was a real leak: an
+                    // effect removed from the context still sat in `dependents` for
+                    // every dependency it had read, so async subscribe/unsubscribe
+                    // churn grew each source's dependent set without bound.
+                    for (dep in node.dependencies) detachDependentLocked(dep, id)
+                    cleanup = node.cleanup
+                    runJob = node.runJob
+                    emptyList()
+                }
             }
-            is AsyncNode.Effect -> {
-                pendingEffects.remove(id)
-                scheduledEffects.remove(id)
-                // The upstream detach the pre-disposal `disposeEffect` skipped
-                // for cells and slots alike. Leaving it out was a real leak: an
-                // effect removed from the context still sat in `dependents` for
-                // every dependency it had read, so async subscribe/unsubscribe
-                // churn grew each source's dependent set without bound.
-                for (dep in node.dependencies) detachDependentLocked(dep, id)
-                cleanup = node.cleanup
-                runJob = node.runJob
-                emptyList()
-            }
-        }
         if (dependents.isNotEmpty()) {
             for (d in dependents) detachDependencyLocked(d, id)
             disposalDepth++
@@ -645,13 +692,19 @@ class AsyncContext(
     }
 
     /** Remove [dependentId] from [depId]'s reverse edge set. Caller holds [lock]. */
-    private fun detachDependentLocked(depId: Int, dependentId: Int) {
+    private fun detachDependentLocked(
+        depId: Int,
+        dependentId: Int,
+    ) {
         (nodes[depId] as? AsyncNode.Slot)?.dependents?.remove(dependentId)
         (nodes[depId] as? AsyncNode.Cell)?.dependents?.remove(dependentId)
     }
 
     /** Remove [depId] from [parentId]'s forward edge set. Caller holds [lock]. */
-    private fun detachDependencyLocked(parentId: Int, depId: Int) {
+    private fun detachDependencyLocked(
+        parentId: Int,
+        depId: Int,
+    ) {
         (nodes[parentId] as? AsyncNode.Slot)?.dependencies?.remove(depId)
         (nodes[parentId] as? AsyncNode.Effect)?.dependencies?.remove(depId)
     }
@@ -687,15 +740,14 @@ class AsyncContext(
         "Retired by the Cell kernel (#lzcellkernel); retained for compatibility until " +
             "the async plane exposes eager AsyncComputed.",
     )
-    fun <T : Any> signalAsync(
-        compute: suspend AsyncComputeContext.() -> T,
-    ): AsyncSignalHandle<T> {
+    fun <T : Any> signalAsync(compute: suspend AsyncComputeContext.() -> T): AsyncSignalHandle<T> {
         val slot = memoAsync(compute = compute)
-        val effect = effectAsync {
-            getAsync(slot)
-            val none: (suspend () -> Unit)? = null
-            none
-        }
+        val effect =
+            effectAsync {
+                getAsync(slot)
+                val none: (suspend () -> Unit)? = null
+                none
+            }
         return AsyncSignalHandle(slot, effect)
     }
 
@@ -707,10 +759,11 @@ class AsyncContext(
         return try {
             run(this)
         } finally {
-            val drained: List<Int> = locked {
-                batchDepth -= 1
-                if (batchDepth == 0) batchedCells.toList().also { batchedCells.clear() } else emptyList()
-            }
+            val drained: List<Int> =
+                locked {
+                    batchDepth -= 1
+                    if (batchDepth == 0) batchedCells.toList().also { batchedCells.clear() } else emptyList()
+                }
             if (drained.isNotEmpty()) {
                 // Mark every batched cell's cone dirty WITHOUT flushing mid-drain
                 // (`flushSuppressed`), then flush effects exactly once at the
@@ -722,9 +775,10 @@ class AsyncContext(
                 locked { flushSuppressed += 1 }
                 try {
                     for (cellId in drained) {
-                        val dependents = locked {
-                            (nodes[cellId] as? AsyncNode.Cell)?.dependents?.toList() ?: emptyList()
-                        }
+                        val dependents =
+                            locked {
+                                (nodes[cellId] as? AsyncNode.Cell)?.dependents?.toList() ?: emptyList()
+                            }
                         invalidateDependents(dependents)
                     }
                 } finally {
@@ -773,10 +827,11 @@ class AsyncContext(
     }
 
     /** Whether a derived node currently has a fresh cached value (testing). */
-    fun isSet(handle: AsyncComputed<*>): Boolean = locked {
-        val slot = nodes[handle.id] as? AsyncNode.Slot ?: return@locked false
-        slot.state is SlotState.Resolved
-    }
+    fun isSet(handle: AsyncComputed<*>): Boolean =
+        locked {
+            val slot = nodes[handle.id] as? AsyncNode.Slot ?: return@locked false
+            slot.state is SlotState.Resolved
+        }
 
     private fun invalidateDependents(dependents: List<Int>) {
         // Process a stable snapshot; invalidation can cascade.
@@ -797,28 +852,29 @@ class AsyncContext(
     }
 
     private fun invalidateSlot(slotId: Int) {
-        val (slotDeps, effectDeps) = locked {
-            val slot = nodes[slotId] as? AsyncNode.Slot ?: return
-            // Bump revision, clear cached state, supersede in-flight waiters.
-            slot.revision += 1
-            slot.state = SlotState.Empty
-            slot.value = null
-            val priorJob = slot.job
-            val priorInFlight = slot.inFlight
-            slot.job = null
-            slot.inFlight = null
-            priorJob?.cancel()
-            priorInFlight?.complete(Outcome.Retry)
-            val sd = ArrayList<Int>()
-            val ed = ArrayList<Int>()
-            for (d in slot.dependents) {
-                when (nodes[d]) {
-                    is AsyncNode.Effect -> ed.add(d)
-                    else -> sd.add(d)
+        val (slotDeps, effectDeps) =
+            locked {
+                val slot = nodes[slotId] as? AsyncNode.Slot ?: return
+                // Bump revision, clear cached state, supersede in-flight waiters.
+                slot.revision += 1
+                slot.state = SlotState.Empty
+                slot.value = null
+                val priorJob = slot.job
+                val priorInFlight = slot.inFlight
+                slot.job = null
+                slot.inFlight = null
+                priorJob?.cancel()
+                priorInFlight?.complete(Outcome.Retry)
+                val sd = ArrayList<Int>()
+                val ed = ArrayList<Int>()
+                for (d in slot.dependents) {
+                    when (nodes[d]) {
+                        is AsyncNode.Effect -> ed.add(d)
+                        else -> sd.add(d)
+                    }
                 }
+                sd to ed
             }
-            sd to ed
-        }
         for (effectId in effectDeps) locked { scheduleEffectLocked(effectId) }
         for (child in slotDeps) invalidateSlot(child)
         // A disposal cascade is mark-only. Flushing here would not just run the
@@ -828,13 +884,17 @@ class AsyncContext(
         if (effectDeps.isNotEmpty() && locked { disposalDepth == 0 && flushSuppressed == 0 }) flushEffects()
     }
 
-    private fun updateDependenciesLocked(nodeId: Int, newDeps: Set<Int>) {
+    private fun updateDependenciesLocked(
+        nodeId: Int,
+        newDeps: Set<Int>,
+    ) {
         val node = nodes[nodeId] ?: return
-        val old = when (node) {
-            is AsyncNode.Slot -> node.dependencies
-            is AsyncNode.Effect -> node.dependencies
-            is AsyncNode.Cell -> return
-        }
+        val old =
+            when (node) {
+                is AsyncNode.Slot -> node.dependencies
+                is AsyncNode.Effect -> node.dependencies
+                is AsyncNode.Cell -> return
+            }
         for (oldId in old - newDeps) {
             (nodes[oldId] as? AsyncNode.Slot)?.dependents?.remove(nodeId)
             (nodes[oldId] as? AsyncNode.Cell)?.dependents?.remove(nodeId)
@@ -854,7 +914,10 @@ class AsyncContext(
         }
     }
 
-    private fun registerDependencyLocked(dependencyId: Int, dependentId: Int) {
+    private fun registerDependencyLocked(
+        dependencyId: Int,
+        dependentId: Int,
+    ) {
         if (dependencyId == dependentId) return
         (nodes[dependentId] as? AsyncNode.Slot)?.dependencies?.add(dependencyId)
         (nodes[dependentId] as? AsyncNode.Effect)?.dependencies?.add(dependencyId)
@@ -871,57 +934,70 @@ class AsyncContext(
     }
 
     private fun flushEffects() {
-        val ids: List<Int> = locked {
-            val drained = pendingEffects.toList()
-            pendingEffects.clear()
-            scheduledEffects.clear()
-            drained
-        }
+        val ids: List<Int> =
+            locked {
+                val drained = pendingEffects.toList()
+                pendingEffects.clear()
+                scheduledEffects.clear()
+                drained
+            }
         for (id in ids) {
             val plan: Pair<Job?, suspend AsyncComputeContext.() -> (suspend () -> Unit)?>? =
                 locked {
-                    val node = nodes[id] as? AsyncNode.Effect
-                        ?: return@locked null
+                    val node =
+                        nodes[id] as? AsyncNode.Effect
+                            ?: return@locked null
                     if (!node.forceRun) return@locked null
                     node.forceRun = false
                     node.runJob to node.effectFn
                 }
             if (plan == null) continue
             val (prior, effectFn) = plan
-            val runJob = scope.launch {
-                // Serialized per effect: wait for the previous run to settle.
-                prior?.join()
-                val prevCleanup = locked {
-                    val node = nodes[id] as? AsyncNode.Effect
-                    node?.cleanup?.also { node.cleanup = null }
-                }
-                // Cleanup-before-body.
-                if (prevCleanup != null) {
-                    try { prevCleanup() } catch (_: Throwable) {}
-                }
-                if (!isActive) return@launch
-                val deps = LinkedHashSet<Int>()
-                val computeCtx = AsyncComputeContext(this@AsyncContext, id, deps)
-                val newCleanup: (suspend () -> Unit)? = try {
-                    computeCtx.effectFn()
-                } catch (_: Throwable) {
-                    null
-                }
-                var disposed = false
-                locked {
-                    val node = nodes[id] as? AsyncNode.Effect
-                    if (node == null) {
-                        disposed = true
-                    } else {
-                        updateDependenciesLocked(id, deps)
-                        node.cleanup = newCleanup
+            val runJob =
+                scope.launch {
+                    // Serialized per effect: wait for the previous run to settle.
+                    prior?.join()
+                    val prevCleanup =
+                        locked {
+                            val node = nodes[id] as? AsyncNode.Effect
+                            node?.cleanup?.also { node.cleanup = null }
+                        }
+                    // Cleanup-before-body.
+                    if (prevCleanup != null) {
+                        try {
+                            prevCleanup()
+                        } catch (_: Throwable) {
+                        }
+                    }
+                    if (!isActive) return@launch
+                    val deps = LinkedHashSet<Int>()
+                    val computeCtx = AsyncComputeContext(this@AsyncContext, id, deps)
+                    val newCleanup: (suspend () -> Unit)? =
+                        try {
+                            computeCtx.effectFn()
+                        } catch (_: Throwable) {
+                            null
+                        }
+                    var disposed = false
+                    locked {
+                        val node = nodes[id] as? AsyncNode.Effect
+                        if (node == null) {
+                            disposed = true
+                        } else {
+                            updateDependenciesLocked(id, deps)
+                            node.cleanup = newCleanup
+                        }
+                    }
+                    // Disposed mid-run — undo this run's side effects (outside the lock).
+                    if (disposed) {
+                        newCleanup?.let { c ->
+                            try {
+                                c()
+                            } catch (_: Throwable) {
+                            }
+                        }
                     }
                 }
-                // Disposed mid-run — undo this run's side effects (outside the lock).
-                if (disposed) {
-                    newCleanup?.let { c -> try { c() } catch (_: Throwable) {} }
-                }
-            }
             locked {
                 (nodes[id] as? AsyncNode.Effect)?.runJob = runJob
             }
@@ -930,16 +1006,19 @@ class AsyncContext(
 
     /** Snapshot of a slot's state machine, for tests/diagnostics. */
     enum class SlotStateView { Empty, Computing, Resolved, Error, None }
-    fun slotState(handle: AsyncComputed<*>): SlotStateView = locked {
-        val slot = nodes[handle.id] as? AsyncNode.Slot
-            ?: return SlotStateView.None
-        when (slot.state) {
-            is SlotState.Empty -> SlotStateView.Empty
-            is SlotState.Computing -> SlotStateView.Computing
-            is SlotState.Resolved -> SlotStateView.Resolved
-            is SlotState.Error -> SlotStateView.Error
+
+    fun slotState(handle: AsyncComputed<*>): SlotStateView =
+        locked {
+            val slot =
+                nodes[handle.id] as? AsyncNode.Slot
+                    ?: return SlotStateView.None
+            when (slot.state) {
+                is SlotState.Empty -> SlotStateView.Empty
+                is SlotState.Computing -> SlotStateView.Computing
+                is SlotState.Resolved -> SlotStateView.Resolved
+                is SlotState.Error -> SlotStateView.Error
+            }
         }
-    }
 }
 
 /**
@@ -1019,14 +1098,25 @@ private sealed class AsyncNode {
 
 private sealed class SlotState {
     data object Empty : SlotState()
-    data class Computing(val revision: Long) : SlotState()
+
+    data class Computing(
+        val revision: Long,
+    ) : SlotState()
+
     data object Resolved : SlotState()
+
     data object Error : SlotState()
 }
 
 private sealed class Outcome {
-    data class Resolved(val value: Any?) : Outcome()
-    data class Failed(val error: Throwable) : Outcome()
+    data class Resolved(
+        val value: Any?,
+    ) : Outcome()
+
+    data class Failed(
+        val error: Throwable,
+    ) : Outcome()
+
     data object Retry : Outcome()
 }
 
@@ -1086,9 +1176,8 @@ class AsyncTeardownScope internal constructor(
     fun <T : Any> cell(value: T): AsyncContext.AsyncSource<T> = source(value)
 
     /** An async computed slot owned by this scope. */
-    fun <T : Any> computedAsync(
-        compute: suspend AsyncComputeContext.() -> T,
-    ): AsyncContext.AsyncComputed<T> = adopt(ctx.computedAsync(compute))
+    fun <T : Any> computedAsync(compute: suspend AsyncComputeContext.() -> T): AsyncContext.AsyncComputed<T> =
+        adopt(ctx.computedAsync(compute))
 
     /** An async memoized slot owned by this scope. */
     fun <T : Any> memoAsync(
@@ -1097,9 +1186,8 @@ class AsyncTeardownScope internal constructor(
     ): AsyncContext.AsyncComputed<T> = adopt(ctx.memoAsync(equals, compute))
 
     /** An async effect owned by this scope. */
-    fun effectAsync(
-        effect: suspend AsyncComputeContext.() -> (suspend () -> Unit)?,
-    ): AsyncContext.AsyncEffectHandle = adopt(ctx.effectAsync(effect))
+    fun effectAsync(effect: suspend AsyncComputeContext.() -> (suspend () -> Unit)?): AsyncContext.AsyncEffectHandle =
+        adopt(ctx.effectAsync(effect))
 
     /** Cancel this scope's teardown. See `TeardownScope.disarm`. */
     fun disarm() {
@@ -1121,6 +1209,5 @@ class AsyncTeardownScope internal constructor(
         owned.clear()
     }
 
-    override fun toString(): String =
-        if (ended) "AsyncTeardownScope(ended)" else "AsyncTeardownScope(${owned.size} owned)"
+    override fun toString(): String = if (ended) "AsyncTeardownScope(ended)" else "AsyncTeardownScope(${owned.size} owned)"
 }

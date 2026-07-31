@@ -20,7 +20,10 @@ package io.github.lazily
  * A shared fold `(node value, children derived) -> derived`.
  */
 fun interface SemFold<V, D> {
-    fun fold(nodeValue: V, childDeriveds: List<D>): D
+    fun fold(
+        nodeValue: V,
+        childDeriveds: List<D>,
+    ): D
 }
 
 /** Read a slot via the non-reified internal accessor (returns [Any]). */
@@ -30,8 +33,7 @@ fun interface SemFold<V, D> {
 private fun ComputeOps.slotValue(id: Int): Any = getSlotAny(id)
 
 /** Allocate a memo slot over [compute] without a reified type parameter. */
-private fun Context.allocSemSlot(compute: Compute.() -> Any?): Computed<Any> =
-    Computed(slotAny(compute))
+private fun Context.allocSemSlot(compute: Compute.() -> Any?): Computed<Any> = Computed(slotAny(compute))
 
 /**
  * A memoized semantic derivation over a [SourceTree]: one `memo` slot per node,
@@ -57,7 +59,10 @@ class SemTree<K : Any, D : Any> private constructor(
     fun node(id: K): Computed<@UnsafeVariance D>? = nodes[id]?.let { Computed(it) }
 
     /** Read the derived value at a node id, if present (reactive). */
-    fun nodeValue(ops: ComputeOps, id: K): D? {
+    fun nodeValue(
+        ops: ComputeOps,
+        id: K,
+    ): D? {
         val slotId = nodes[id] ?: return null
         @Suppress("UNCHECKED_CAST")
         return ops.slotValue(slotId) as D
@@ -105,21 +110,23 @@ class SemTree<K : Any, D : Any> private constructor(
                 nodes[c] = s
                 childSlots[c] = s
             }
-            val slot = ctx.allocSemSlot {
-                // Value-threaded tracked reads (#lzcellkernel): every read below
-                // goes through the [Compute] receiver, so the memo slot subscribes
-                // to this node's value cell, its child order slot, and each child
-                // memo slot — attributed to the memo slot being recomputed, not an
-                // ambient frame.
-                @Suppress("UNCHECKED_CAST")
-                val v = getCellAny(tree.value(nodeId).id) as V // subscribe to this node's value cell
-                val orderSlot = tree.children(nodeId).keys()
-                val ids = slotValue(orderSlot.id) as List<*>
-                @Suppress("UNCHECKED_CAST")
-                val ds = ArrayList<Any?>(ids.size)
-                for (id in ids) childSlots[id]?.let { ds.add(slotValue(it)) }
-                fold.fold(v, ds as List<D>) as Any
-            }
+            val slot =
+                ctx.allocSemSlot {
+                    // Value-threaded tracked reads (#lzcellkernel): every read below
+                    // goes through the [Compute] receiver, so the memo slot subscribes
+                    // to this node's value cell, its child order slot, and each child
+                    // memo slot — attributed to the memo slot being recomputed, not an
+                    // ambient frame.
+                    @Suppress("UNCHECKED_CAST")
+                    val v = getCellAny(tree.value(nodeId).id) as V // subscribe to this node's value cell
+                    val orderSlot = tree.children(nodeId).keys()
+                    val ids = slotValue(orderSlot.id) as List<*>
+
+                    @Suppress("UNCHECKED_CAST")
+                    val ds = ArrayList<Any?>(ids.size)
+                    for (id in ids) childSlots[id]?.let { ds.add(slotValue(it)) }
+                    fold.fold(v, ds as List<D>) as Any
+                }
             return slot.id
         }
     }

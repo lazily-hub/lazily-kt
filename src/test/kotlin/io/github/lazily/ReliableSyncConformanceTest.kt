@@ -1,7 +1,5 @@
 package io.github.lazily
 
-import java.nio.file.Files
-import java.nio.file.Path
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -12,6 +10,8 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
+import java.nio.file.Files
+import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -43,11 +43,16 @@ class ReliableSyncConformanceTest {
      * carries on disk. [file] is threaded through because the ledger is keyed by
      * spec-relative fixture path, exactly as the fixture manifest is.
      */
-    private fun scenario(file: String, fx: JsonObject, name: String): JsonObject =
-        ConformanceScenarios.pick("reliable-sync/$file", fx, name)
+    private fun scenario(
+        file: String,
+        fx: JsonObject,
+        name: String,
+    ): JsonObject = ConformanceScenarios.pick("reliable-sync/$file", fx, name)
 
     private fun JsonObject.long(key: String): Long = this[key]!!.jsonPrimitive.long
+
     private fun JsonObject.bool(key: String): Boolean = this[key]!!.jsonPrimitive.boolean
+
     private fun msg(el: JsonElement): IpcMessage = IpcMessage.fromJson(el)
 
     /**
@@ -60,7 +65,9 @@ class ReliableSyncConformanceTest {
      * receiver those keys are unreadable, which is exactly why they went
      * unconsumed (#lzassertunknownkeys).
      */
-    private class Receiver(startEpoch: Long) {
+    private class Receiver(
+        startEpoch: Long,
+    ) {
         val coord = ResyncCoordinator(startEpoch)
         val nodes = sortedMapOf<Long, List<Int>>()
 
@@ -83,11 +90,12 @@ class ReliableSyncConformanceTest {
 
         fun apply(delta: Delta) {
             for (op in delta.ops) {
-                val (node, payload) = when (op) {
-                    is DeltaOp.CellSet -> op.node to op.payload
-                    is DeltaOp.SlotValue -> op.node to op.payload
-                    else -> continue
-                }
+                val (node, payload) =
+                    when (op) {
+                        is DeltaOp.CellSet -> op.node to op.payload
+                        is DeltaOp.SlotValue -> op.node to op.payload
+                        else -> continue
+                    }
                 val inline = payload as? IpcValue.Inline ?: continue
                 nodes[node] = inline.bytes.map { it.toInt() and 0xff }
             }
@@ -98,9 +106,10 @@ class ReliableSyncConformanceTest {
 
     /** `{"1": [10]}` -> `{1L: [10]}`, the fixtures' node-state spelling. */
     private fun nodeState(el: JsonElement): Map<Long, List<Int>> =
-        el.jsonObject.entries.associate { (k, v) ->
-            k.toLong() to v.jsonArray.map { it.jsonPrimitive.int }
-        }.toSortedMap()
+        el.jsonObject.entries
+            .associate { (k, v) ->
+                k.toLong() to v.jsonArray.map { it.jsonPrimitive.int }
+            }.toSortedMap()
 
     // -- control-frame serde round-trip -------------------------------------
 
@@ -179,14 +188,14 @@ class ReliableSyncConformanceTest {
     }
 
     /** The externally-tagged `Delta` envelope the fixtures store bare. */
-    private fun buildDeltaWire(delta: JsonObject): JsonElement =
-        buildJsonObject { put("Delta", delta) }
+    private fun buildDeltaWire(delta: JsonObject): JsonElement = buildJsonObject { put("Delta", delta) }
 
-    private fun actionName(action: ResyncAction): String = when (action) {
-        is ResyncAction.Apply -> "Apply"
-        is ResyncAction.Ignore -> "Ignore"
-        is ResyncAction.RequestSnapshot -> "RequestSnapshot"
-    }
+    private fun actionName(action: ResyncAction): String =
+        when (action) {
+            is ResyncAction.Apply -> "Apply"
+            is ResyncAction.Ignore -> "Ignore"
+            is ResyncAction.RequestSnapshot -> "RequestSnapshot"
+        }
 
     // -- resync_gap_converge.json -------------------------------------------
 
@@ -226,13 +235,15 @@ class ReliableSyncConformanceTest {
             // The real content of the claim is that nothing stale survived the
             // resync and nothing the drop cost is still missing.
             e.assertBoolean("equals_no_drop_receiver") {
-                val snapshot = sc["inbound"]!!.jsonArray
-                    .map { it.jsonObject }
-                    .mapNotNull { it["frame"] }
-                    .map { msg(it) }
-                    .filterIsInstance<IpcMessage.SnapshotMessage>()
-                    .lastOrNull()
-                    ?: error("equals_no_drop_receiver needs a resync Snapshot in `inbound`")
+                val snapshot =
+                    sc["inbound"]!!
+                        .jsonArray
+                        .map { it.jsonObject }
+                        .mapNotNull { it["frame"] }
+                        .map { msg(it) }
+                        .filterIsInstance<IpcMessage.SnapshotMessage>()
+                        .lastOrNull()
+                        ?: error("equals_no_drop_receiver needs a resync Snapshot in `inbound`")
                 val noDrop = Receiver(sc.long("start_last_epoch"))
                 noDrop.fold(snapshot)
                 noDrop.state() == recv.state()
@@ -281,7 +292,9 @@ class ReliableSyncConformanceTest {
 
     // -- a reference file-backed DurableOutbox (crash-replay test helper) ----
 
-    private class FileOutbox(private val path: Path) : DurableOutbox {
+    private class FileOutbox(
+        private val path: Path,
+    ) : DurableOutbox {
         private var ackedThrough = 0L
 
         init {
@@ -289,15 +302,19 @@ class ReliableSyncConformanceTest {
         }
 
         private fun readAll(): List<Pair<Long, IpcMessage>> =
-            Files.readString(path).lineSequence()
+            Files
+                .readString(path)
+                .lineSequence()
                 .filter { it.isNotBlank() }
                 .map { line ->
                     val arr = Json.parseToJsonElement(line).jsonArray
                     arr[0].jsonPrimitive.long to IpcMessage.fromJson(arr[1])
-                }
-                .toList()
+                }.toList()
 
-        override fun append(epoch: Long, msg: IpcMessage) {
+        override fun append(
+            epoch: Long,
+            msg: IpcMessage,
+        ) {
             val line = "[$epoch,${msg.toJson()}]\n"
             Files.writeString(path, line, java.nio.file.StandardOpenOption.APPEND)
         }
@@ -308,13 +325,15 @@ class ReliableSyncConformanceTest {
             Files.writeString(path, retained.joinToString("") { "[${it.first},${it.second.toJson()}]\n" })
         }
 
-        override fun replayFrom(cursor: Long): List<Pair<Long, IpcMessage>> =
-            readAll().filter { it.first > cursor }.sortedBy { it.first }
+        override fun replayFrom(cursor: Long): List<Pair<Long, IpcMessage>> = readAll().filter { it.first > cursor }.sortedBy { it.first }
 
         override fun retainedEpochs(): List<Long> = readAll().map { it.first }.sorted()
     }
 
-    private fun frames(sc: JsonObject, key: String): List<Pair<Long, IpcMessage>> =
+    private fun frames(
+        sc: JsonObject,
+        key: String,
+    ): List<Pair<Long, IpcMessage>> =
         sc[key]!!.jsonArray.map {
             val e = it.jsonObject
             e.long("epoch") to IpcMessage.fromJson(e["frame"]!!)
@@ -403,8 +422,7 @@ class ReliableSyncConformanceTest {
 
     // -- liveness_orset_lww.json --------------------------------------------
 
-    private fun stamp(o: JsonObject): WireStamp =
-        WireStamp(o.long("wall_time"), o.long("logical"), o.long("peer"))
+    private fun stamp(o: JsonObject): WireStamp = WireStamp(o.long("wall_time"), o.long("logical"), o.long("peer"))
 
     @Test
     fun livenessOrSetLww() {
@@ -412,14 +430,16 @@ class ReliableSyncConformanceTest {
 
         val add = scenario("liveness_orset_lww.json", fx, "open_set_add_wins_over_stale_remove")
         val addOps = add["ops"]!!.jsonArray.map { it.jsonObject }
-        fun replayOrSet(ops: List<JsonObject>): OrSet = OrSet().also { s ->
-            for (op in ops) {
-                when (op["op"]!!.jsonPrimitive.content) {
-                    "add" -> s.add(op["tag"]!!.jsonPrimitive.content)
-                    "remove" -> s.removeObserved(op["observed_tags"]!!.jsonArray.map { it.jsonPrimitive.content })
+
+        fun replayOrSet(ops: List<JsonObject>): OrSet =
+            OrSet().also { s ->
+                for (op in ops) {
+                    when (op["op"]!!.jsonPrimitive.content) {
+                        "add" -> s.add(op["tag"]!!.jsonPrimitive.content)
+                        "remove" -> s.removeObserved(op["observed_tags"]!!.jsonArray.map { it.jsonPrimitive.content })
+                    }
                 }
             }
-        }
         val set = replayOrSet(addOps)
         add["expect"]!!.jsonObject.consuming("liveness_orset_lww.json[open_set_add_wins] expect") { e ->
             e.assertBoolean("present") { set.present() }
@@ -450,11 +470,16 @@ class ReliableSyncConformanceTest {
             // the op stream so the prose and the fixture cannot drift apart.
             e.assertKeyWith("reason") { el ->
                 val reason = el.jsonPrimitive.content
-                val tag = Regex("add_tag_(\\w+?)_not_observed_by_remove").find(reason)
-                    ?.groupValues?.get(1)
-                    ?: error("unsupported reason spelling '$reason'")
-                val observed = addOps.filter { it["op"]!!.jsonPrimitive.content == "remove" }
-                    .flatMap { it["observed_tags"]!!.jsonArray.map { t -> t.jsonPrimitive.content } }
+                val tag =
+                    Regex("add_tag_(\\w+?)_not_observed_by_remove")
+                        .find(reason)
+                        ?.groupValues
+                        ?.get(1)
+                        ?: error("unsupported reason spelling '$reason'")
+                val observed =
+                    addOps
+                        .filter { it["op"]!!.jsonPrimitive.content == "remove" }
+                        .flatMap { it["observed_tags"]!!.jsonArray.map { t -> t.jsonPrimitive.content } }
                 assertTrue(
                     addOps.any { it["tag"]?.jsonPrimitive?.content == tag },
                     "reason names tag '$tag' which no add op carries",
@@ -465,6 +490,7 @@ class ReliableSyncConformanceTest {
 
         val lww = scenario("liveness_orset_lww.json", fx, "lww_alive_highest_stamp_wins")
         val ops = lww["ops"]!!.jsonArray.map { it.jsonObject }
+
         fun replayLww(seq: List<JsonObject>): WireLwwRegister<Boolean> {
             val r = WireLwwRegister(stamp(seq[0]["stamp"]!!.jsonObject), seq[0].bool("value"))
             for (op in seq.drop(1)) r.set(stamp(op["stamp"]!!.jsonObject), op.bool("value"))
@@ -479,33 +505,46 @@ class ReliableSyncConformanceTest {
             e.assertKeyWith("resolution") { el ->
                 val rule = el.jsonPrimitive.content
                 assertEquals("max_stamp", rule, "unsupported resolution rule '$rule'")
-                val winner = ops.maxWithOrNull(
-                    compareBy<JsonObject>(
-                        { it["stamp"]!!.jsonObject.long("wall_time") },
-                        { it["stamp"]!!.jsonObject.long("logical") },
-                        { it["stamp"]!!.jsonObject.long("peer") },
-                    ),
-                )!!
+                val winner =
+                    ops.maxWithOrNull(
+                        compareBy<JsonObject>(
+                            { it["stamp"]!!.jsonObject.long("wall_time") },
+                            { it["stamp"]!!.jsonObject.long("logical") },
+                            { it["stamp"]!!.jsonObject.long("peer") },
+                        ),
+                    )!!
                 assertEquals(winner.bool("value"), reg.value, "resolution=max_stamp")
             }
         }
 
         val death = scenario("liveness_orset_lww.json", fx, "whole_editor_death_cascades")
-        val open = death["open_set"]!!.jsonArray.map { it.jsonObject }
-            .filter { it.bool("present") }
-            .map {
-                val (doc, pid) = it["key"]!!.jsonPrimitive.content.split("/")
-                doc to pid.removePrefix("pid").toLong()
-            }
+        val open =
+            death["open_set"]!!
+                .jsonArray
+                .map { it.jsonObject }
+                .filter { it.bool("present") }
+                .map {
+                    val (doc, pid) = it["key"]!!.jsonPrimitive.content.split("/")
+                    doc to pid.removePrefix("pid").toLong()
+                }
         val alive = mutableMapOf<Long, WireLwwRegister<Boolean>>()
         for ((pid, v) in death["alive_before"]!!.jsonObject) {
             alive[pid.toLong()] = WireLwwRegister(WireStamp(1, 0, 1), v.jsonPrimitive.boolean)
         }
+
         fun liveDocs(): List<String> =
-            open.filter { (_, p) -> alive[p]?.value == true }.map { it.first }.distinct().sorted()
+            open
+                .filter { (_, p) -> alive[p]?.value == true }
+                .map { it.first }
+                .distinct()
+                .sorted()
         val liveBefore = liveDocs()
         val op = death["op"]!!.jsonObject
-        val pid = op["key"]!!.jsonPrimitive.content.removePrefix("alive/pid").toLong()
+        val pid =
+            op["key"]!!
+                .jsonPrimitive.content
+                .removePrefix("alive/pid")
+                .toLong()
         alive[pid]!!.set(stamp(op["stamp"]!!.jsonObject), op.bool("value"))
         val liveAfter = liveDocs()
         death["expect"]!!.jsonObject.consuming("liveness_orset_lww.json[death_cascades] expect") { e ->
@@ -527,6 +566,7 @@ class ReliableSyncConformanceTest {
         // skipped entirely, so all four of its keys were unevaluated.
         val agg = scenario("liveness_orset_lww.json", fx, "derived_live_doc_aggregate_converges_under_retry")
         val aggOps = agg["ops"]!!.jsonArray.map { it.jsonObject }
+
         fun aggregate(seq: List<JsonObject>): List<String> {
             val docs = sortedMapOf<String, OrSet>()
             val liveness = mutableMapOf<Long, WireLwwRegister<Boolean>>()
@@ -548,9 +588,11 @@ class ReliableSyncConformanceTest {
                     else -> error("unknown register_kind")
                 }
             }
-            return docs.filter { (doc, set) ->
-                set.present() && owner[doc].orEmpty().any { liveness[it]?.value == true }
-            }.keys.sorted()
+            return docs
+                .filter { (doc, set) ->
+                    set.present() && owner[doc].orEmpty().any { liveness[it]?.value == true }
+                }.keys
+                .sorted()
         }
         val forward = aggregate(aggOps)
         agg["expect"]!!.jsonObject.consuming("liveness_orset_lww.json[aggregate] expect") { e ->

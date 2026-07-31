@@ -12,7 +12,8 @@ import kotlin.test.assertTrue
  * and [ThreadSafeStateChart] (chart over [ThreadSafeContext]).
  */
 class StateChartBuilderVariantTest {
-    private val jsonSrc = """
+    private val jsonSrc =
+        """
         {
           "initial": "root",
           "states": {
@@ -25,7 +26,7 @@ class StateChartBuilderVariantTest {
             "down": { "parent": "net", "on": { "restore": { "target": "up" } } }
           }
         }
-    """.trimIndent()
+        """.trimIndent()
 
     private fun jsonChart(): ChartDef = ChartDef.fromJson(Json.parseToJsonElement(jsonSrc))
 

@@ -44,6 +44,12 @@ jobs:
           test -f ../lazily-spec/conformance/reactive-graph/transitive_invalidation_reaches_depth.json || { echo "::error::reactive-graph/transitive_invalidation_reaches_depth.json missing — the invalidation-cascade replay across the sync/thread-safe/async contexts would not run"; exit 1; }
           test -f ../lazily-spec/schemas/agent-doc-state.json || { echo "::error::schemas/agent-doc-state.json missing — the type_tag vocabulary check would not run"; exit 1; }
 
+      # The formatting gate (#lazilyformattinggate). Before Build, because a
+      # formatting failure should be the cheapest signal in the job rather than
+      # something a contributor waits through a full compile to discover.
+      - name: Format gate (make fmt)
+        run: make fmt
+
       - name: Build
         run: ./gradlew build --no-daemon
 

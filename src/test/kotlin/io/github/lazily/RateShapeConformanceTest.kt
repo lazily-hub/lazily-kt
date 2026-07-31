@@ -1,7 +1,5 @@
 package io.github.lazily
 
-import java.nio.file.Files
-import java.nio.file.Path
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
@@ -32,14 +30,22 @@ class RateShapeConformanceTest {
     }
 
     private fun steps(fx: JsonObject) = fx["steps"]!!.jsonArray
+
     private fun opType(step: JsonObject) = step["op"]!!.jsonObject["type"]!!.jsonPrimitive.content
+
     private fun opNow(step: JsonObject) = step["op"]!!.jsonObject["now"]!!.jsonPrimitive.long
+
     private fun opVal(step: JsonObject) = step["op"]!!.jsonObject["value"]!!.jsonPrimitive.content
+
     private fun ret(step: JsonObject) = step["returns"]!!.jsonPrimitive.contentOrNull
-    private fun expOutput(step: JsonObject) =
-        step["expected"]!!.jsonObject["output"]!!.jsonPrimitive.contentOrNull
+
+    private fun expOutput(step: JsonObject) = step["expected"]!!.jsonObject["output"]!!.jsonPrimitive.contentOrNull
+
     private fun expInval(step: JsonObject) =
-        step["expected"]!!.jsonObject["invalidates"]!!.jsonObject["output"]!!.jsonPrimitive.boolean
+        step["expected"]!!
+            .jsonObject["invalidates"]!!
+            .jsonObject["output"]!!
+            .jsonPrimitive.boolean
 
     /** Replay a fixture given a per-step driver returning the emitted value. */
     private fun run(
@@ -69,21 +75,28 @@ class RateShapeConformanceTest {
         val cell = DebounceCell<String>(ctx, quiet)
         run(ctx, fx, cell.outputCell, { cell.output() }) { step ->
             if (opType(step) == "input") {
-                cell.input(opNow(step), opVal(step)); null
+                cell.input(opNow(step), opVal(step))
+                null
             } else {
                 cell.tick(opNow(step))
             }
         }
     }
 
-    private fun runThrottle(name: String, edge: ThrottleEdge) {
+    private fun runThrottle(
+        name: String,
+        edge: ThrottleEdge,
+    ) {
         val fx = loadFixture(name)
         val ctx = Context()
         val window = fx["initial"]!!.jsonObject["window"]!!.jsonPrimitive.long
         val cell = ThrottleCell<String>(ctx, edge, window)
         run(ctx, fx, cell.outputCell, { cell.output() }) { step ->
-            if (opType(step) == "input") cell.input(opNow(step), opVal(step))
-            else cell.tick(opNow(step))
+            if (opType(step) == "input") {
+                cell.input(opNow(step), opVal(step))
+            } else {
+                cell.tick(opNow(step))
+            }
         }
     }
 
@@ -108,7 +121,8 @@ class RateShapeConformanceTest {
         val cell = SampleCell<String>(ctx, SampleMode.Time(period))
         run(ctx, fx, cell.outputCell, { cell.output() }) { step ->
             if (opType(step) == "input") {
-                cell.input(opVal(step)); null
+                cell.input(opVal(step))
+                null
             } else {
                 cell.tick(opNow(step))
             }

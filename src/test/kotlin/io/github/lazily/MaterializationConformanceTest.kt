@@ -1,7 +1,5 @@
 package io.github.lazily
 
-import java.nio.file.Files
-import java.nio.file.Path
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -55,15 +53,20 @@ class MaterializationConformanceTest {
         return obj
     }
 
-    private fun strArray(obj: JsonObject, key: String): List<String> =
-        obj.getValue(key).jsonArray.map { it.jsonPrimitive.content }
+    private fun strArray(
+        obj: JsonObject,
+        key: String,
+    ): List<String> = obj.getValue(key).jsonArray.map { it.jsonPrimitive.content }
 
-    private fun strings(el: JsonElement): List<String> =
-        el.jsonArray.map { it.jsonPrimitive.content }
+    private fun strings(el: JsonElement): List<String> = el.jsonArray.map { it.jsonPrimitive.content }
 
     /** Parse a `spec.val` object of key -> canonical value. */
     private fun valSpec(fixture: JsonObject): Map<String, Int> =
-        fixture.getValue("spec").jsonObject.getValue("val").jsonObject
+        fixture
+            .getValue("spec")
+            .jsonObject
+            .getValue("val")
+            .jsonObject
             .mapValues { (_, v) -> v.jsonPrimitive.int }
 
     /**
@@ -201,11 +204,12 @@ class MaterializationConformanceTest {
 
     private fun identityTag(tag: String): String = tag
 
-    private fun v2Tag(tag: String): String = when (tag) {
-        "cell" -> "source"
-        "slot" -> "computed"
-        else -> tag
-    }
+    private fun v2Tag(tag: String): String =
+        when (tag) {
+            "cell" -> "source"
+            "slot" -> "computed"
+            else -> tag
+        }
 
     /** [rewriteKindTag] maps the fixture's raw `kind` tag before it is parsed. */
     private fun replayEntryKindFixture(rewriteKindTag: (String) -> String) {
@@ -215,7 +219,12 @@ class MaterializationConformanceTest {
         // Split declared entries by kind. A single ReactiveMap fixes one handle
         // kind, so a mixed-kind fixture is modelled by a SourceMap over the cell
         // entries and a ComputedMap over the slot entries, sharing one key space.
-        val entries = fixture.getValue("spec").jsonObject.getValue("entries").jsonObject
+        val entries =
+            fixture
+                .getValue("spec")
+                .jsonObject
+                .getValue("entries")
+                .jsonObject
         val cellKeys = mutableListOf<String>()
         val slotKeys = mutableListOf<String>()
         val vals = HashMap<String, Int>()

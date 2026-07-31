@@ -186,7 +186,9 @@ private fun setupThreadSafeBatchStorm(cellsLen: Int): BatchStormFixture {
     val ctx = ThreadSafeContext()
     val cells = (0 until cellsLen).map { idx -> ctx.source(idx.toLong()) }
     val cellsForEffect = cells.toList()
-    val sink = java.util.concurrent.atomic.AtomicLong(0L)
+    val sink =
+        java.util.concurrent.atomic
+            .AtomicLong(0L)
     ctx.effect {
         var total = 0L
         for (cell in cellsForEffect) total += ctx.get(cell as ThreadSafeSource<Long>)
@@ -201,45 +203,53 @@ private fun setupThreadSafeBatchStorm(cellsLen: Int): BatchStormFixture {
 fun benchCachedReads(): List<BenchmarkResult> {
     val group = "cached_reads"
     return listOf(
-        timeOp(Benchmark(group, "context", setup = {
-            val ctx = Context()
-            val root = ctx.source(21L)
-            val doubled = ctx.computed { get(root) * 2L }
-            BlackholeSink.consume(ctx.get(doubled))
-            Triple(ctx, root, doubled)
-        }) { hole, fixture ->
-            val f = fixture as Triple<Context, Source<Long>, Computed<Long>>
-            hole.consume(f.first.get(f.third as Computed<Long>))
-        }),
-        timeOp(Benchmark(group, "thread_safe_context", setup = {
-            val ctx = ThreadSafeContext()
-            val root = ctx.source(21L)
-            val doubled = ctx.computed { ctx.get(root) * 2L }
-            BlackholeSink.consume(ctx.get(doubled))
-            Triple(ctx, root, doubled)
-        }) { hole, fixture ->
-            val f = fixture as Triple<ThreadSafeContext, ThreadSafeSource<Long>, ThreadSafeComputed<Long>>
-            hole.consume(f.first.get(f.third as ThreadSafeComputed<Long>))
-        }),
+        timeOp(
+            Benchmark(group, "context", setup = {
+                val ctx = Context()
+                val root = ctx.source(21L)
+                val doubled = ctx.computed { get(root) * 2L }
+                BlackholeSink.consume(ctx.get(doubled))
+                Triple(ctx, root, doubled)
+            }) { hole, fixture ->
+                val f = fixture as Triple<Context, Source<Long>, Computed<Long>>
+                hole.consume(f.first.get(f.third as Computed<Long>))
+            },
+        ),
+        timeOp(
+            Benchmark(group, "thread_safe_context", setup = {
+                val ctx = ThreadSafeContext()
+                val root = ctx.source(21L)
+                val doubled = ctx.computed { ctx.get(root) * 2L }
+                BlackholeSink.consume(ctx.get(doubled))
+                Triple(ctx, root, doubled)
+            }) { hole, fixture ->
+                val f = fixture as Triple<ThreadSafeContext, ThreadSafeSource<Long>, ThreadSafeComputed<Long>>
+                hole.consume(f.first.get(f.third as ThreadSafeComputed<Long>))
+            },
+        ),
     )
 }
 
 fun benchColdFirstGet(): List<BenchmarkResult> {
     val group = "cold_first_get"
     return listOf(
-        timeOp(Benchmark(group, "context", warmup = 200, samples = 1_000, setup = { 0 }) { hole, _ ->
-            // Per-iteration fresh context + slot (build is part of the op).
-            val ctx = Context()
-            val root = ctx.source(21L)
-            val doubled = ctx.computed { get(root) * 2L }
-            hole.consume(ctx.get(doubled))
-        }),
-        timeOp(Benchmark(group, "thread_safe_context", warmup = 200, samples = 1_000, setup = { 0 }) { hole, _ ->
-            val ctx = ThreadSafeContext()
-            val root = ctx.source(21L)
-            val doubled = ctx.computed { ctx.get(root) * 2L }
-            hole.consume(ctx.get(doubled))
-        }),
+        timeOp(
+            Benchmark(group, "context", warmup = 200, samples = 1_000, setup = { 0 }) { hole, _ ->
+                // Per-iteration fresh context + slot (build is part of the op).
+                val ctx = Context()
+                val root = ctx.source(21L)
+                val doubled = ctx.computed { get(root) * 2L }
+                hole.consume(ctx.get(doubled))
+            },
+        ),
+        timeOp(
+            Benchmark(group, "thread_safe_context", warmup = 200, samples = 1_000, setup = { 0 }) { hole, _ ->
+                val ctx = ThreadSafeContext()
+                val root = ctx.source(21L)
+                val doubled = ctx.computed { ctx.get(root) * 2L }
+                hole.consume(ctx.get(doubled))
+            },
+        ),
     )
 }
 
@@ -247,26 +257,32 @@ fun benchDependencyFanOut(): List<BenchmarkResult> {
     val group = "dependency_fan_out"
     val out = ArrayList<BenchmarkResult>()
     for (width in intArrayOf(FAN_OUT_WIDTH_32, FAN_OUT_WIDTH_256)) {
-        out += timeOp(Benchmark(group, "context/$width", samples = 2_000, setup = {
-            setupContextFanOut(width)
-        }) { hole, fixture ->
-            val f = fixture as FanOutFixture
-            val ctx = f.ctx as Context
-            (f.root as Source<Long>).set(ctx, 1L)
-            var total = 0L
-            for (slot in f.slots) total += ctx.get(slot as Computed<Long>)
-            hole.consume(total)
-        })
-        out += timeOp(Benchmark(group, "thread_safe_context/$width", samples = 2_000, setup = {
-            setupThreadSafeFanOut(width)
-        }) { hole, fixture ->
-            val f = fixture as FanOutFixture
-            val ctx = f.ctx as ThreadSafeContext
-            ctx.set(f.root as ThreadSafeSource<Long>, 1L)
-            var total = 0L
-            for (slot in f.slots) total += ctx.get(slot as ThreadSafeComputed<Long>)
-            hole.consume(total)
-        })
+        out +=
+            timeOp(
+                Benchmark(group, "context/$width", samples = 2_000, setup = {
+                    setupContextFanOut(width)
+                }) { hole, fixture ->
+                    val f = fixture as FanOutFixture
+                    val ctx = f.ctx as Context
+                    (f.root as Source<Long>).set(ctx, 1L)
+                    var total = 0L
+                    for (slot in f.slots) total += ctx.get(slot as Computed<Long>)
+                    hole.consume(total)
+                },
+            )
+        out +=
+            timeOp(
+                Benchmark(group, "thread_safe_context/$width", samples = 2_000, setup = {
+                    setupThreadSafeFanOut(width)
+                }) { hole, fixture ->
+                    val f = fixture as FanOutFixture
+                    val ctx = f.ctx as ThreadSafeContext
+                    ctx.set(f.root as ThreadSafeSource<Long>, 1L)
+                    var total = 0L
+                    for (slot in f.slots) total += ctx.get(slot as ThreadSafeComputed<Long>)
+                    hole.consume(total)
+                },
+            )
     }
     return out
 }
@@ -274,155 +290,187 @@ fun benchDependencyFanOut(): List<BenchmarkResult> {
 fun benchSetCellInvalidation(): List<BenchmarkResult> {
     val group = "set_cell_invalidation"
     return listOf(
-        timeOp(Benchmark(group, "high_fan_out/$SET_CELL_INVALIDATION_FAN_OUT", samples = 1_000, setup = {
-            setupThreadSafeFanOut(SET_CELL_INVALIDATION_FAN_OUT)
-        }) { hole, fixture ->
-            val f = fixture as FanOutFixture
-            val ctx = f.ctx as ThreadSafeContext
-            ctx.set(f.root as ThreadSafeSource<Long>, 1L)
-            hole.consume(f.slots.size)
-        }),
+        timeOp(
+            Benchmark(group, "high_fan_out/$SET_CELL_INVALIDATION_FAN_OUT", samples = 1_000, setup = {
+                setupThreadSafeFanOut(SET_CELL_INVALIDATION_FAN_OUT)
+            }) { hole, fixture ->
+                val f = fixture as FanOutFixture
+                val ctx = f.ctx as ThreadSafeContext
+                ctx.set(f.root as ThreadSafeSource<Long>, 1L)
+                hole.consume(f.slots.size)
+            },
+        ),
     )
 }
 
 fun benchMemoEqualitySuppression(): List<BenchmarkResult> {
     val group = "memo_equality_suppression"
     return listOf(
-        timeOp(Benchmark(group, "context", samples = 5_000, setup = {
-            setupContextMemoChain(MEMO_CHAIN_DEPTH)
-        }) { hole, fixture ->
-            val f = fixture as MemoChainFixture
-            val ctx = f.ctx as Context
-            (f.root as Source<Long>).set(ctx, 2L)
-            hole.consume(ctx.get(f.tail as Computed<Long>))
-        }),
-        timeOp(Benchmark(group, "thread_safe_context", samples = 5_000, setup = {
-            setupThreadSafeMemoChain(MEMO_CHAIN_DEPTH)
-        }) { hole, fixture ->
-            val f = fixture as MemoChainFixture
-            val ctx = f.ctx as ThreadSafeContext
-            ctx.set(f.root as ThreadSafeSource<Long>, 2L)
-            hole.consume(ctx.get(f.tail as ThreadSafeComputed<Long>))
-        }),
+        timeOp(
+            Benchmark(group, "context", samples = 5_000, setup = {
+                setupContextMemoChain(MEMO_CHAIN_DEPTH)
+            }) { hole, fixture ->
+                val f = fixture as MemoChainFixture
+                val ctx = f.ctx as Context
+                (f.root as Source<Long>).set(ctx, 2L)
+                hole.consume(ctx.get(f.tail as Computed<Long>))
+            },
+        ),
+        timeOp(
+            Benchmark(group, "thread_safe_context", samples = 5_000, setup = {
+                setupThreadSafeMemoChain(MEMO_CHAIN_DEPTH)
+            }) { hole, fixture ->
+                val f = fixture as MemoChainFixture
+                val ctx = f.ctx as ThreadSafeContext
+                ctx.set(f.root as ThreadSafeSource<Long>, 2L)
+                hole.consume(ctx.get(f.tail as ThreadSafeComputed<Long>))
+            },
+        ),
     )
 }
 
 fun benchEffectFlushing(): List<BenchmarkResult> {
     val group = "effect_flushing"
     return listOf(
-        timeOp(Benchmark(group, "context", samples = 5_000, setup = {
-            val ctx = Context()
-            val root = ctx.source(0L)
-            val seen = longArrayOf(0L)
-            ctx.effect {
-                seen[0] += get(root)
-                null
-            }
-            Fixture3(ctx, root, seen)
-        }) { hole, fixture ->
-            val f = fixture as Fixture3<Context, Source<Long>, LongArray>
-            val ctx = f.a
-            f.b.set(ctx, f.c[0] + 1L)
-            hole.consume(f.c[0])
-        }),
-        timeOp(Benchmark(group, "thread_safe_context", samples = 5_000, setup = {
-            val ctx = ThreadSafeContext()
-            val root = ctx.source(0L)
-            val seen = java.util.concurrent.atomic.AtomicLong(0L)
-            ctx.effect {
-                seen.addAndGet(ctx.get(root))
-                null
-            }
-            Fixture3(ctx, root, seen)
-        }) { hole, fixture ->
-            val f = fixture as Fixture3<ThreadSafeContext, ThreadSafeSource<Long>, java.util.concurrent.atomic.AtomicLong>
-            val ctx = f.a
-            ctx.set(f.b, f.c.get() + 1L)
-            hole.consume(f.c.get())
-        }),
+        timeOp(
+            Benchmark(group, "context", samples = 5_000, setup = {
+                val ctx = Context()
+                val root = ctx.source(0L)
+                val seen = longArrayOf(0L)
+                ctx.effect {
+                    seen[0] += get(root)
+                    null
+                }
+                Fixture3(ctx, root, seen)
+            }) { hole, fixture ->
+                val f = fixture as Fixture3<Context, Source<Long>, LongArray>
+                val ctx = f.a
+                f.b.set(ctx, f.c[0] + 1L)
+                hole.consume(f.c[0])
+            },
+        ),
+        timeOp(
+            Benchmark(group, "thread_safe_context", samples = 5_000, setup = {
+                val ctx = ThreadSafeContext()
+                val root = ctx.source(0L)
+                val seen =
+                    java.util.concurrent.atomic
+                        .AtomicLong(0L)
+                ctx.effect {
+                    seen.addAndGet(ctx.get(root))
+                    null
+                }
+                Fixture3(ctx, root, seen)
+            }) { hole, fixture ->
+                val f = fixture as Fixture3<ThreadSafeContext, ThreadSafeSource<Long>, java.util.concurrent.atomic.AtomicLong>
+                val ctx = f.a
+                ctx.set(f.b, f.c.get() + 1L)
+                hole.consume(f.c.get())
+            },
+        ),
     )
 }
 
 fun benchBatchStorms(): List<BenchmarkResult> {
     val group = "batch_storms"
     return listOf(
-        timeOp(Benchmark(group, "context/$BATCH_STORM_CELLS", samples = 2_000, setup = {
-            setupContextBatchStorm(BATCH_STORM_CELLS)
-        }) { hole, fixture ->
-            val f = fixture as BatchStormFixture
-            val ctx = f.ctx as Context
-            var base = BATCH_STORM_CELLS.toLong() + 1
-            ctx.batch {
-                for ((offset, cell) in (f.cells as List<Source<Long>>).withIndex()) {
-                    set(cell, base + offset)
+        timeOp(
+            Benchmark(group, "context/$BATCH_STORM_CELLS", samples = 2_000, setup = {
+                setupContextBatchStorm(BATCH_STORM_CELLS)
+            }) { hole, fixture ->
+                val f = fixture as BatchStormFixture
+                val ctx = f.ctx as Context
+                var base = BATCH_STORM_CELLS.toLong() + 1
+                ctx.batch {
+                    for ((offset, cell) in (f.cells as List<Source<Long>>).withIndex()) {
+                        set(cell, base + offset)
+                    }
                 }
-            }
-            hole.consume(f.read())
-            base += BATCH_STORM_CELLS
-        }),
-        timeOp(Benchmark(group, "thread_safe_context/$BATCH_STORM_CELLS", samples = 2_000, setup = {
-            setupThreadSafeBatchStorm(BATCH_STORM_CELLS)
-        }) { hole, fixture ->
-            val f = fixture as BatchStormFixture
-            val ctx = f.ctx as ThreadSafeContext
-            var base = BATCH_STORM_CELLS.toLong() + 1
-            ctx.batch {
-                for ((offset, cell) in (f.cells as List<ThreadSafeSource<Long>>).withIndex()) {
-                    set(cell, base + offset)
+                hole.consume(f.read())
+                base += BATCH_STORM_CELLS
+            },
+        ),
+        timeOp(
+            Benchmark(group, "thread_safe_context/$BATCH_STORM_CELLS", samples = 2_000, setup = {
+                setupThreadSafeBatchStorm(BATCH_STORM_CELLS)
+            }) { hole, fixture ->
+                val f = fixture as BatchStormFixture
+                val ctx = f.ctx as ThreadSafeContext
+                var base = BATCH_STORM_CELLS.toLong() + 1
+                ctx.batch {
+                    for ((offset, cell) in (f.cells as List<ThreadSafeSource<Long>>).withIndex()) {
+                        set(cell, base + offset)
+                    }
                 }
-            }
-            hole.consume(f.read())
-            base += BATCH_STORM_CELLS
-        }),
+                hole.consume(f.read())
+                base += BATCH_STORM_CELLS
+            },
+        ),
     )
 }
 
 fun benchTypedCacheReads(): List<BenchmarkResult> {
     val group = "typed_cache_reads"
     return listOf(
-        timeOp(Benchmark(group, "context_slot", setup = {
-            val ctx = Context()
-            val cell = ctx.source(42L)
-            val slot = ctx.computed { get(cell) }
-            BlackholeSink.consume(ctx.get(slot))
-            Fixture2(ctx, slot)
-        }) { hole, fixture ->
-            val f = fixture as Fixture2<Context, Computed<Long>>
-            hole.consume(f.a.get(f.b))
-        }),
-        timeOp(Benchmark(group, "context_cell", setup = {
-            val ctx = Context()
-            val cell = ctx.source(99L)
-            Fixture2(ctx, cell)
-        }) { hole, fixture ->
-            val f = fixture as Fixture2<Context, Source<Long>>
-            hole.consume(f.a.get(f.b))
-        }),
-        timeOp(Benchmark(group, "thread_safe_slot", setup = {
-            val ctx = ThreadSafeContext()
-            val cell = ctx.source(42L)
-            val slot = ctx.computed { ctx.get(cell) }
-            BlackholeSink.consume(ctx.get(slot))
-            Fixture2(ctx, slot)
-        }) { hole, fixture ->
-            val f = fixture as Fixture2<ThreadSafeContext, ThreadSafeComputed<Long>>
-            hole.consume(f.a.get(f.b))
-        }),
-        timeOp(Benchmark(group, "thread_safe_cell", setup = {
-            val ctx = ThreadSafeContext()
-            val cell = ctx.source(99L)
-            Fixture2(ctx, cell)
-        }) { hole, fixture ->
-            val f = fixture as Fixture2<ThreadSafeContext, ThreadSafeSource<Long>>
-            hole.consume(f.a.get(f.b))
-        }),
+        timeOp(
+            Benchmark(group, "context_slot", setup = {
+                val ctx = Context()
+                val cell = ctx.source(42L)
+                val slot = ctx.computed { get(cell) }
+                BlackholeSink.consume(ctx.get(slot))
+                Fixture2(ctx, slot)
+            }) { hole, fixture ->
+                val f = fixture as Fixture2<Context, Computed<Long>>
+                hole.consume(f.a.get(f.b))
+            },
+        ),
+        timeOp(
+            Benchmark(group, "context_cell", setup = {
+                val ctx = Context()
+                val cell = ctx.source(99L)
+                Fixture2(ctx, cell)
+            }) { hole, fixture ->
+                val f = fixture as Fixture2<Context, Source<Long>>
+                hole.consume(f.a.get(f.b))
+            },
+        ),
+        timeOp(
+            Benchmark(group, "thread_safe_slot", setup = {
+                val ctx = ThreadSafeContext()
+                val cell = ctx.source(42L)
+                val slot = ctx.computed { ctx.get(cell) }
+                BlackholeSink.consume(ctx.get(slot))
+                Fixture2(ctx, slot)
+            }) { hole, fixture ->
+                val f = fixture as Fixture2<ThreadSafeContext, ThreadSafeComputed<Long>>
+                hole.consume(f.a.get(f.b))
+            },
+        ),
+        timeOp(
+            Benchmark(group, "thread_safe_cell", setup = {
+                val ctx = ThreadSafeContext()
+                val cell = ctx.source(99L)
+                Fixture2(ctx, cell)
+            }) { hole, fixture ->
+                val f = fixture as Fixture2<ThreadSafeContext, ThreadSafeSource<Long>>
+                hole.consume(f.a.get(f.b))
+            },
+        ),
     )
 }
 
 // Typed mutable 2/3-tuples so fixtures survive the Any? boundary without casts
 // losing component types (avoids @Suppress-on-destructuring issues).
-private class Fixture2<A, B>(val a: A, val b: B)
-private class Fixture3<A, B, C>(val a: A, val b: B, val c: C)
+private class Fixture2<A, B>(
+    val a: A,
+    val b: B,
+)
+
+private class Fixture3<A, B, C>(
+    val a: A,
+    val b: B,
+    val c: C,
+)
 
 // -- Thread-safe contention (parity with lazily-rs thread_safe_contention) ---
 
@@ -431,13 +479,16 @@ private fun runWorkersWithBarrier(
     body: (workerIdx: Int, sink: java.util.concurrent.atomic.AtomicLong) -> Unit,
 ): Long {
     val barrier = java.util.concurrent.CyclicBarrier(workers)
-    val sink = java.util.concurrent.atomic.AtomicLong(0L)
-    val threads = (0 until workers).map { workerIdx ->
-        Thread {
-            barrier.await()
-            body(workerIdx, sink)
-        }.also { it.isDaemon = true }
-    }
+    val sink =
+        java.util.concurrent.atomic
+            .AtomicLong(0L)
+    val threads =
+        (0 until workers).map { workerIdx ->
+            Thread {
+                barrier.await()
+                body(workerIdx, sink)
+            }.also { it.isDaemon = true }
+        }
     for (t in threads) t.start()
     for (t in threads) t.join()
     return sink.get()
@@ -494,17 +545,19 @@ private fun runThreadSafeReadMostlyContention(workers: Int): Long {
 
 private fun runThreadSafeBatchedWriteBursts(workers: Int): Long {
     val ctx = ThreadSafeContext()
-    val workerCells = (0 until workers).map { worker ->
-        (0 until CONTENTION_BATCH_CELLS_PER_WORKER).map { offset ->
-            ctx.source((worker * CONTENTION_BATCH_CELLS_PER_WORKER + offset).toLong())
+    val workerCells =
+        (0 until workers).map { worker ->
+            (0 until CONTENTION_BATCH_CELLS_PER_WORKER).map { offset ->
+                ctx.source((worker * CONTENTION_BATCH_CELLS_PER_WORKER + offset).toLong())
+            }
         }
-    }
     val allCells = workerCells.flatten()
-    val total = ctx.computed {
-        var sum = 0L
-        for (cell in allCells) sum += ctx.get(cell)
-        sum
-    }
+    val total =
+        ctx.computed {
+            var sum = 0L
+            for (cell in allCells) sum += ctx.get(cell)
+            sum
+        }
     BlackholeSink.consume(ctx.get(total))
     return runWorkersWithBarrier(workers) { workerIdx, sink ->
         val cells = workerCells[workerIdx]
@@ -525,17 +578,21 @@ private fun runThreadSafeBatchedWriteBursts(workers: Int): Long {
 fun benchThreadSafeContention(): List<BenchmarkResult> {
     val group = "thread_safe_contention"
     val out = ArrayList<BenchmarkResult>()
-    val cases = listOf(
-        "same_slot_write_read" to { w: Int -> runThreadSafeSameSlotContention(w) },
-        "independent_slots" to { w: Int -> runThreadSafeIndependentSlotContention(w) },
-        "read_mostly_waiters" to { w: Int -> runThreadSafeReadMostlyContention(w) },
-        "batched_write_bursts" to { w: Int -> runThreadSafeBatchedWriteBursts(w) },
-    )
+    val cases =
+        listOf(
+            "same_slot_write_read" to { w: Int -> runThreadSafeSameSlotContention(w) },
+            "independent_slots" to { w: Int -> runThreadSafeIndependentSlotContention(w) },
+            "read_mostly_waiters" to { w: Int -> runThreadSafeReadMostlyContention(w) },
+            "batched_write_bursts" to { w: Int -> runThreadSafeBatchedWriteBursts(w) },
+        )
     for ((name, runner) in cases) {
         for (workers in THREAD_WORKERS) {
-            out += timeOp(Benchmark(group, "$name/$workers", warmup = 200, samples = 30) { hole, _ ->
-                hole.consume(runner(workers))
-            })
+            out +=
+                timeOp(
+                    Benchmark(group, "$name/$workers", warmup = 200, samples = 30) { hole, _ ->
+                        hole.consume(runner(workers))
+                    },
+                )
         }
     }
     return out
@@ -547,14 +604,19 @@ fun benchEffectContention(): List<BenchmarkResult> {
 
     fun queueCoalescing(workers: Int): Long {
         val ctx = ThreadSafeContext()
-        val workerCells = (0 until workers).map { worker ->
-            (0 until CONTENTION_BATCH_CELLS_PER_WORKER).map { offset ->
-                ctx.source((worker * CONTENTION_BATCH_CELLS_PER_WORKER + offset).toLong())
+        val workerCells =
+            (0 until workers).map { worker ->
+                (0 until CONTENTION_BATCH_CELLS_PER_WORKER).map { offset ->
+                    ctx.source((worker * CONTENTION_BATCH_CELLS_PER_WORKER + offset).toLong())
+                }
             }
-        }
         val allCells = workerCells.flatten()
-        val sink = java.util.concurrent.atomic.AtomicLong(0L)
-        val runs = java.util.concurrent.atomic.AtomicLong(0L)
+        val sink =
+            java.util.concurrent.atomic
+                .AtomicLong(0L)
+        val runs =
+            java.util.concurrent.atomic
+                .AtomicLong(0L)
         ctx.effect {
             runs.incrementAndGet()
             var total = 0L
@@ -581,43 +643,53 @@ fun benchEffectContention(): List<BenchmarkResult> {
     fun cleanupExecution(workers: Int): Long {
         val ctx = ThreadSafeContext()
         val cells = (0 until workers).map { ctx.source(it.toLong()) }
-        val sink = java.util.concurrent.atomic.AtomicLong(0L)
-        val cleanups = java.util.concurrent.atomic.AtomicLong(0L)
-        val effect = ctx.effect {
-            var total = 0L
-            for (cell in cells) total += ctx.get(cell)
-            sink.set(total)
-            val localCleanups = cleanups
-            { localCleanups.incrementAndGet() }
-        }
-        val total = runWorkersWithBarrier(workers) { workerIdx, acc ->
-            val cell = cells[workerIdx]
-            var sum = 0L
-            for (iter in 0 until CONTENTION_ITERS_PER_WORKER) {
-                val next = (workerIdx * CONTENTION_ITERS_PER_WORKER + iter).toLong()
-                ctx.set(cell, next)
-                sum += sink.get() + cleanups.get()
+        val sink =
+            java.util.concurrent.atomic
+                .AtomicLong(0L)
+        val cleanups =
+            java.util.concurrent.atomic
+                .AtomicLong(0L)
+        val effect =
+            ctx.effect {
+                var total = 0L
+                for (cell in cells) total += ctx.get(cell)
+                sink.set(total)
+                val localCleanups = cleanups
+                { localCleanups.incrementAndGet() }
             }
-            acc.addAndGet(sum)
-        }
+        val total =
+            runWorkersWithBarrier(workers) { workerIdx, acc ->
+                val cell = cells[workerIdx]
+                var sum = 0L
+                for (iter in 0 until CONTENTION_ITERS_PER_WORKER) {
+                    val next = (workerIdx * CONTENTION_ITERS_PER_WORKER + iter).toLong()
+                    ctx.set(cell, next)
+                    sum += sink.get() + cleanups.get()
+                }
+                acc.addAndGet(sum)
+            }
         ctx.disposeEffect(effect)
         return total + cleanups.get()
     }
 
     fun batchFlush(workers: Int): Long {
         val ctx = ThreadSafeContext()
-        val workerCells = (0 until workers).map { worker ->
-            (0 until CONTENTION_BATCH_CELLS_PER_WORKER).map { offset ->
-                ctx.source((worker * CONTENTION_BATCH_CELLS_PER_WORKER + offset).toLong())
+        val workerCells =
+            (0 until workers).map { worker ->
+                (0 until CONTENTION_BATCH_CELLS_PER_WORKER).map { offset ->
+                    ctx.source((worker * CONTENTION_BATCH_CELLS_PER_WORKER + offset).toLong())
+                }
             }
-        }
         val allCells = workerCells.flatten()
-        val total = ctx.computed {
-            var sum = 0L
-            for (cell in allCells) sum += ctx.get(cell)
-            sum
-        }
-        val sink = java.util.concurrent.atomic.AtomicLong(0L)
+        val total =
+            ctx.computed {
+                var sum = 0L
+                for (cell in allCells) sum += ctx.get(cell)
+                sum
+            }
+        val sink =
+            java.util.concurrent.atomic
+                .AtomicLong(0L)
         ctx.effect {
             sink.set(ctx.get(total))
             null
@@ -648,16 +720,20 @@ fun benchEffectContention(): List<BenchmarkResult> {
         }
     }
 
-    val cases = listOf(
-        "queue_coalescing" to ::queueCoalescing,
-        "cleanup_execution" to ::cleanupExecution,
-        "batch_flush" to ::batchFlush,
-    )
+    val cases =
+        listOf(
+            "queue_coalescing" to ::queueCoalescing,
+            "cleanup_execution" to ::cleanupExecution,
+            "batch_flush" to ::batchFlush,
+        )
     for ((name, runner) in cases) {
         for (workers in EFFECT_THREAD_WORKERS) {
-            out += timeOp(Benchmark(group, "$name/$workers", warmup = 100, samples = 20) { hole, _ ->
-                hole.consume(runner(workers))
-            })
+            out +=
+                timeOp(
+                    Benchmark(group, "$name/$workers", warmup = 100, samples = 20) { hole, _ ->
+                        hole.consume(runner(workers))
+                    },
+                )
         }
     }
     return out
@@ -675,14 +751,18 @@ fun benchIpcPayloadSerialization(): List<BenchmarkResult> {
     val group = "ipc_payload"
     val payload = ByteArray(IPC_PAYLOAD_BYTES) { it.toByte() }
     return listOf(
-        timeOp(Benchmark(group, "inline_serialize/$IPC_PAYLOAD_BYTES", setup = { payload }) { hole, fixture ->
-            val src = fixture as ByteArray
-            hole.consume(IpcValue.Inline(src).toJson())
-        }),
-        timeOp(Benchmark(group, "payload_serialize/$IPC_PAYLOAD_BYTES", setup = { payload }) { hole, fixture ->
-            val src = fixture as ByteArray
-            hole.consume(NodeState.Payload(src).toJson())
-        }),
+        timeOp(
+            Benchmark(group, "inline_serialize/$IPC_PAYLOAD_BYTES", setup = { payload }) { hole, fixture ->
+                val src = fixture as ByteArray
+                hole.consume(IpcValue.Inline(src).toJson())
+            },
+        ),
+        timeOp(
+            Benchmark(group, "payload_serialize/$IPC_PAYLOAD_BYTES", setup = { payload }) { hole, fixture ->
+                val src = fixture as ByteArray
+                hole.consume(NodeState.Payload(src).toJson())
+            },
+        ),
     )
 }
 
@@ -708,9 +788,12 @@ fun benchRelayReclaim(): List<BenchmarkResult> {
     val group = "relay_reclaim"
     val out = ArrayList<BenchmarkResult>()
     for (pages in RELAY_RECLAIM_PAGES) {
-        out += timeOp(Benchmark(group, "append_reclaim/$pages", warmup = 50, samples = 200) { hole, _ ->
-            hole.consume(runRelayReclaimCycle(pages))
-        })
+        out +=
+            timeOp(
+                Benchmark(group, "append_reclaim/$pages", warmup = 50, samples = 200) { hole, _ ->
+                    hole.consume(runRelayReclaimCycle(pages))
+                },
+            )
     }
     return out
 }
@@ -723,15 +806,19 @@ fun benchRelayReclaim(): List<BenchmarkResult> {
 fun benchHlcTick(): List<BenchmarkResult> {
     val group = "hlc_tick"
     return listOf(
-        timeOp(Benchmark(group, "tick", setup = { CrdtClock(peer = 1) }) { hole, fixture ->
-            val clock = fixture as CrdtClock
-            hole.consume(clock.tick())
-        }),
-        timeOp(Benchmark(group, "observe", setup = { CrdtClock(peer = 1) to WireStamp(0L, 0L, 2L) }) { hole, fixture ->
-            val (clock, stamp) = fixture as Pair<CrdtClock, WireStamp>
-            clock.observe(stamp)
-            hole.consume(clock)
-        }),
+        timeOp(
+            Benchmark(group, "tick", setup = { CrdtClock(peer = 1) }) { hole, fixture ->
+                val clock = fixture as CrdtClock
+                hole.consume(clock.tick())
+            },
+        ),
+        timeOp(
+            Benchmark(group, "observe", setup = { CrdtClock(peer = 1) to WireStamp(0L, 0L, 2L) }) { hole, fixture ->
+                val (clock, stamp) = fixture as Pair<CrdtClock, WireStamp>
+                clock.observe(stamp)
+                hole.consume(clock)
+            },
+        ),
     )
 }
 

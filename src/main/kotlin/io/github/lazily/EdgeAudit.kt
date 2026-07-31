@@ -97,7 +97,11 @@ private fun auditMedian(values: DoubleArray): Double {
 }
 
 /** One arm's three phases, each normalised per effect. */
-data class ArmSample(val buildNs: Double, val notifyNs: Double, val teardownNs: Double)
+data class ArmSample(
+    val buildNs: Double,
+    val notifyNs: Double,
+    val teardownNs: Double,
+)
 
 data class AuditRung(
     val width: Int,
@@ -114,7 +118,11 @@ private var auditSink: Long = 0L
  *   wide arm, `width / 2` the narrow control.
  * @param filler extra unused cells, so both arms allocate the same node count.
  */
-private fun runArm(width: Int, topics: Int, filler: Int): ArmSample {
+private fun runArm(
+    width: Int,
+    topics: Int,
+    filler: Int,
+): ArmSample {
     val ctx = Context()
     val topicIds = ArrayList<Source<Long>>(topics)
     for (i in 0 until topics) topicIds += ctx.source(0L)
@@ -128,10 +136,11 @@ private fun runArm(width: Int, topics: Int, filler: Int): ArmSample {
     val buildStart = System.nanoTime()
     for (i in 0 until width) {
         val t = topicIds[i / perTopic]
-        handles += ctx.effect {
-            auditSink += get(t)
-            null
-        }
+        handles +=
+            ctx.effect {
+                auditSink += get(t)
+                null
+            }
     }
     val buildNs = (System.nanoTime() - buildStart).toDouble() / width
 
@@ -157,16 +166,27 @@ private fun runArm(width: Int, topics: Int, filler: Int): ArmSample {
 }
 
 /** Interleave the arms so both see the same load; take the median of repeats. */
-private fun runRungInterleaved(width: Int, repeats: Int): AuditRung {
-    val wb = DoubleArray(repeats); val wn = DoubleArray(repeats); val wt = DoubleArray(repeats)
-    val nb = DoubleArray(repeats); val nn = DoubleArray(repeats); val nt = DoubleArray(repeats)
+private fun runRungInterleaved(
+    width: Int,
+    repeats: Int,
+): AuditRung {
+    val wb = DoubleArray(repeats)
+    val wn = DoubleArray(repeats)
+    val wt = DoubleArray(repeats)
+    val nb = DoubleArray(repeats)
+    val nn = DoubleArray(repeats)
+    val nt = DoubleArray(repeats)
     val narrowTopics = maxOf(1, width / 2)
     for (r in 0 until repeats) {
         // wide: 1 topic + (narrowTopics - 1) filler cells == narrow's node count.
         val w = runArm(width, topics = 1, filler = narrowTopics - 1)
         val n = runArm(width, topics = narrowTopics, filler = 0)
-        wb[r] = w.buildNs; wn[r] = w.notifyNs; wt[r] = w.teardownNs
-        nb[r] = n.buildNs; nn[r] = n.notifyNs; nt[r] = n.teardownNs
+        wb[r] = w.buildNs
+        wn[r] = w.notifyNs
+        wt[r] = w.teardownNs
+        nb[r] = n.buildNs
+        nn[r] = n.notifyNs
+        nt[r] = n.teardownNs
         System.gc()
     }
     return AuditRung(
@@ -196,7 +216,10 @@ fun main() {
     println(
         String.format(
             "%9s %22s %22s %22s",
-            "width", "build w/n", "notify w/n", "teardown w/n",
+            "width",
+            "build w/n",
+            "notify w/n",
+            "teardown w/n",
         ),
     )
     val rungs = ArrayList<AuditRung>()
@@ -212,9 +235,15 @@ fun main() {
             String.format(
                 "%9d  %7.1f %7.1f %5.2fx  %7.1f %7.1f %5.2fx  %7.1f %7.1f %5.2fx",
                 width,
-                r.wide.buildNs, r.narrow.buildNs, r.wide.buildNs / r.narrow.buildNs,
-                r.wide.notifyNs, r.narrow.notifyNs, r.wide.notifyNs / r.narrow.notifyNs,
-                r.wide.teardownNs, r.narrow.teardownNs, r.wide.teardownNs / r.narrow.teardownNs,
+                r.wide.buildNs,
+                r.narrow.buildNs,
+                r.wide.buildNs / r.narrow.buildNs,
+                r.wide.notifyNs,
+                r.narrow.notifyNs,
+                r.wide.notifyNs / r.narrow.notifyNs,
+                r.wide.teardownNs,
+                r.narrow.teardownNs,
+                r.wide.teardownNs / r.narrow.teardownNs,
             ),
         )
     }
@@ -225,7 +254,12 @@ fun main() {
 }
 
 private fun readLoadAverage(): String =
-    runCatching { java.io.File("/proc/loadavg").readText().trim() }.getOrDefault("n/a")
+    runCatching {
+        java.io
+            .File("/proc/loadavg")
+            .readText()
+            .trim()
+    }.getOrDefault("n/a")
 
 /**
  * The pass condition is a **flat** wide/narrow ratio, not a small one.
@@ -245,12 +279,21 @@ fun assertAudit(rungs: List<AuditRung>) {
     val lo = rungs.first()
     val hi = rungs.last()
 
-    fun check(name: String, loR: Double, hiR: Double, limit: Double) {
+    fun check(
+        name: String,
+        loR: Double,
+        hiR: Double,
+        limit: Double,
+    ) {
         val drift = hiR / loR
-        val msg = "$name wide/narrow ratio ${lo.width}->${hi.width}: " +
-            "%.2fx -> %.2fx (drift %.2fx)".format(loR, hiR, drift)
-        if (drift >= limit) failures += "FAIL $msg (want drift < %.2fx)".format(limit)
-        else println("ok   $msg (want drift < %.2fx)".format(limit))
+        val msg =
+            "$name wide/narrow ratio ${lo.width}->${hi.width}: " +
+                "%.2fx -> %.2fx (drift %.2fx)".format(loR, hiR, drift)
+        if (drift >= limit) {
+            failures += "FAIL $msg (want drift < %.2fx)".format(limit)
+        } else {
+            println("ok   $msg (want drift < %.2fx)".format(limit))
+        }
     }
 
     // A real O(W^2) removal at these widths is a 1000x drift, not a 4x one; the

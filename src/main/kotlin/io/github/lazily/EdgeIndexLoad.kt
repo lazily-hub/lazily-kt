@@ -29,10 +29,23 @@ package io.github.lazily
  * invisible at every other width.
  */
 
-private val LADDER = intArrayOf(
-    32, 64, 96, 128, 129, 160, 256, 1_024, 4_096, 65_536,
-    262_144, 1_000_000, 4_000_000, 10_000_000,
-)
+private val LADDER =
+    intArrayOf(
+        32,
+        64,
+        96,
+        128,
+        129,
+        160,
+        256,
+        1_024,
+        4_096,
+        65_536,
+        262_144,
+        1_000_000,
+        4_000_000,
+        10_000_000,
+    )
 
 private const val MEMORY_FLOOR_BYTES = 512L * 1024 * 1024
 
@@ -138,9 +151,10 @@ private fun warmup() {
 }
 
 fun main() {
-    val maxWidth = System.getProperty("lazily.loadMaxWidth")?.toIntOrNull()
-        ?: System.getenv("LAZILY_LOAD_MAX_WIDTH")?.toIntOrNull()
-        ?: 1_000_000
+    val maxWidth =
+        System.getProperty("lazily.loadMaxWidth")?.toIntOrNull()
+            ?: System.getenv("LAZILY_LOAD_MAX_WIDTH")?.toIntOrNull()
+            ?: 1_000_000
     val maxHeap = Runtime.getRuntime().maxMemory()
 
     // Warm the JIT before the first rung. Without this the narrow rungs are
@@ -171,27 +185,31 @@ fun main() {
             if (headroom < MEMORY_FLOOR_BYTES) {
                 limitingFactor =
                     "projected ${projected / (1024 * 1024)} MiB at width $width from " +
-                        "${"%.1f".format(last.bytesPerSub)} B/sub measured at width ${last.width}; " +
-                        "would leave ${headroom / (1024 * 1024)} MiB against a " +
-                        "${MEMORY_FLOOR_BYTES / (1024 * 1024)} MiB floor"
+                    "${"%.1f".format(last.bytesPerSub)} B/sub measured at width ${last.width}; " +
+                    "would leave ${headroom / (1024 * 1024)} MiB against a " +
+                    "${MEMORY_FLOOR_BYTES / (1024 * 1024)} MiB floor"
                 println("REFUSED width $width: $limitingFactor")
                 break
             }
         }
 
-        val r = try {
-            runRung(width)
-        } catch (e: OutOfMemoryError) {
-            limitingFactor = "OutOfMemoryError at width $width"
-            println("OOM at width $width")
-            break
-        }
+        val r =
+            try {
+                runRung(width)
+            } catch (e: OutOfMemoryError) {
+                limitingFactor = "OutOfMemoryError at width $width"
+                println("OOM at width $width")
+                break
+            }
         results += r
         ceiling = width
         println(
             String.format(
                 "%12d %14.1f %14.1f %12.1f",
-                r.width, r.buildNanosPerSub, r.notifyNanosPerSub, r.bytesPerSub,
+                r.width,
+                r.buildNanosPerSub,
+                r.notifyNanosPerSub,
+                r.bytesPerSub,
             ),
         )
         check(i >= 0)

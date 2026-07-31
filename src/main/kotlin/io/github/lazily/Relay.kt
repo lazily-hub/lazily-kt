@@ -49,7 +49,9 @@ enum class RelayConfigError {
 }
 
 /** Thrown when a relay is constructed with an illegal overflow for its policy. */
-class RelayConfigException(val error: RelayConfigError) : IllegalArgumentException(error.name)
+class RelayConfigException(
+    val error: RelayConfigError,
+) : IllegalArgumentException(error.name)
 
 /** The outcome of a single [RelayCell.ingress] op. */
 enum class IngressOutcome {
@@ -117,8 +119,7 @@ class RelayCell<T : Any>(
     }
 
     /** Whether the current overflow choice is legal for [mergePolicy]. */
-    fun overflowIsLegal(ops: ComputeOps = ctx): Boolean =
-        ops.get(policy.overflow) != Overflow.Conflate || mergePolicy.conflates
+    fun overflowIsLegal(ops: ComputeOps = ctx): Boolean = ops.get(policy.overflow) != Overflow.Conflate || mergePolicy.conflates
 
     /** Current window depth (`Count`). */
     fun depth(ops: ComputeOps = ctx): Long = ops.get(depth)
@@ -200,7 +201,11 @@ enum class SpillMode {
 }
 
 /** One immutable cold page: a coalesced window summary plus its manifest entry. */
-data class SpillPage<T>(val id: Long, var summary: T, var bytes: Long)
+data class SpillPage<T>(
+    val id: Long,
+    var summary: T,
+    var bytes: Long,
+)
 
 /**
  * A paged durable tail for a [RelayCell] (Phase 3, in-memory reference backend).
@@ -225,7 +230,10 @@ class SpillStore<T : Any>(
      * always opens a new page; `CompactOnWrite` merges into the open page until
      * it reaches `pageSize`, then seals it.
      */
-    fun spill(window: T, bytes: Long) {
+    fun spill(
+        window: T,
+        bytes: Long,
+    ) {
         when (mode) {
             SpillMode.AppendCompact -> pushPage(window, bytes)
             SpillMode.CompactOnWrite -> {
@@ -242,7 +250,10 @@ class SpillStore<T : Any>(
         }
     }
 
-    private fun pushPage(summary: T, bytes: Long) {
+    private fun pushPage(
+        summary: T,
+        bytes: Long,
+    ) {
         pages.add(SpillPage(nextId, summary, bytes))
         nextId += 1
     }
@@ -279,7 +290,10 @@ class SpillStore<T : Any>(
      * Reconstruction (`spill_lossless`). Fold the cold tail then the hot head —
      * reproduces the flat fold of every op the relay ever ingested.
      */
-    fun reconstruct(s0: T, hot: T?): T {
+    fun reconstruct(
+        s0: T,
+        hot: T?,
+    ): T {
         val cold = foldPages(s0)
         return if (hot == null) cold else mergePolicy.merge(cold, hot)
     }
@@ -289,8 +303,7 @@ class SpillStore<T : Any>(
      * `downstream`. For an idempotent policy re-applying an already-delivered page
      * is a no-op (`spill_replay_idempotent`), so at-least-once replay converges.
      */
-    fun replayUnacked(downstream: T): T =
-        pendingPages().fold(downstream) { acc, p -> mergePolicy.merge(acc, p.summary) }
+    fun replayUnacked(downstream: T): T = pendingPages().fold(downstream) { acc, p -> mergePolicy.merge(acc, p.summary) }
 }
 
 // -- Phase 4: Transport ------------------------------------------------------
@@ -332,7 +345,9 @@ class InProcTransport<T> : RelayTransport<T> {
  * A *framed* transport — models `CrossThread`/`Ipc`/`Ws`: ops are delivered in
  * bounded frames of at most `frameSize` (an MTU / batch boundary).
  */
-class FramedTransport<T>(frameSize: Int) : RelayTransport<T> {
+class FramedTransport<T>(
+    frameSize: Int,
+) : RelayTransport<T> {
     private val frameSize: Int = maxOf(1, frameSize)
     private val buf: ArrayDeque<T> = ArrayDeque()
 
@@ -431,20 +446,22 @@ class Inbox<T : Any>(
  * token is available. Refilled `refillPerTick` tokens per logical tick, capped at
  * `capacity`.
  */
-class RatePolicy(private val capacity: Long, private val refillPerTick: Long) {
+class RatePolicy(
+    private val capacity: Long,
+    private val refillPerTick: Long,
+) {
     private var tokensRemaining: Long = capacity
 
     fun tokens(): Long = tokensRemaining
 
     /** Try to consume one token for an egress; returns `true` if paced through. */
-    fun tryEgress(): Boolean {
-        return if (tokensRemaining > 0) {
+    fun tryEgress(): Boolean =
+        if (tokensRemaining > 0) {
             tokensRemaining -= 1
             true
         } else {
             false
         }
-    }
 
     /** Advance the logical clock, refilling the bucket (saturating at capacity). */
     fun tick() {
@@ -457,7 +474,9 @@ class RatePolicy(private val capacity: Long, private val refillPerTick: Long) {
  * `windowOps` ops or on an explicit `tick`. Because a window is just a flush
  * group, associativity keeps the converged state unchanged.
  */
-class WindowPolicy(windowOps: Long) {
+class WindowPolicy(
+    windowOps: Long,
+) {
     private val windowOps: Long = maxOf(1L, windowOps)
     private var pending: Long = 0
 
@@ -473,21 +492,22 @@ class WindowPolicy(windowOps: Long) {
     }
 
     /** The debounce/throttle interval elapsed: flush whatever is pending. */
-    fun tick(): Boolean {
-        return if (pending > 0) {
+    fun tick(): Boolean =
+        if (pending > 0) {
             pending = 0
             true
         } else {
             false
         }
-    }
 }
 
 /**
  * Case 10 — TTL / deadline expiry. Drops elements whose age exceeds `ttl` against
  * a logical clock. Lossy-by-age (explicit); used to shed cold data.
  */
-class ExpiryPolicy(private val ttl: Long) {
+class ExpiryPolicy(
+    private val ttl: Long,
+) {
     private var nowTick: Long = 0
 
     fun advance(by: Long) {
@@ -500,8 +520,7 @@ class ExpiryPolicy(private val ttl: Long) {
     fun isLive(stampedAt: Long): Boolean = nowTick - stampedAt <= ttl
 
     /** Retain only the live elements of a timestamped batch (drop the aged tail). */
-    fun <T> retainLive(batch: List<Pair<Long, T>>): List<T> =
-        batch.filter { isLive(it.first) }.map { it.second }
+    fun <T> retainLive(batch: List<Pair<Long, T>>): List<T> = batch.filter { isLive(it.first) }.map { it.second }
 }
 
 /**
@@ -510,12 +529,19 @@ class ExpiryPolicy(private val ttl: Long) {
  * for a commutative merge downstream (`reorder_adjacent`).
  */
 class PriorityStorage<T> {
-    private data class Entry<T>(val priority: Long, val seq: Long, val value: T)
+    private data class Entry<T>(
+        val priority: Long,
+        val seq: Long,
+        val value: T,
+    )
 
     private val items: MutableList<Entry<T>> = mutableListOf()
     private var seq: Long = 0
 
-    fun push(priority: Long, value: T) {
+    fun push(
+        priority: Long,
+        value: T,
+    ) {
         items.add(Entry(priority, seq, value))
         seq += 1
     }
@@ -553,7 +579,10 @@ class KeyedRelay<K, T : Any>(
     private val shards: MutableMap<K, RelayCell<T>> = mutableMapOf()
 
     /** Route `op` to `key`'s shard, creating the shard on first use. */
-    fun ingress(key: K, op: T): IngressOutcome {
+    fun ingress(
+        key: K,
+        op: T,
+    ): IngressOutcome {
         val relay =
             shards.getOrPut(key) {
                 RelayCell(

@@ -1,7 +1,5 @@
 package io.github.lazily
 
-import java.nio.file.Files
-import java.nio.file.Path
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
@@ -23,10 +21,12 @@ class IpcConformanceTest {
         return fixture
     }
 
-    private fun parseWire(fixture: JsonObject): IpcMessage =
-        IpcMessage.fromJson(fixture.getValue("wire"))
+    private fun parseWire(fixture: JsonObject): IpcMessage = IpcMessage.fromJson(fixture.getValue("wire"))
 
-    private fun assertRoundTripJson(message: IpcMessage, fixture: JsonObject) {
+    private fun assertRoundTripJson(
+        message: IpcMessage,
+        fixture: JsonObject,
+    ) {
         assertEquals(fixture.getValue("wire"), message.toJson())
         assertEquals(message, IpcMessage.decodeJson(message.encodeJson()))
     }
@@ -177,21 +177,23 @@ class IpcConformanceTest {
         }
     }
 
-    private fun variantName(state: NodeState): String = when (state) {
-        is NodeState.Payload -> "Payload"
-        is NodeState.SharedBlob -> "SharedBlob"
-        NodeState.Opaque -> "Opaque"
-    }
+    private fun variantName(state: NodeState): String =
+        when (state) {
+            is NodeState.Payload -> "Payload"
+            is NodeState.SharedBlob -> "SharedBlob"
+            NodeState.Opaque -> "Opaque"
+        }
 
-    private fun variantName(op: DeltaOp): String = when (op) {
-        is DeltaOp.CellSet -> "CellSet"
-        is DeltaOp.SlotValue -> "SlotValue"
-        is DeltaOp.Invalidate -> "Invalidate"
-        is DeltaOp.NodeAdd -> "NodeAdd"
-        is DeltaOp.NodeRemove -> "NodeRemove"
-        is DeltaOp.EdgeAdd -> "EdgeAdd"
-        is DeltaOp.EdgeRemove -> "EdgeRemove"
-    }
+    private fun variantName(op: DeltaOp): String =
+        when (op) {
+            is DeltaOp.CellSet -> "CellSet"
+            is DeltaOp.SlotValue -> "SlotValue"
+            is DeltaOp.Invalidate -> "Invalidate"
+            is DeltaOp.NodeAdd -> "NodeAdd"
+            is DeltaOp.NodeRemove -> "NodeRemove"
+            is DeltaOp.EdgeAdd -> "EdgeAdd"
+            is DeltaOp.EdgeRemove -> "EdgeRemove"
+        }
 
     /**
      * Generically validate a fixture's `assertions` metadata against the parsed
@@ -206,7 +208,11 @@ class IpcConformanceTest {
      * Adding that arm fixed the instance; refusing unconsumed keys fixes the
      * property.
      */
-    private fun assertAssertions(fixtureName: String, message: IpcMessage, fixture: JsonObject) {
+    private fun assertAssertions(
+        fixtureName: String,
+        message: IpcMessage,
+        fixture: JsonObject,
+    ) {
         val assertions = (fixture["assertions"] as? JsonObject) ?: return
         assertions.consuming("$fixtureName assertions") { a ->
             when (message) {
@@ -230,8 +236,9 @@ class IpcConformanceTest {
                     // against is a skipped assertion, not a satisfied one — the
                     // conditional used to swallow the whole group.
                     if (a.has("blob_offset") || a.has("blob_len") || a.has("blob_epoch")) {
-                        val sharedBlob = snapshot.nodes.firstNotNullOfOrNull { it.state as? NodeState.SharedBlob }
-                            ?: error("$fixtureName: blob_* assertions need a SharedBlob node, snapshot has none")
+                        val sharedBlob =
+                            snapshot.nodes.firstNotNullOfOrNull { it.state as? NodeState.SharedBlob }
+                                ?: error("$fixtureName: blob_* assertions need a SharedBlob node, snapshot has none")
                         a.assertLong("blob_offset") { sharedBlob.blob.offset }
                         a.assertLong("blob_len") { sharedBlob.blob.len }
                         a.assertLong("blob_epoch") { sharedBlob.blob.epoch }
@@ -248,10 +255,16 @@ class IpcConformanceTest {
                     // "this delta does NOT exercise every variant" was unfalsifiable
                     // (#lzconsumednotasserted).
                     a.assertBoolean("has_all_op_variants") {
-                        val allVariants = setOf(
-                            "CellSet", "SlotValue", "Invalidate",
-                            "NodeAdd", "NodeRemove", "EdgeAdd", "EdgeRemove",
-                        )
+                        val allVariants =
+                            setOf(
+                                "CellSet",
+                                "SlotValue",
+                                "Invalidate",
+                                "NodeAdd",
+                                "NodeRemove",
+                                "EdgeAdd",
+                                "EdgeRemove",
+                            )
                         delta.ops.map { variantName(it) }.toSet() == allVariants
                     }
                     a.assertString("first_op_kind") { variantName(delta.ops.first()) }
@@ -294,9 +307,13 @@ class IpcConformanceTest {
         }
     }
 
-    private fun firstPayload(delta: Delta, key: String): IpcValue = when (val first = delta.ops.first()) {
-        is DeltaOp.CellSet -> first.payload
-        is DeltaOp.SlotValue -> first.payload
-        else -> error("$key only valid for payload-bearing ops, got ${variantName(first)}")
-    }
+    private fun firstPayload(
+        delta: Delta,
+        key: String,
+    ): IpcValue =
+        when (val first = delta.ops.first()) {
+            is DeltaOp.CellSet -> first.payload
+            is DeltaOp.SlotValue -> first.payload
+            else -> error("$key only valid for payload-bearing ops, got ${variantName(first)}")
+        }
 }

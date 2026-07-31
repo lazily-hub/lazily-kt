@@ -27,9 +27,18 @@ package io.github.lazily
  */
 sealed class InsertAt<out K> {
     data object End : InsertAt<Nothing>()
-    data class At<K>(val index: Int) : InsertAt<K>()
-    data class Before<K>(val anchor: K) : InsertAt<K>()
-    data class After<K>(val anchor: K) : InsertAt<K>()
+
+    data class At<K>(
+        val index: Int,
+    ) : InsertAt<K>()
+
+    data class Before<K>(
+        val anchor: K,
+    ) : InsertAt<K>()
+
+    data class After<K>(
+        val anchor: K,
+    ) : InsertAt<K>()
 }
 
 // Read the value of a cell handle via the non-reified internal accessor.
@@ -43,10 +52,10 @@ private fun ComputeOps.cellValue(id: Int): Any = getCellAny(id)
 private fun Context.allocCell(): Source<Any> = Source(cellAny(UNSET))
 
 /** Allocate a memo/non-memo slot over [compute] without a reified type parameter. */
-private fun Context.allocSlot(compute: Compute.() -> Any?): Computed<Any> =
-    Computed(slotAny(compute))
+private fun Context.allocSlot(compute: Compute.() -> Any?): Computed<Any> = Computed(slotAny(compute))
 
 private object UnsetSentinel
+
 private val UNSET: Any = UnsetSentinel
 
 /**
@@ -73,12 +82,14 @@ class SourceMap<K : Any, V : Any>(
     /** [SourceMap] is the input-cell specialization of [ReactiveMap]. */
     override val entryKind: EntryKind get() = EntryKind.Source
     private val entryCells: MutableMap<K, Source<Any>> = LinkedHashMap()
-    private val membershipCell: Source<Any> = ctx.allocCell().also { cell ->
-        ctx.setCellAny(cell.id, entries.map { it.first }.toLinkedSet())
-    }
-    private val orderCell: Source<Any> = ctx.allocCell().also { cell ->
-        ctx.setCellAny(cell.id, entries.map { it.first })
-    }
+    private val membershipCell: Source<Any> =
+        ctx.allocCell().also { cell ->
+            ctx.setCellAny(cell.id, entries.map { it.first }.toLinkedSet())
+        }
+    private val orderCell: Source<Any> =
+        ctx.allocCell().also { cell ->
+            ctx.setCellAny(cell.id, entries.map { it.first })
+        }
 
     init {
         for ((key, value) in entries) {
@@ -92,15 +103,20 @@ class SourceMap<K : Any, V : Any>(
 
     /** The stable value-cell handle for [key]; throws if [key] is absent. */
     @Suppress("UNCHECKED_CAST")
-    fun value(key: K): Source<V> =
-        (entryCells[key] ?: error("SourceMap has no entry for key $key")) as Source<V>
+    fun value(key: K): Source<V> = (entryCells[key] ?: error("SourceMap has no entry for key $key")) as Source<V>
 
     /** Read the current value of [key]; auto-subscribes the reading node. */
     @Suppress("UNCHECKED_CAST")
-    fun get(key: K, ops: ComputeOps = ctx): V = ops.getCellAny(value(key).id) as V
+    fun get(
+        key: K,
+        ops: ComputeOps = ctx,
+    ): V = ops.getCellAny(value(key).id) as V
 
     /** Write [value] to [key]'s entry cell. Membership and order are untouched. */
-    fun setValue(key: K, value: V) {
+    fun setValue(
+        key: K,
+        value: V,
+    ) {
         require(containsNow(key)) { "cannot setValue on absent key $key" }
         ctx.setCellAny(value(key).id, value)
     }
@@ -109,13 +125,11 @@ class SourceMap<K : Any, V : Any>(
 
     /** Slot over the membership-set size — a membership reader (`len`). */
     @Suppress("UNCHECKED_CAST")
-    fun len(): Computed<Int> =
-        ctx.allocSlot { (cellValue(membershipCell.id) as Set<*>).size } as Computed<Int>
+    fun len(): Computed<Int> = ctx.allocSlot { (cellValue(membershipCell.id) as Set<*>).size } as Computed<Int>
 
     /** Slot over membership of [key] — a membership reader (`contains`). */
     @Suppress("UNCHECKED_CAST")
-    fun contains(key: K): Computed<Boolean> =
-        ctx.allocSlot { key in (cellValue(membershipCell.id) as Set<*>) } as Computed<Boolean>
+    fun contains(key: K): Computed<Boolean> = ctx.allocSlot { key in (cellValue(membershipCell.id) as Set<*>) } as Computed<Boolean>
 
     /** Whether [key] is currently a member (non-reactive snapshot). */
     fun containsNow(key: K): Boolean = key in (ctx.cellValue(membershipCell.id) as Set<*>)
@@ -139,8 +153,7 @@ class SourceMap<K : Any, V : Any>(
 
     /** Slot over the ordered key list — an order reader (`keys`). */
     @Suppress("UNCHECKED_CAST")
-    fun keys(): Computed<List<K>> =
-        ctx.allocSlot { cellValue(orderCell.id) as List<*> } as Computed<List<K>>
+    fun keys(): Computed<List<K>> = ctx.allocSlot { cellValue(orderCell.id) as List<*> } as Computed<List<K>>
 
     /** Current ordered key list (non-reactive snapshot). */
     @Suppress("UNCHECKED_CAST")
@@ -152,7 +165,11 @@ class SourceMap<K : Any, V : Any>(
     // -- Mutation: insert / remove ---------------------------------------
 
     /** Insert [key] → [value] at [at]; updates membership + order, mints the entry cell. */
-    fun insert(key: K, value: V, at: InsertAt<K> = InsertAt.End): Boolean {
+    fun insert(
+        key: K,
+        value: V,
+        at: InsertAt<K> = InsertAt.End,
+    ): Boolean {
         if (containsNow(key)) return false
         val handle = ctx.allocCell()
         ctx.setCellAny(handle.id, value)
@@ -182,15 +199,27 @@ class SourceMap<K : Any, V : Any>(
     // remove + re-mint). Value readers of the moved key are untouched.
 
     /** Move [key] to absolute index [index] in the order list. */
-    fun moveTo(key: K, index: Int) = moveOnly(key) { order -> order.movedTo(key, index) }
+    fun moveTo(
+        key: K,
+        index: Int,
+    ) = moveOnly(key) { order -> order.movedTo(key, index) }
 
     /** Move [key] to immediately before sibling [anchor]. */
-    fun moveBefore(key: K, anchor: K) = moveOnly(key) { order -> order.movedBefore(key, anchor) }
+    fun moveBefore(
+        key: K,
+        anchor: K,
+    ) = moveOnly(key) { order -> order.movedBefore(key, anchor) }
 
     /** Move [key] to immediately after sibling [anchor]. */
-    fun moveAfter(key: K, anchor: K) = moveOnly(key) { order -> order.movedAfter(key, anchor) }
+    fun moveAfter(
+        key: K,
+        anchor: K,
+    ) = moveOnly(key) { order -> order.movedAfter(key, anchor) }
 
-    private inline fun moveOnly(key: K, reorder: (List<K>) -> List<K>) {
+    private inline fun moveOnly(
+        key: K,
+        reorder: (List<K>) -> List<K>,
+    ) {
         require(containsNow(key)) { "cannot move absent key $key" }
         val current = ctx.cellValue(orderCell.id) as List<K>
         ctx.setCellAny(orderCell.id, reorder(current))
@@ -205,7 +234,10 @@ class SourceMap<K : Any, V : Any>(
      * removes touch membership/order only, moves touch order only, and updates
      * fire only when a value actually differs.
      */
-    fun reconcile(targetOrder: List<K>, targetValues: Map<K, V>) {
+    fun reconcile(
+        targetOrder: List<K>,
+        targetValues: Map<K, V>,
+    ) {
         val priorOrder = keysNow()
         val targetSet = targetOrder.toSet()
 
@@ -243,30 +275,36 @@ class SourceMap<K : Any, V : Any>(
         }
     }
 
-    override fun toString(): String =
-        "SourceMap(order=${keysNow()})"
+    override fun toString(): String = "SourceMap(order=${keysNow()})"
 }
 
 @Suppress("UNCHECKED_CAST", "NOTHING_TO_INLINE")
-private inline fun <K> List<K>.insertedAt(at: InsertAt<K>, key: K): List<K> = when (at) {
-    InsertAt.End -> this + key
-    is InsertAt.At -> {
-        val idx = at.index.coerceIn(0, size)
-        toMutableList().apply { add(idx, key) }
+private inline fun <K> List<K>.insertedAt(
+    at: InsertAt<K>,
+    key: K,
+): List<K> =
+    when (at) {
+        InsertAt.End -> this + key
+        is InsertAt.At -> {
+            val idx = at.index.coerceIn(0, size)
+            toMutableList().apply { add(idx, key) }
+        }
+        is InsertAt.Before -> {
+            val idx = indexOf(at.anchor)
+            require(idx >= 0) { "insert Before unknown anchor ${at.anchor}" }
+            toMutableList().apply { add(idx, key) }
+        }
+        is InsertAt.After -> {
+            val idx = indexOf(at.anchor)
+            require(idx >= 0) { "insert After unknown anchor ${at.anchor}" }
+            toMutableList().apply { add(idx + 1, key) }
+        }
     }
-    is InsertAt.Before -> {
-        val idx = indexOf(at.anchor)
-        require(idx >= 0) { "insert Before unknown anchor ${at.anchor}" }
-        toMutableList().apply { add(idx, key) }
-    }
-    is InsertAt.After -> {
-        val idx = indexOf(at.anchor)
-        require(idx >= 0) { "insert After unknown anchor ${at.anchor}" }
-        toMutableList().apply { add(idx + 1, key) }
-    }
-}
 
-private fun <K> List<K>.movedTo(key: K, index: Int): List<K> {
+private fun <K> List<K>.movedTo(
+    key: K,
+    index: Int,
+): List<K> {
     val cur = indexOf(key)
     require(cur >= 0) { "moveTo unknown key $key" }
     if (cur == index) return this
@@ -274,7 +312,10 @@ private fun <K> List<K>.movedTo(key: K, index: Int): List<K> {
     return without.toMutableList().apply { add(index.coerceIn(0, without.size), key) }
 }
 
-private fun <K> List<K>.movedBefore(key: K, anchor: K): List<K> {
+private fun <K> List<K>.movedBefore(
+    key: K,
+    anchor: K,
+): List<K> {
     require(indexOf(key) >= 0) { "moveBefore unknown key $key" }
     val a = indexOf(anchor)
     require(a >= 0) { "moveBefore unknown anchor $anchor" }
@@ -284,7 +325,10 @@ private fun <K> List<K>.movedBefore(key: K, anchor: K): List<K> {
     return without.toMutableList().apply { add(newAnchor, key) }
 }
 
-private fun <K> List<K>.movedAfter(key: K, anchor: K): List<K> {
+private fun <K> List<K>.movedAfter(
+    key: K,
+    anchor: K,
+): List<K> {
     require(indexOf(key) >= 0) { "moveAfter unknown key $key" }
     val a = indexOf(anchor)
     require(a >= 0) { "moveAfter unknown anchor $anchor" }
@@ -309,7 +353,9 @@ private fun <K> Iterable<K>.toLinkedSet(): Set<K> = linkedSetOf<K>().apply { add
  * The tree is a composition of cells — not a new cell kind — so per-cell merge
  * applies node-by-node.
  */
-class SourceTree<K : Any, V : Any>(private val ctx: Context) {
+class SourceTree<K : Any, V : Any>(
+    private val ctx: Context,
+) {
     private val values: MutableMap<K, Source<Any>> = LinkedHashMap()
     private val children: MutableMap<K, SourceMap<K, K>> = LinkedHashMap()
     private val parentOf: MutableMap<K, K> = HashMap()
@@ -317,21 +363,29 @@ class SourceTree<K : Any, V : Any>(private val ctx: Context) {
 
     /** The value-cell handle for [node] (stable for the node's lifetime). */
     @Suppress("UNCHECKED_CAST")
-    fun value(node: K): Source<V> =
-        (values[node] ?: error("SourceTree has no node $node")) as Source<V>
+    fun value(node: K): Source<V> = (values[node] ?: error("SourceTree has no node $node")) as Source<V>
 
     /** Read [node]'s value. */
     @Suppress("UNCHECKED_CAST")
-    fun get(node: K, ops: ComputeOps = ctx): V = ops.getCellAny(value(node).id) as V
+    fun get(
+        node: K,
+        ops: ComputeOps = ctx,
+    ): V = ops.getCellAny(value(node).id) as V
 
     /** Write [node]'s value — invalidates only [node]'s value readers. */
-    fun setValue(node: K, v: V) {
+    fun setValue(
+        node: K,
+        v: V,
+    ) {
         require(values.containsKey(node)) { "unknown node $node" }
         ctx.setCellAny(value(node).id, v)
     }
 
     /** Insert [node] as a root (top-level node). */
-    fun addRoot(node: K, v: V): Boolean {
+    fun addRoot(
+        node: K,
+        v: V,
+    ): Boolean {
         if (values.containsKey(node)) return false
         val handle = ctx.allocCell()
         ctx.setCellAny(handle.id, v)
@@ -342,7 +396,11 @@ class SourceTree<K : Any, V : Any>(private val ctx: Context) {
     }
 
     /** Insert [child] under [parent] with value [v]. */
-    fun insertChild(parent: K, child: K, v: V): Boolean {
+    fun insertChild(
+        parent: K,
+        child: K,
+        v: V,
+    ): Boolean {
         require(values.containsKey(parent)) { "unknown parent $parent" }
         if (values.containsKey(child)) return false
         val handle = ctx.allocCell()
@@ -355,26 +413,37 @@ class SourceTree<K : Any, V : Any>(private val ctx: Context) {
     }
 
     /** The ordered child-collection handle for [parent] (membership/order readers). */
-    fun children(parent: K): SourceMap<K, K> =
-        children[parent] ?: error("SourceTree has no node $parent")
+    fun children(parent: K): SourceMap<K, K> = children[parent] ?: error("SourceTree has no node $parent")
 
     /** Move [child] to absolute [index] within [parent]'s child order (atomic). */
-    fun moveChildTo(parent: K, child: K, index: Int) =
-        children.getValue(parent).moveTo(child, index)
+    fun moveChildTo(
+        parent: K,
+        child: K,
+        index: Int,
+    ) = children.getValue(parent).moveTo(child, index)
 
     /** Move [child] before [anchor] within [parent]'s child order (atomic). */
-    fun moveChildBefore(parent: K, child: K, anchor: K) =
-        children.getValue(parent).moveBefore(child, anchor)
+    fun moveChildBefore(
+        parent: K,
+        child: K,
+        anchor: K,
+    ) = children.getValue(parent).moveBefore(child, anchor)
 
     /** Move [child] after [anchor] within [parent]'s child order (atomic). */
-    fun moveChildAfter(parent: K, child: K, anchor: K) =
-        children.getValue(parent).moveAfter(child, anchor)
+    fun moveChildAfter(
+        parent: K,
+        child: K,
+        anchor: K,
+    ) = children.getValue(parent).moveAfter(child, anchor)
 
     /** Remove [child] (and detach from its parent). */
     fun remove(node: K): Boolean {
         val parent = parentOf.remove(node)
-        if (parent != null) children[parent]?.remove(node)
-        else roots.remove(node)
+        if (parent != null) {
+            children[parent]?.remove(node)
+        } else {
+            roots.remove(node)
+        }
         values.remove(node)
         children.remove(node)
         return true
@@ -389,18 +458,39 @@ class SourceTree<K : Any, V : Any>(private val ctx: Context) {
 /** Anchor for a keyed-reconciliation [ReconOp.Move]. */
 sealed class ReconOp {
     sealed class Anchor {
-        data class Before(val sibling: String) : Anchor()
-        data class After(val sibling: String) : Anchor()
+        data class Before(
+            val sibling: String,
+        ) : Anchor()
+
+        data class After(
+            val sibling: String,
+        ) : Anchor()
     }
 
-    data class Insert(val key: String, val after: Anchor? = null) : ReconOp()
-    data class Remove(val key: String) : ReconOp()
-    data class Move(val key: String, val anchor: Anchor) : ReconOp()
-    data class Update(val key: String) : ReconOp()
+    data class Insert(
+        val key: String,
+        val after: Anchor? = null,
+    ) : ReconOp()
+
+    data class Remove(
+        val key: String,
+    ) : ReconOp()
+
+    data class Move(
+        val key: String,
+        val anchor: Anchor,
+    ) : ReconOp()
+
+    data class Update(
+        val key: String,
+    ) : ReconOp()
 }
 
 /** Prior/target keyed-sequence state for [reconcile]. */
-data class ReconcileState(val order: List<String>, val values: Map<String, Int>)
+data class ReconcileState(
+    val order: List<String>,
+    val values: Map<String, Int>,
+)
 
 /**
  * Reconcile a keyed sequence [prior] → [target] **by stable key, not position**,
@@ -416,7 +506,10 @@ data class ReconcileState(val order: List<String>, val values: Map<String, Int>)
  * nearest preceding kept sibling (`After`) or, for a move to the front, `Before`
  * the new first sibling.
  */
-fun reconcile(prior: ReconcileState, target: ReconcileState): List<ReconOp> {
+fun reconcile(
+    prior: ReconcileState,
+    target: ReconcileState,
+): List<ReconOp> {
     val priorIndex: Map<String, Int> = prior.order.withIndex().associate { (i, k) -> k to i }
     val targetKeys = target.order
     val targetSet = targetKeys.toSet()
@@ -440,12 +533,13 @@ fun reconcile(prior: ReconcileState, target: ReconcileState): List<ReconOp> {
                 val after = lastKeptSibling?.let { ReconOp.Anchor.After(it) }
                 add(ReconOp.Insert(key, after))
             } else if (key !in stableKeys) {
-                val anchor: ReconOp.Anchor = if (lastKeptSibling != null) {
-                    ReconOp.Anchor.After(lastKeptSibling!!)
-                } else {
-                    val nextSibling = targetKeys.firstOrNull { it != key }
-                    ReconOp.Anchor.Before(nextSibling ?: key)
-                }
+                val anchor: ReconOp.Anchor =
+                    if (lastKeptSibling != null) {
+                        ReconOp.Anchor.After(lastKeptSibling!!)
+                    } else {
+                        val nextSibling = targetKeys.firstOrNull { it != key }
+                        ReconOp.Anchor.Before(nextSibling ?: key)
+                    }
                 add(ReconOp.Move(key, anchor))
             }
             if (targetValues[key] != prior.values[key]) {
@@ -460,7 +554,7 @@ fun reconcile(prior: ReconcileState, target: ReconcileState): List<ReconOp> {
 internal fun longestIncreasingSubsequenceIndices(seq: List<Int>): List<Int> {
     if (seq.isEmpty()) return emptyList()
     // patience-style LIS keeping the index path; O(n log n).
-    val tails = mutableListOf<Int>()      // indices into seq, min-tail per pile
+    val tails = mutableListOf<Int>() // indices into seq, min-tail per pile
     val prev = IntArray(seq.size) { -1 }
     for (i in seq.indices) {
         val v = seq[i]

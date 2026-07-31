@@ -34,7 +34,9 @@ class InMemoryDataChannel private constructor(
     private val openState: OpenState,
 ) : DataChannel {
     /** Shared open/closed flag so closing either endpoint closes the pair. */
-    class OpenState(var open: Boolean = true)
+    class OpenState(
+        var open: Boolean = true,
+    )
 
     override fun sendFrame(frame: ByteArray) {
         tx.addLast(frame)

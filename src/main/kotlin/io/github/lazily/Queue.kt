@@ -78,10 +78,14 @@ sealed class QueuePopError {
  */
 sealed class QueuePop<out T : Any> {
     /** A successfully popped element. */
-    data class Value<out T : Any>(val value: T) : QueuePop<T>()
+    data class Value<out T : Any>(
+        val value: T,
+    ) : QueuePop<T>()
 
     /** Pop failed — the queue is [QueuePopError.Empty] or [QueuePopError.Closed]. */
-    data class Failed(val error: QueuePopError) : QueuePop<Nothing>()
+    data class Failed(
+        val error: QueuePopError,
+    ) : QueuePop<Nothing>()
 }
 
 // ---------------------------------------------------------------------------
@@ -198,11 +202,12 @@ class VecDequeStorage<T : Any> private constructor(
         return null
     }
 
-    override fun tryPop(): QueuePop<T> = when {
-        elements.isNotEmpty() -> QueuePop.Value(elements.removeFirst())
-        closed -> QueuePop.Failed(QueuePopError.Closed)
-        else -> QueuePop.Failed(QueuePopError.Empty)
-    }
+    override fun tryPop(): QueuePop<T> =
+        when {
+            elements.isNotEmpty() -> QueuePop.Value(elements.removeFirst())
+            closed -> QueuePop.Failed(QueuePopError.Closed)
+            else -> QueuePop.Failed(QueuePopError.Empty)
+        }
 
     override fun peek(): T? = elements.firstOrNull()
 
@@ -276,8 +281,7 @@ class QueueCell<T : Any, S : QueueStorage<T>>(
 
     companion object {
         /** Create an unbounded queue (the default reference backend). */
-        fun <T : Any> unbounded(ctx: Context): QueueCell<T, VecDequeStorage<T>> =
-            QueueCell(ctx, VecDequeStorage())
+        fun <T : Any> unbounded(ctx: Context): QueueCell<T, VecDequeStorage<T>> = QueueCell(ctx, VecDequeStorage())
 
         /**
          * Create a bounded queue with [capacity]. Exposes reactive backpressure
@@ -286,8 +290,10 @@ class QueueCell<T : Any, S : QueueStorage<T>>(
          *
          * @throws IllegalArgumentException if [capacity] == 0.
          */
-        fun <T : Any> bounded(ctx: Context, capacity: Int): QueueCell<T, VecDequeStorage<T>> =
-            QueueCell(ctx, VecDequeStorage(capacity))
+        fun <T : Any> bounded(
+            ctx: Context,
+            capacity: Int,
+        ): QueueCell<T, VecDequeStorage<T>> = QueueCell(ctx, VecDequeStorage(capacity))
     }
 
     /**
@@ -299,7 +305,11 @@ class QueueCell<T : Any, S : QueueStorage<T>>(
      * law. `closed` is intentionally NOT touched here: it only changes via
      * [close].
      */
-    private fun invalidateReaders(lenBefore: Int, lenAfter: Int, headChanged: Boolean) {
+    private fun invalidateReaders(
+        lenBefore: Int,
+        lenAfter: Int,
+        headChanged: Boolean,
+    ) {
         // Collect the ids of exactly the reader Slots whose value provably
         // changed, then invalidate them together (one flush) so an observer never
         // sees a partial state. No reader value is derived here — each Slot
@@ -398,8 +408,7 @@ class QueueCell<T : Any, S : QueueStorage<T>>(
     fun capacity(): Int? = cap
 
     /** Handles to the reader-kinds, for advanced wiring (e.g. effects that subscribe to multiple reader kinds). The four derived reader-kinds are Slots; `closed` is a Cell. */
-    fun readerHandles(): QueueReaderHandles =
-        QueueReaderHandles(headSlot, lenSlot, isEmptySlot, isFullSlot, closedCell)
+    fun readerHandles(): QueueReaderHandles = QueueReaderHandles(headSlot, lenSlot, isEmptySlot, isFullSlot, closedCell)
 }
 
 /**
@@ -517,7 +526,10 @@ class TopicCell<T : Any>(
      * Create a cursor at the current tail, or reconnect an existing durable id
      * without moving its cursor. Existing state owns the id's durability.
      */
-    fun subscribe(id: String, durability: TopicDurability): TopicSubscribeOutcome {
+    fun subscribe(
+        id: String,
+        durability: TopicDurability,
+    ): TopicSubscribeOutcome {
         val existing = subscriptions[id]
         if (existing != null) {
             if (existing.connected) return TopicSubscribeOutcome.AlreadyConnected
@@ -562,13 +574,19 @@ class TopicCell<T : Any>(
 
     /** Reactive unread suffix for one connected subscriber. */
     @Suppress("UNCHECKED_CAST")
-    fun readStream(id: String, ops: ComputeOps = ctx): List<T> {
+    fun readStream(
+        id: String,
+        ops: ComputeOps = ctx,
+    ): List<T> {
         val reader = readers[id] ?: return emptyList()
         return ops.getSlotAny(reader.id) as List<T>
     }
 
     /** Reactive element at the subscriber's cursor, or null at the tail/offline. */
-    fun read(id: String, ops: ComputeOps = ctx): T? = readStream(id, ops).firstOrNull()
+    fun read(
+        id: String,
+        ops: ComputeOps = ctx,
+    ): T? = readStream(id, ops).firstOrNull()
 
     /** Advance only [id], returning the element it passed. */
     fun advance(id: String): T? {
@@ -616,9 +634,9 @@ class TopicCell<T : Any>(
             baseOffset = baseOffset,
             elements = retained.toList(),
             subscriptions =
-                subscriptions.mapValues { (_, sub) ->
-                    TopicSubscriptionSnapshot(sub.cursor, sub.durability, sub.connected)
-                },
+            subscriptions.mapValues { (_, sub) ->
+                TopicSubscriptionSnapshot(sub.cursor, sub.durability, sub.connected)
+            },
         )
 }
 

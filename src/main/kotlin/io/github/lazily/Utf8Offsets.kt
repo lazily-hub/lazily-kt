@@ -20,18 +20,22 @@ package io.github.lazily
 // than silently corrupting text.
 object Utf8Offsets {
     /** UTF-8 byte length of the character whose code point is [cp]. */
-    private fun utf8Len(cp: Int): Int = when {
-        cp < 0x80 -> 1
-        cp < 0x800 -> 2
-        cp < 0x10000 -> 3
-        else -> 4
-    }
+    private fun utf8Len(cp: Int): Int =
+        when {
+            cp < 0x80 -> 1
+            cp < 0x800 -> 2
+            cp < 0x10000 -> 3
+            else -> 4
+        }
 
     /**
      * UTF-8 byte offset [byte] into [s] → the UTF-16 code-unit index at that
      * position, or `null` if [byte] is out of range or not on a char boundary.
      */
-    fun byteToUtf16(s: String, byte: Int): Int? {
+    fun byteToUtf16(
+        s: String,
+        byte: Int,
+    ): Int? {
         if (byte < 0) return null
         var b = 0
         var i = 0
@@ -50,7 +54,10 @@ object Utf8Offsets {
      * points) before it — the wire `at_char` value — or `null` if [byte] is out
      * of range or not on a char boundary.
      */
-    fun byteToCodePoint(s: String, byte: Int): Int? {
+    fun byteToCodePoint(
+        s: String,
+        byte: Int,
+    ): Int? {
         if (byte < 0) return null
         var b = 0
         var i = 0
@@ -70,7 +77,10 @@ object Utf8Offsets {
      * A Unicode scalar (code-point) count [cpCount] → the UTF-16 code-unit index
      * in [s], clamped into range (matching the reference's `at_char.min(len)`).
      */
-    fun codePointToUtf16(s: String, cpCount: Int): Int {
+    fun codePointToUtf16(
+        s: String,
+        cpCount: Int,
+    ): Int {
         val total = s.codePointCount(0, s.length)
         val n = cpCount.coerceIn(0, total)
         return s.offsetByCodePoints(0, n)

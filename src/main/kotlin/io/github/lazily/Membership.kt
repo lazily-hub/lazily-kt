@@ -22,8 +22,7 @@ enum class PeerState { Alive, Suspect, Dead, Left }
 sealed class PeerChangeEvent<P> {
     data class Joined<P>(val peer: P) : PeerChangeEvent<P>()
     data class Left<P>(val peer: P) : PeerChangeEvent<P>()
-    data class StateChanged<P>(val peer: P, val from: PeerState, val to: PeerState) :
-        PeerChangeEvent<P>()
+    data class StateChanged<P>(val peer: P, val from: PeerState, val to: PeerState) : PeerChangeEvent<P>()
 }
 
 /** Tunables for the failure detector + SWIM state machine. */

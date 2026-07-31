@@ -23,7 +23,9 @@ import kotlin.test.assertTrue
  * ```
  */
 class CellKernelTest {
-    private data class Box(val value: Int)
+    private data class Box(
+        val value: Int,
+    )
 
     @Test
     fun source_cell_reads_and_writes() {
@@ -41,7 +43,11 @@ class CellKernelTest {
         val ctx = Context()
         val n = ctx.source(2)
         var computes = 0
-        val doubled = ctx.computed { computes++; get(n) * 2 }
+        val doubled =
+            ctx.computed {
+                computes++
+                get(n) * 2
+            }
         assertEquals(4, ctx.get(doubled))
         assertEquals(4, ctx.get(doubled)) // cached — no recompute
         assertEquals(1, computes)
@@ -85,7 +91,11 @@ class CellKernelTest {
         val n = ctx.source(1)
         val parity = ctx.computed { get(n) % 2 } // 1 -> 1 when n goes 1 -> 3
         var downstream = 0
-        val watcher = ctx.computed { downstream++; get(parity) }
+        val watcher =
+            ctx.computed {
+                downstream++
+                get(parity)
+            }
         assertEquals(1, ctx.get(watcher))
         assertEquals(1, downstream)
         n.set(ctx, 3) // parity recomputes to 1 (unchanged) ⇒ watcher must not re-run
@@ -98,7 +108,12 @@ class CellKernelTest {
         val ctx = Context()
         val n = ctx.source(1)
         var computes = 0
-        val f = ctx.computed { computes++; get(n) + 100 }.eager(ctx)
+        val f =
+            ctx
+                .computed {
+                    computes++
+                    get(n) + 100
+                }.eager(ctx)
         assertTrue(f.isEager(ctx))
         assertEquals(1, computes, "an eager computed materializes at creation, without a read")
         assertEquals(1, ctx.dependentCount(f), "the puller is a dependent of the computed")

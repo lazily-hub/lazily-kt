@@ -29,24 +29,37 @@ class EphemeralCore<T : Any> : Ephemeral {
     private var value: T? = null
     private var expiry: Long = 0
 
-    fun set(value: T, now: Long, ttl: Long) {
+    fun set(
+        value: T,
+        now: Long,
+        ttl: Long,
+    ) {
         this.value = value
         this.expiry = now + ttl
     }
+
     fun tick(now: Long) {
         if (value != null && now >= expiry) value = null
     }
+
     fun value(): T? = value
 }
 
 /** Reactive single-value ephemeral cell. */
-class EphemeralCell<T : Any>(private val ctx: Context) : Ephemeral {
+class EphemeralCell<T : Any>(
+    private val ctx: Context,
+) : Ephemeral {
     private val core = EphemeralCore<T>()
     val valueCell: Source<Any> = ctx.source<Any>(EphemeralNone)
 
     private fun refresh() = valueCell.set(ctx, core.value() ?: EphemeralNone)
 
-    fun set(value: T, now: Long, ttl: Long) = core.set(value, now, ttl).also { refresh() }
+    fun set(
+        value: T,
+        now: Long,
+        ttl: Long,
+    ) = core.set(value, now, ttl).also { refresh() }
+
     fun tick(now: Long) = core.tick(now).also { refresh() }
 
     @Suppress("UNCHECKED_CAST")
@@ -59,22 +72,36 @@ class EphemeralCell<T : Any>(private val ctx: Context) : Ephemeral {
 class EphemeralMapCore<K : Any, V : Any> : Ephemeral {
     private val entries = mutableMapOf<K, Pair<V, Long>>()
 
-    fun set(key: K, value: V, now: Long, ttl: Long) {
+    fun set(
+        key: K,
+        value: V,
+        now: Long,
+        ttl: Long,
+    ) {
         entries[key] = value to (now + ttl)
     }
+
     fun evict(key: K) {
         entries.remove(key)
     }
+
     fun tick(now: Long) {
         entries.entries.removeAll { now >= it.value.second }
     }
-    fun get(key: K, now: Long): V? = entries[key]?.takeIf { now < it.second }?.first
-    fun present(now: Long): Map<K, V> =
-        entries.filterValues { now < it.second }.mapValues { it.value.first }
+
+    fun get(
+        key: K,
+        now: Long,
+    ): V? = entries[key]?.takeIf { now < it.second }?.first
+
+    fun present(now: Long): Map<K, V> = entries.filterValues { now < it.second }.mapValues { it.value.first }
 }
 
 /** Reactive per-peer presence: heartbeat-kept, membership- and TTL-evicted. */
-class PresenceCell<K : Any, V : Any>(private val ctx: Context, private val ttl: Long) : Ephemeral {
+class PresenceCell<K : Any, V : Any>(
+    private val ctx: Context,
+    private val ttl: Long,
+) : Ephemeral {
     private val core = EphemeralMapCore<K, V>()
     val presentCell: Source<Any> = ctx.source<Any>(emptyMap<K, V>())
 
@@ -82,14 +109,26 @@ class PresenceCell<K : Any, V : Any>(private val ctx: Context, private val ttl: 
         presentCell.set(ctx, core.present(now))
     }
 
-    fun heartbeat(peer: K, value: V, now: Long) {
-        core.set(peer, value, now, ttl); refreshAt(now)
+    fun heartbeat(
+        peer: K,
+        value: V,
+        now: Long,
+    ) {
+        core.set(peer, value, now, ttl)
+        refreshAt(now)
     }
-    fun evict(peer: K, now: Long) {
-        core.evict(peer); refreshAt(now)
+
+    fun evict(
+        peer: K,
+        now: Long,
+    ) {
+        core.evict(peer)
+        refreshAt(now)
     }
+
     fun tick(now: Long) {
-        core.tick(now); refreshAt(now)
+        core.tick(now)
+        refreshAt(now)
     }
 
     @Suppress("UNCHECKED_CAST")
@@ -97,7 +136,10 @@ class PresenceCell<K : Any, V : Any>(private val ctx: Context, private val ttl: 
 }
 
 /** Reactive typed ephemeral broadcast (cursors/selections): last-writer-per-peer. */
-class AwarenessCell<K : Any, V : Any>(private val ctx: Context, private val ttl: Long) : Ephemeral {
+class AwarenessCell<K : Any, V : Any>(
+    private val ctx: Context,
+    private val ttl: Long,
+) : Ephemeral {
     private val core = EphemeralMapCore<K, V>()
     val presentCell: Source<Any> = ctx.source<Any>(emptyMap<K, V>())
 
@@ -105,13 +147,24 @@ class AwarenessCell<K : Any, V : Any>(private val ctx: Context, private val ttl:
         presentCell.set(ctx, core.present(now))
     }
 
-    fun set(peer: K, value: V, now: Long) {
-        core.set(peer, value, now, ttl); refreshAt(now)
+    fun set(
+        peer: K,
+        value: V,
+        now: Long,
+    ) {
+        core.set(peer, value, now, ttl)
+        refreshAt(now)
     }
+
     fun tick(now: Long) {
-        core.tick(now); refreshAt(now)
+        core.tick(now)
+        refreshAt(now)
     }
-    fun get(peer: K, now: Long): V? = core.get(peer, now)
+
+    fun get(
+        peer: K,
+        now: Long,
+    ): V? = core.get(peer, now)
 
     @Suppress("UNCHECKED_CAST")
     fun present(ops: ComputeOps = ctx): Map<K, V> = ops.get(presentCell) as Map<K, V>

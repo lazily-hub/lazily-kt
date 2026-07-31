@@ -1,15 +1,11 @@
 package io.github.lazily
 
-import java.nio.file.Files
-import java.nio.file.Path
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.booleanOrNull
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.int
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -41,7 +37,10 @@ class QueueCellConformanceTest {
         return json.parseToJsonElement(text).jsonObject
     }
 
-    private fun buildInitial(ctx: Context, initial: JsonObject): QueueCell<V, VecDequeStorage<V>> {
+    private fun buildInitial(
+        ctx: Context,
+        initial: JsonObject,
+    ): QueueCell<V, VecDequeStorage<V>> {
         val cap = initial["capacity"]?.jsonPrimitive?.intOrNull
         val q = if (cap != null) QueueCell.bounded<V>(ctx, cap) else QueueCell.unbounded<V>(ctx)
         initial["elements"]?.jsonArray?.forEach { e ->
@@ -61,20 +60,46 @@ class QueueCellConformanceTest {
         val closed: Computed<Unit>,
     )
 
-    private fun makeReaders(ctx: Context, q: QueueCell<V, *>): Readers {
+    private fun makeReaders(
+        ctx: Context,
+        q: QueueCell<V, *>,
+    ): Readers {
         // Each reader subscribes to exactly one reader-kind cell. We wrap the
         // reactive read in a `computed` returning `Unit` so `ctx.isSet` reports
         // whether the cached value survived the last op.
-        val head = ctx.computed { q.head(this); Unit }
-        val len = ctx.computed { q.len(this); Unit }
-        val isEmpty = ctx.computed { q.isEmpty(this); Unit }
-        val isFull = ctx.computed { q.isFull(this); Unit }
-        val closed = ctx.computed { q.isClosed(this); Unit }
+        val head =
+            ctx.computed {
+                q.head(this)
+                Unit
+            }
+        val len =
+            ctx.computed {
+                q.len(this)
+                Unit
+            }
+        val isEmpty =
+            ctx.computed {
+                q.isEmpty(this)
+                Unit
+            }
+        val isFull =
+            ctx.computed {
+                q.isFull(this)
+                Unit
+            }
+        val closed =
+            ctx.computed {
+                q.isClosed(this)
+                Unit
+            }
         return Readers(head, len, isEmpty, isFull, closed)
     }
 
     /** Materialize every reader's cache so the next op's invalidation is observable via [Context.isSet] (a cached reader that stays cached was not invalidated). */
-    private fun materializeAll(ctx: Context, readers: Readers) {
+    private fun materializeAll(
+        ctx: Context,
+        readers: Readers,
+    ) {
         ctx.get(readers.head)
         ctx.get(readers.len)
         ctx.get(readers.isEmpty)
@@ -93,8 +118,15 @@ class QueueCellConformanceTest {
      * reader kind (e.g. `popped_head_observation`) only declare the kind under
      * test, so absence means "don't check", not "must be false".
      */
-    private fun assertInvalidation(ctx: Context, readers: Readers, invalidates: JsonObject) {
-        fun check(name: String, reader: Computed<Unit>) {
+    private fun assertInvalidation(
+        ctx: Context,
+        readers: Readers,
+        invalidates: JsonObject,
+    ) {
+        fun check(
+            name: String,
+            reader: Computed<Unit>,
+        ) {
             val node = invalidates[name] ?: return
             val expectedInv = node.jsonPrimitive.boolean
             val cached = ctx.isSet(reader)
@@ -115,7 +147,10 @@ class QueueCellConformanceTest {
     }
 
     /** Assert the observable queue state after a step. */
-    private fun assertState(q: QueueCell<V, VecDequeStorage<V>>, expected: JsonObject) {
+    private fun assertState(
+        q: QueueCell<V, VecDequeStorage<V>>,
+        expected: JsonObject,
+    ) {
         expected["elements"]?.jsonArray?.let { want ->
             assertEquals(
                 want.map { it.jsonPrimitive.content },
@@ -155,48 +190,51 @@ class QueueCellConformanceTest {
             val expected = step["expected"]?.jsonObject ?: JsonObject(emptyMap())
             val invalidates = expected["invalidates"]?.jsonObject ?: JsonObject(emptyMap())
 
-            val gotReturns: kotlinx.serialization.json.JsonElement = when (opType) {
-                "push" -> {
-                    val v = op.getValue("value").jsonPrimitive.content
-                    val r = q.tryPush(v)
-                    assertNullError(r, "step $i: push should succeed")
-                    JsonNull
-                }
-                "try_push" -> {
-                    val v = op.getValue("value").jsonPrimitive.content
-                    when (val r = q.tryPush(v)) {
-                        null -> JsonNull
-                        QueuePushError.Full -> JsonPrimitive("Full")
-                        QueuePushError.Closed -> JsonPrimitive("Closed")
+            val gotReturns: kotlinx.serialization.json.JsonElement =
+                when (opType) {
+                    "push" -> {
+                        val v = op.getValue("value").jsonPrimitive.content
+                        val r = q.tryPush(v)
+                        assertNullError(r, "step $i: push should succeed")
+                        JsonNull
                     }
-                }
-                "pop", "try_pop" -> when (val r = q.tryPop()) {
-                    is QueuePop.Value -> JsonPrimitive(r.value)
-                    is QueuePop.Failed -> when (r.error) {
-                        QueuePopError.Empty -> JsonPrimitive("Empty")
-                        QueuePopError.Closed -> JsonPrimitive("Closed")
-                    }
-                }
-                "close" -> {
-                    q.close()
-                    JsonNull
-                }
-                "batch" -> {
-                    ctx.batch {
-                        for (inner in op.getValue("ops").jsonArray) {
-                            val io = inner.jsonObject
-                            assertEquals(
-                                "push",
-                                io.getValue("type").jsonPrimitive.content,
-                                "batch currently only wraps pushes",
-                            )
-                            assertNullError(q.tryPush(io.getValue("value").jsonPrimitive.content), "batch push")
+                    "try_push" -> {
+                        val v = op.getValue("value").jsonPrimitive.content
+                        when (val r = q.tryPush(v)) {
+                            null -> JsonNull
+                            QueuePushError.Full -> JsonPrimitive("Full")
+                            QueuePushError.Closed -> JsonPrimitive("Closed")
                         }
                     }
-                    JsonNull
+                    "pop", "try_pop" ->
+                        when (val r = q.tryPop()) {
+                            is QueuePop.Value -> JsonPrimitive(r.value)
+                            is QueuePop.Failed ->
+                                when (r.error) {
+                                    QueuePopError.Empty -> JsonPrimitive("Empty")
+                                    QueuePopError.Closed -> JsonPrimitive("Closed")
+                                }
+                        }
+                    "close" -> {
+                        q.close()
+                        JsonNull
+                    }
+                    "batch" -> {
+                        ctx.batch {
+                            for (inner in op.getValue("ops").jsonArray) {
+                                val io = inner.jsonObject
+                                assertEquals(
+                                    "push",
+                                    io.getValue("type").jsonPrimitive.content,
+                                    "batch currently only wraps pushes",
+                                )
+                                assertNullError(q.tryPush(io.getValue("value").jsonPrimitive.content), "batch push")
+                            }
+                        }
+                        JsonNull
+                    }
+                    else -> error("unknown queue op type: $opType")
                 }
-                else -> error("unknown queue op type: $opType")
-            }
 
             // Assert the observable state.
             assertState(q, expected)
@@ -262,7 +300,9 @@ class QueueCellConformanceTest {
     // -----------------------------------------------------------------------
 
     /** A minimal custom backend proving the [QueueStorage] adapter seam works. */
-    private class BoundedRing<T : Any>(private val cap: Int) : QueueStorage<T> {
+    private class BoundedRing<T : Any>(
+        private val cap: Int,
+    ) : QueueStorage<T> {
         private val buf = ArrayDeque<T>()
         private var closed = false
 
@@ -274,14 +314,22 @@ class QueueCellConformanceTest {
         }
 
         override fun tryPop(): QueuePop<T> =
-            if (buf.isNotEmpty()) QueuePop.Value(buf.removeFirst())
-            else if (closed) QueuePop.Failed(QueuePopError.Closed)
-            else QueuePop.Failed(QueuePopError.Empty)
+            if (buf.isNotEmpty()) {
+                QueuePop.Value(buf.removeFirst())
+            } else if (closed) {
+                QueuePop.Failed(QueuePopError.Closed)
+            } else {
+                QueuePop.Failed(QueuePopError.Empty)
+            }
 
         override fun peek(): T? = buf.firstOrNull()
+
         override fun len(): Int = buf.size
+
         override fun capacity(): Int? = cap
+
         override fun isClosed(): Boolean = closed
+
         override fun close() {
             closed = true
         }
@@ -321,12 +369,18 @@ class QueueCellConformanceTest {
         }
 
         override fun tryPop(): QueuePop<T> =
-            if (buf.isNotEmpty()) QueuePop.Value(buf.removeFirst())
-            else if (closed) QueuePop.Failed(QueuePopError.Closed)
-            else QueuePop.Failed(QueuePopError.Empty)
+            if (buf.isNotEmpty()) {
+                QueuePop.Value(buf.removeFirst())
+            } else if (closed) {
+                QueuePop.Failed(QueuePopError.Closed)
+            } else {
+                QueuePop.Failed(QueuePopError.Empty)
+            }
 
         override fun len(): Int = buf.size
+
         override fun isClosed(): Boolean = closed
+
         override fun close() {
             closed = true
         }
@@ -383,7 +437,10 @@ class QueueCellConformanceTest {
 
     private companion object {
         /** Assert a push returned success (`null` error), with a message. */
-        fun assertNullError(error: QueuePushError?, message: String) {
+        fun assertNullError(
+            error: QueuePushError?,
+            message: String,
+        ) {
             assertTrue(error == null, "$message: expected success, got $error")
         }
     }

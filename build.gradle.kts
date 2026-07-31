@@ -3,7 +3,65 @@ import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 plugins {
     kotlin("jvm") version "2.0.21"
     kotlin("plugin.serialization") version "2.0.21"
+    // The formatting gate (#lazilyformattinggate). Version pinned exactly, and
+    // the ktlint version it drives is pinned separately below — see the spotless
+    // block for why both pins are needed rather than either alone.
+    id("com.diffplug.spotless") version "6.25.0"
     `maven-publish`
+}
+
+// #lazilyformattinggate. This binding had no formatting floor: nothing in
+// `check`, nothing in CI, so drift was invisible until someone read a diff.
+//
+// TWO pins, deliberately. `spotless` is the plugin; `ktlint("...")` is the
+// formatter it shells to, and they version independently. Pinning only the
+// plugin would leave the actual style free to move when spotless bumps its
+// default ktlint, which is precisely how three sibling gates in this series
+// broke: clang-format defaults moving between majors, zig `master` resolving to
+// a different nightly in CI than locally, and `dart format` choosing its style
+// from build state. Pin the style AND the implementation, or neither is pinned.
+//
+// `spotlessCheck` is the gate and runs in `make check`; `spotlessApply` writes
+// and deliberately does not.
+// The four rules below are ktlint's NON-formatting opinions. Each is disabled
+// because it fires on something deliberate in this codebase and ktlint cannot
+// auto-fix any of them — left on, `spotlessApply` aborts before formatting a
+// single file, which is how this gate first failed to land.
+//
+//   function-naming   the JNA bindings in LazilyFFI.kt must match the native C
+//                     symbols exactly (agent_doc_state_projection and friends);
+//                     renaming them breaks the FFI.
+//   class-naming      private SCREAMING_SNAKE sentinel objects (RETRY_SYNC_COMPUTE,
+//                     NO_QUEUE_HEAD) read as the constants they are, and two
+//                     independent authors reached for the same idiom.
+//   filename          CrdtPlane.kt would have to become CrdtPlaneRuntime.kt; the
+//                     file name is part of the JVM facade class name, so that is
+//                     a Java-interop change, not a formatting one.
+//   no-consecutive-comments
+//                     24 sites where a KDoc follows a KDoc. That is an authoring
+//                     convention in this repo, not layout.
+//
+// max-line-length is deliberately NOT in this list. Its single violation is a
+// raw-string JSON fixture that cannot be wrapped without changing the bytes
+// under test, so it carries a targeted @Suppress at that one site and the rule
+// stays enforced everywhere else.
+val ktlintNonFormattingRules =
+    mapOf(
+        "ktlint_standard_function-naming" to "disabled",
+        "ktlint_standard_class-naming" to "disabled",
+        "ktlint_standard_filename" to "disabled",
+        "ktlint_standard_no-consecutive-comments" to "disabled",
+    )
+
+spotless {
+    kotlin {
+        target("src/**/*.kt")
+        ktlint("1.3.1").editorConfigOverride(ktlintNonFormattingRules)
+    }
+    kotlinGradle {
+        target("*.gradle.kts")
+        ktlint("1.3.1").editorConfigOverride(ktlintNonFormattingRules)
+    }
 }
 
 group = "io.github.lazily"
@@ -179,7 +237,7 @@ publishing {
                 description.set(
                     "Native Kotlin port of the lazily reactive core " +
                         "(Context / Slot / Cell / Signal / Effect), a reactive StateMachine, " +
-                        "a full Harel/SCXML StateChart, and the lazily-spec IPC wire types."
+                        "a full Harel/SCXML StateChart, and the lazily-spec IPC wire types.",
                 )
                 url.set("https://github.com/lazily-hub/lazily-kt")
                 licenses {

@@ -21,7 +21,9 @@ sealed interface ResyncAction {
     data object Apply : ResyncAction
 
     /** A gap was detected; request a fresh Snapshot covering [fromEpoch]. */
-    data class RequestSnapshot(val fromEpoch: Long) : ResyncAction
+    data class RequestSnapshot(
+        val fromEpoch: Long,
+    ) : ResyncAction
 
     /** Drop the frame (re-delivery, malformed, suppressed duplicate request, or a control frame). */
     data object Ignore : ResyncAction
@@ -33,7 +35,9 @@ sealed interface ResyncAction {
  * covering Snapshot lands). `ingest` advances `lastEpoch` on [ResyncAction.Apply];
  * the caller MUST fold the frame's ops on Apply. Mirrors `ReliableSync.step`.
  */
-class ResyncCoordinator(lastEpoch: Long = 0) {
+class ResyncCoordinator(
+    lastEpoch: Long = 0,
+) {
     var lastEpoch: Long = lastEpoch
         private set
     var isResyncing: Boolean = false
@@ -95,7 +99,10 @@ class ResyncCoordinator(lastEpoch: Long = 0) {
  */
 interface DurableOutbox {
     /** Persist [msg] at [epoch] before the send is attempted. */
-    fun append(epoch: Long, msg: IpcMessage)
+    fun append(
+        epoch: Long,
+        msg: IpcMessage,
+    )
 
     /** The peer proved receipt through [epoch]; retained frames `<= epoch` MAY be pruned. */
     fun ackThrough(epoch: Long)
@@ -141,14 +148,20 @@ class OrSet {
  * by [WireStamp] `(wallTime, logical, peer)` total order: the highest stamp wins.
  * Join is the stamp-max, a semilattice (`ReliableSync.joinReg_*`).
  */
-class WireLwwRegister<V>(stamp: WireStamp, value: V) {
+class WireLwwRegister<V>(
+    stamp: WireStamp,
+    value: V,
+) {
     var stamp: WireStamp = stamp
         private set
     var value: V = value
         private set
 
     /** Write [value] at [stamp] iff it dominates the current stamp. */
-    fun set(stamp: WireStamp, value: V) {
+    fun set(
+        stamp: WireStamp,
+        value: V,
+    ) {
         if (stampGreater(stamp, this.stamp)) {
             this.stamp = stamp
             this.value = value
@@ -160,7 +173,10 @@ class WireLwwRegister<V>(stamp: WireStamp, value: V) {
 
     companion object {
         /** Total order `(wallTime, logical, peer)` — the wire mirror of the HLC stamp. */
-        fun stampGreater(a: WireStamp, b: WireStamp): Boolean =
+        fun stampGreater(
+            a: WireStamp,
+            b: WireStamp,
+        ): Boolean =
             when {
                 a.wallTime != b.wallTime -> a.wallTime > b.wallTime
                 a.logical != b.logical -> a.logical > b.logical
@@ -257,8 +273,9 @@ data class Progress(
  * replays the unacked outbox suffix from the peer ack cursor and re-advertises the
  * receiver cursor.
  */
-class SyncDriverSourceException(cause: Throwable? = null) :
-    RuntimeException("inbound IpcSource read failed — reconnect and call onReconnect()", cause)
+class SyncDriverSourceException(
+    cause: Throwable? = null,
+) : RuntimeException("inbound IpcSource read failed — reconnect and call onReconnect()", cause)
 
 /**
  * Full-duplex reliable-sync loop driver (spec § SyncDriver). One driver drives one
@@ -313,7 +330,10 @@ class SyncDriver(
      * the frame's accepted-event count (`Delta.epoch` / `Snapshot.epoch`); it becomes
      * the outbox retention key.
      */
-    fun enqueue(epoch: Long, msg: IpcMessage) {
+    fun enqueue(
+        epoch: Long,
+        msg: IpcMessage,
+    ) {
         pending.addLast(epoch to msg)
     }
 

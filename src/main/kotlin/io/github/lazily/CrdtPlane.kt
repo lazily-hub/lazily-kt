@@ -33,11 +33,16 @@ private class LwwFamilyFactory<V : Any>(
     val codec: CrdtCodec<V>,
     private val clock: CrdtClock,
 ) {
-    fun materialize(ctx: Context, op: CrdtOp): ReplicatedCell<V> {
-        val bytes = when (val state = op.state) {
-            is IpcValue.Inline -> state.toByteArray()
-            else -> error("family op requires Inline state")
-        }
+    fun materialize(
+        ctx: Context,
+        op: CrdtOp,
+    ): ReplicatedCell<V> {
+        val bytes =
+            when (val state = op.state) {
+                is IpcValue.Inline -> state.toByteArray()
+                else -> error("family op requires Inline state")
+            }
+
         @Suppress("UNCHECKED_CAST")
         val value = decodeCrdtValue(codec, bytes) as V
         // Seed the backing cell with the decoded value; the caller's applyRemote(op)
@@ -57,7 +62,9 @@ private class LwwFamilyFactory<V : Any>(
  * [value]. Registering a typed [ReplicatedCell] additionally drives the reactive
  * graph on each converged remote op.
  */
-class CrdtPlaneRuntime(private val peer: PeerId) {
+class CrdtPlaneRuntime(
+    private val peer: PeerId,
+) {
     /**
      * The plane clock. Build [ReplicatedCell]s registered here with this clock so
      * local stamps stay coordinated with the plane.
@@ -101,7 +108,11 @@ class CrdtPlaneRuntime(private val peer: PeerId) {
      * wire-stable [key] so the cell stays addressable across NodeId churn. Build
      * [cell] with this runtime's [clock].
      */
-    fun <V : Any> register(node: NodeId, key: NodeKey?, cell: ReplicatedCell<V>) {
+    fun <V : Any> register(
+        node: NodeId,
+        key: NodeKey?,
+        cell: ReplicatedCell<V>,
+    ) {
         if (key != null) {
             keyToNode[key] = node
             nodeToKey[node] = key
@@ -116,8 +127,7 @@ class CrdtPlaneRuntime(private val peer: PeerId) {
      * The current converged value of a registered typed cell at [node].
      */
     @Suppress("UNCHECKED_CAST")
-    fun <V : Any> typedValue(node: NodeId): V? =
-        (typedCells[node] as? ReplicatedCell<V>)?.register?.value()
+    fun <V : Any> typedValue(node: NodeId): V? = (typedCells[node] as? ReplicatedCell<V>)?.register?.value()
 
     /** The raw converged wire state (winning op's state) at [node], if any. */
     fun value(node: NodeId): IpcValue? = rawState[node]?.state
@@ -127,7 +137,10 @@ class CrdtPlaneRuntime(private val peer: PeerId) {
      * broadcast, or `null` for a value-preserving edit, an unknown [node], or a
      * type mismatch. The plane clock ticks and the fresh stamp orders the op.
      */
-    fun <V : Any> localUpdate(node: NodeId, value: V): CrdtOp? {
+    fun <V : Any> localUpdate(
+        node: NodeId,
+        value: V,
+    ): CrdtOp? {
         @Suppress("UNCHECKED_CAST")
         val typed = typedCells[node] as? ReplicatedCell<V> ?: return null
         val op = typed.localEdit(value, node, nodeToKey[node])
@@ -145,7 +158,10 @@ class CrdtPlaneRuntime(private val peer: PeerId) {
      * applied; re-delivering a frame the receiver already has applies 0 (op-log
      * dedup by (node, stamp)).
      */
-    fun ingest(sync: CrdtSync, nowMicros: Long = 0L): Int {
+    fun ingest(
+        sync: CrdtSync,
+        nowMicros: Long = 0L,
+    ): Int {
         for ((p, wire) in sync.frontier) {
             if (p != peer) clock.observe(wire)
             frontierState.observe(p, wire)
@@ -187,8 +203,7 @@ class CrdtPlaneRuntime(private val peer: PeerId) {
      * This replica's stamp frontier in wire form — the per-peer highest observed
      * stamp it advertises so a peer can compute what it is missing.
      */
-    fun wireFrontier(): List<Pair<PeerId, WireStamp>> =
-        frontierState.entries().entries.map { it.key to it.value }
+    fun wireFrontier(): List<Pair<PeerId, WireStamp>> = frontierState.entries().entries.map { it.key to it.value }
 
     /**
      * A frame shipping the entire op log plus this replica's frontier. Safe to
@@ -224,7 +239,11 @@ class CrdtPlaneRuntime(private val peer: PeerId) {
      * membership signal on first call; build family entries with this runtime's
      * [clock].
      */
-    fun <V : Any> registerFamilyLww(ctx: Context, namespace: String, codec: CrdtCodec<V>) {
+    fun <V : Any> registerFamilyLww(
+        ctx: Context,
+        namespace: String,
+        codec: CrdtCodec<V>,
+    ) {
         familyCtx = ctx
         if (membershipEpochCell == null) membershipEpochCell = Source(ctx.cellAny(0L))
         familyMembers.getOrPut(namespace) { mutableListOf() }
@@ -239,11 +258,13 @@ class CrdtPlaneRuntime(private val peer: PeerId) {
     fun membershipEpoch(): Source<Long>? = membershipEpochCell
 
     /** The materialized keys of family [namespace], in first-materialization order. */
-    fun familyKeys(namespace: String): List<NodeKey> =
-        familyMembers[namespace]?.toList() ?: emptyList()
+    fun familyKeys(namespace: String): List<NodeKey> = familyMembers[namespace]?.toList() ?: emptyList()
 
     /** The current converged value of family entry `namespace/keySuffix`. */
-    fun <V : Any> familyValueLww(namespace: String, keySuffix: String): V? {
+    fun <V : Any> familyValueLww(
+        namespace: String,
+        keySuffix: String,
+    ): V? {
         val key = NodeKey.fromSegments(listOf(namespace, keySuffix))
         val node = keyToNode[key] ?: return null
         return typedValue<V>(node)
@@ -255,10 +276,15 @@ class CrdtPlaneRuntime(private val peer: PeerId) {
      * Materializes the entry (and bumps membership) on first insert.
      */
     @Suppress("UNCHECKED_CAST")
-    fun <V : Any> familySetLww(namespace: String, keySuffix: String, value: V): CrdtOp? {
+    fun <V : Any> familySetLww(
+        namespace: String,
+        keySuffix: String,
+        value: V,
+    ): CrdtOp? {
         val ctx = familyCtx ?: error("register the family before setting entries")
-        val factory = families[namespace] as? LwwFamilyFactory<V>
-            ?: error("no family registered for namespace '$namespace'")
+        val factory =
+            families[namespace] as? LwwFamilyFactory<V>
+                ?: error("no family registered for namespace '$namespace'")
         val key = NodeKey.fromSegments(listOf(namespace, keySuffix))
         keyToNode[key]?.let { return localUpdate(it, value) }
         // First local insert: seed a fresh entry at a real stamp and emit the op.
@@ -284,7 +310,10 @@ class CrdtPlaneRuntime(private val peer: PeerId) {
         }
     }
 
-    private fun recordFamilyMember(namespace: String, key: NodeKey) {
+    private fun recordFamilyMember(
+        namespace: String,
+        key: NodeKey,
+    ) {
         val members = familyMembers.getOrPut(namespace) { mutableListOf() }
         if (!members.contains(key)) members.add(key)
     }
@@ -316,16 +345,21 @@ class CrdtPlaneRuntime(private val peer: PeerId) {
 
     // -- internals -----------------------------------------------------------
 
-    private fun resolveNode(op: CrdtOp): NodeId =
-        op.key?.let { keyToNode[it] } ?: op.node
+    private fun resolveNode(op: CrdtOp): NodeId = op.key?.let { keyToNode[it] } ?: op.node
 
-    private fun isMissing(op: CrdtOp, since: StampFrontier): Boolean {
+    private fun isMissing(
+        op: CrdtOp,
+        since: StampFrontier,
+    ): Boolean {
         val seen = since.of(op.stamp.peer) ?: return true
         return op.stamp.isAfter(seen)
     }
 
     /** Record a not-yet-seen op into the log, frontier, membership, and raw state. */
-    private fun recordNew(op: CrdtOp, node: NodeId) {
+    private fun recordNew(
+        op: CrdtOp,
+        node: NodeId,
+    ) {
         log[node to op.stamp] = op
         frontierState.observe(op.stamp.peer, op.stamp)
         membershipSet.add(op.stamp.peer)

@@ -26,7 +26,9 @@ package io.github.lazily
  * strings fall back to [Shm] so a legacy or forward-compatible descriptor never
  * hard-fails resolution.
  */
-enum class BlobBackendKind(val wire: String) {
+enum class BlobBackendKind(
+    val wire: String,
+) {
     /** POSIX shared memory (`shm_open` + `mmap`) — the default cross-process backend, same host. */
     Shm("shm"),
 
@@ -34,7 +36,8 @@ enum class BlobBackendKind(val wire: String) {
     Arrow("arrow"),
 
     /** An in-process arena (single address space — the FFI host / an in-process plugin). */
-    InProcess("in_process");
+    InProcess("in_process"),
+    ;
 
     /** Whether this is the default backend ([Shm]) — the field is omitted on the wire when so. */
     val isDefault: Boolean get() = this == Shm
@@ -44,11 +47,12 @@ enum class BlobBackendKind(val wire: String) {
         val Default: BlobBackendKind = Shm
 
         /** Parse a backend discriminator from its wire string; unknown → [Shm] (default). */
-        fun fromWire(s: String): BlobBackendKind = when (s) {
-            "arrow" -> Arrow
-            "in_process" -> InProcess
-            else -> Shm
-        }
+        fun fromWire(s: String): BlobBackendKind =
+            when (s) {
+                "arrow" -> Arrow
+                "in_process" -> InProcess
+                else -> Shm
+            }
     }
 }
 
@@ -95,7 +99,9 @@ const val BLOB_SPILL_THRESHOLD_DEFAULT: Int = 4096
  * sharing swaps the [ShmBackend]'s arena for a memory-mapped region without
  * changing this contract (the descriptor + routing layer is unchanged).
  */
-abstract class ArenaBlobBackend(private val arena: ShmBlobArena) : BlobBackend {
+abstract class ArenaBlobBackend(
+    private val arena: ShmBlobArena,
+) : BlobBackend {
     private var epoch: Long = 0
 
     /** The backing arena — exposed for capacity/introspection, like lazily-rs `arena()`. */
@@ -104,8 +110,7 @@ abstract class ArenaBlobBackend(private val arena: ShmBlobArena) : BlobBackend {
     /** The current validity epoch. */
     fun epoch(): Long = epoch
 
-    final override fun write(bytes: ByteArray): ShmBlobRef =
-        arena.writeBlob(epoch, bytes).copy(backend = kind())
+    final override fun write(bytes: ByteArray): ShmBlobRef = arena.writeBlob(epoch, bytes).copy(backend = kind())
 
     final override fun readView(descriptor: ShmBlobRef): ByteArray? {
         if (descriptor.backend != kind()) return null // routing (resolve_wrong_backend)
@@ -127,7 +132,9 @@ abstract class ArenaBlobBackend(private val arena: ShmBlobArena) : BlobBackend {
  * carry [BlobBackendKind.Shm]. Heap-backed here; a memory-mapped arena is the
  * drop-in for genuine cross-process sharing.
  */
-class ShmBackend(arena: ShmBlobArena) : ArenaBlobBackend(arena) {
+class ShmBackend(
+    arena: ShmBlobArena,
+) : ArenaBlobBackend(arena) {
     override fun kind(): BlobBackendKind = BlobBackendKind.Shm
 
     companion object {
@@ -142,7 +149,9 @@ class ShmBackend(arena: ShmBlobArena) : ArenaBlobBackend(arena) {
  * imports zero-copy. The arena is the transport substrate for the descriptor +
  * routing contract.
  */
-class ArrowBackend(arena: ShmBlobArena) : ArenaBlobBackend(arena) {
+class ArrowBackend(
+    arena: ShmBlobArena,
+) : ArenaBlobBackend(arena) {
     override fun kind(): BlobBackendKind = BlobBackendKind.Arrow
 
     companion object {
@@ -155,7 +164,9 @@ class ArrowBackend(arena: ShmBlobArena) : ArenaBlobBackend(arena) {
  * In-process arena backend — a single address space (the FFI host / an
  * in-process plugin). Descriptors carry [BlobBackendKind.InProcess].
  */
-class InProcessBackend(arena: ShmBlobArena) : ArenaBlobBackend(arena) {
+class InProcessBackend(
+    arena: ShmBlobArena,
+) : ArenaBlobBackend(arena) {
     override fun kind(): BlobBackendKind = BlobBackendKind.InProcess
 
     companion object {
@@ -165,7 +176,10 @@ class InProcessBackend(arena: ShmBlobArena) : ArenaBlobBackend(arena) {
 }
 
 /** The (possibly-spilled) result of a spill: the rewritten payload plus the bytes moved to a backend. */
-data class SpillResult<T>(val value: T, val spilled: Int)
+data class SpillResult<T>(
+    val value: T,
+    val spilled: Int,
+)
 
 /**
  * Spill an [IpcValue] over [threshold] to a [BlobBackend], returning the
@@ -219,49 +233,53 @@ fun spillMessage(
     threshold: Int = BLOB_SPILL_THRESHOLD_DEFAULT,
 ): SpillResult<IpcMessage> {
     var total = 0
-    val next: IpcMessage = when (message) {
-        is IpcMessage.SnapshotMessage -> {
-            val nodes = message.snapshot.nodes.map { node ->
-                val (state, spilled) = spillState(node.state, backend, threshold)
-                total += spilled
-                if (spilled > 0) node.copy(state = state) else node
+    val next: IpcMessage =
+        when (message) {
+            is IpcMessage.SnapshotMessage -> {
+                val nodes =
+                    message.snapshot.nodes.map { node ->
+                        val (state, spilled) = spillState(node.state, backend, threshold)
+                        total += spilled
+                        if (spilled > 0) node.copy(state = state) else node
+                    }
+                IpcMessage.SnapshotMessage(message.snapshot.copy(nodes = nodes))
             }
-            IpcMessage.SnapshotMessage(message.snapshot.copy(nodes = nodes))
-        }
-        is IpcMessage.DeltaMessage -> {
-            val ops = message.delta.ops.map { op ->
-                when (op) {
-                    is DeltaOp.CellSet -> {
-                        val (payload, spilled) = spillValue(op.payload, backend, threshold)
-                        total += spilled
-                        if (spilled > 0) op.copy(payload = payload) else op
+            is IpcMessage.DeltaMessage -> {
+                val ops =
+                    message.delta.ops.map { op ->
+                        when (op) {
+                            is DeltaOp.CellSet -> {
+                                val (payload, spilled) = spillValue(op.payload, backend, threshold)
+                                total += spilled
+                                if (spilled > 0) op.copy(payload = payload) else op
+                            }
+                            is DeltaOp.SlotValue -> {
+                                val (payload, spilled) = spillValue(op.payload, backend, threshold)
+                                total += spilled
+                                if (spilled > 0) op.copy(payload = payload) else op
+                            }
+                            is DeltaOp.NodeAdd -> {
+                                val (state, spilled) = spillState(op.state, backend, threshold)
+                                total += spilled
+                                if (spilled > 0) op.copy(state = state) else op
+                            }
+                            else -> op
+                        }
                     }
-                    is DeltaOp.SlotValue -> {
-                        val (payload, spilled) = spillValue(op.payload, backend, threshold)
-                        total += spilled
-                        if (spilled > 0) op.copy(payload = payload) else op
-                    }
-                    is DeltaOp.NodeAdd -> {
-                        val (state, spilled) = spillState(op.state, backend, threshold)
+                IpcMessage.DeltaMessage(message.delta.copy(ops = ops))
+            }
+            is IpcMessage.CrdtSyncMessage -> {
+                val ops =
+                    message.sync.ops.map { op ->
+                        val (state, spilled) = spillValue(op.state, backend, threshold)
                         total += spilled
                         if (spilled > 0) op.copy(state = state) else op
                     }
-                    else -> op
-                }
+                IpcMessage.CrdtSyncMessage(message.sync.copy(ops = ops))
             }
-            IpcMessage.DeltaMessage(message.delta.copy(ops = ops))
+            // Reliable-sync control frames carry no blob payload to spill.
+            is IpcMessage.ResyncRequestMessage, is IpcMessage.OutboxAckMessage -> message
         }
-        is IpcMessage.CrdtSyncMessage -> {
-            val ops = message.sync.ops.map { op ->
-                val (state, spilled) = spillValue(op.state, backend, threshold)
-                total += spilled
-                if (spilled > 0) op.copy(state = state) else op
-            }
-            IpcMessage.CrdtSyncMessage(message.sync.copy(ops = ops))
-        }
-        // Reliable-sync control frames carry no blob payload to spill.
-        is IpcMessage.ResyncRequestMessage, is IpcMessage.OutboxAckMessage -> message
-    }
     return SpillResult(next, total)
 }
 
@@ -270,10 +288,14 @@ fun spillMessage(
  * directly, a SharedBlob resolved zero-copy. Returns `null` if a SharedBlob fails
  * to resolve (unknown / stale / corrupt / wrong backend).
  */
-fun resolveValue(value: IpcValue, backend: BlobBackend): ByteArray? = when (value) {
-    is IpcValue.Inline -> value.toByteArray()
-    is IpcValue.SharedBlob -> backend.readView(value.blob)
-}
+fun resolveValue(
+    value: IpcValue,
+    backend: BlobBackend,
+): ByteArray? =
+    when (value) {
+        is IpcValue.Inline -> value.toByteArray()
+        is IpcValue.SharedBlob -> backend.readView(value.blob)
+    }
 
 /**
  * Receiver-side multi-backend resolver. Holds backends by [BlobBackendKind] and
@@ -295,8 +317,9 @@ class BlobRouter {
     fun readView(descriptor: ShmBlobRef): ByteArray? = backends[descriptor.backend]?.readView(descriptor)
 
     /** Resolve an [IpcValue]: inline bytes directly, SharedBlob routed by its backend discriminator. */
-    fun resolve(value: IpcValue): ByteArray? = when (value) {
-        is IpcValue.Inline -> value.toByteArray()
-        is IpcValue.SharedBlob -> readView(value.blob)
-    }
+    fun resolve(value: IpcValue): ByteArray? =
+        when (value) {
+            is IpcValue.Inline -> value.toByteArray()
+            is IpcValue.SharedBlob -> readView(value.blob)
+        }
 }

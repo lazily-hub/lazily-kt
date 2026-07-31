@@ -10,20 +10,22 @@ import kotlin.test.fail
 class IpcTest {
     @Test
     fun `snapshot round trips through JSON bytes`() {
-        val snapshot = Snapshot(
-            epoch = 7,
-            nodes = listOf(
-                NodeSnapshot.payload(1, "i32", byteArrayOf(1, 2, 3)),
-                NodeSnapshot.opaque(2, "opaque-type"),
-                NodeSnapshot.sharedBlob(
-                    3,
-                    "text/plain",
-                    ShmBlobRef(offset = 0, len = 16, generation = 1, epoch = 7, checksum = 999),
+        val snapshot =
+            Snapshot(
+                epoch = 7,
+                nodes =
+                listOf(
+                    NodeSnapshot.payload(1, "i32", byteArrayOf(1, 2, 3)),
+                    NodeSnapshot.opaque(2, "opaque-type"),
+                    NodeSnapshot.sharedBlob(
+                        3,
+                        "text/plain",
+                        ShmBlobRef(offset = 0, len = 16, generation = 1, epoch = 7, checksum = 999),
+                    ),
                 ),
-            ),
-            edges = listOf(EdgeSnapshot(2, 1), EdgeSnapshot(3, 1)),
-            roots = listOf(1, 2),
-        )
+                edges = listOf(EdgeSnapshot(2, 1), EdgeSnapshot(3, 1)),
+                roots = listOf(1, 2),
+            )
 
         val message = IpcMessage.ofSnapshot(snapshot)
         val decoded = IpcMessage.decodeJson(message.encodeJson())
@@ -34,18 +36,19 @@ class IpcTest {
 
     @Test
     fun `delta round trips all operation variants`() {
-        val delta = Delta.next(
-            40,
-            listOf(
-                DeltaOp.cellSet(1, byteArrayOf(10)),
-                DeltaOp.slotValue(2, byteArrayOf(20)),
-                DeltaOp.invalidate(3),
-                DeltaOp.nodeAdd(4, "u64", NodeState.Payload(byteArrayOf(64))),
-                DeltaOp.nodeRemove(5),
-                DeltaOp.edgeAdd(2, 1),
-                DeltaOp.edgeRemove(3, 1),
-            ),
-        )
+        val delta =
+            Delta.next(
+                40,
+                listOf(
+                    DeltaOp.cellSet(1, byteArrayOf(10)),
+                    DeltaOp.slotValue(2, byteArrayOf(20)),
+                    DeltaOp.invalidate(3),
+                    DeltaOp.nodeAdd(4, "u64", NodeState.Payload(byteArrayOf(64))),
+                    DeltaOp.nodeRemove(5),
+                    DeltaOp.edgeAdd(2, 1),
+                    DeltaOp.edgeRemove(3, 1),
+                ),
+            )
 
         val message = IpcMessage.ofDelta(delta)
         val decoded = IpcMessage.decodeJson(message.encodeJson())
@@ -95,16 +98,18 @@ class IpcTest {
         val permissions = PeerPermissions()
         permissions.allowMany(1, OpKind.Read, listOf(1, 2))
 
-        val snapshot = Snapshot(
-            epoch = 5,
-            nodes = listOf(
-                NodeSnapshot.payload(1, "i32", byteArrayOf(1)),
-                NodeSnapshot.payload(2, "i32", byteArrayOf(2)),
-                NodeSnapshot.payload(3, "i32", byteArrayOf(3)),
-            ),
-            edges = listOf(EdgeSnapshot(2, 1), EdgeSnapshot(3, 1)),
-            roots = listOf(1, 2, 3),
-        )
+        val snapshot =
+            Snapshot(
+                epoch = 5,
+                nodes =
+                listOf(
+                    NodeSnapshot.payload(1, "i32", byteArrayOf(1)),
+                    NodeSnapshot.payload(2, "i32", byteArrayOf(2)),
+                    NodeSnapshot.payload(3, "i32", byteArrayOf(3)),
+                ),
+                edges = listOf(EdgeSnapshot(2, 1), EdgeSnapshot(3, 1)),
+                roots = listOf(1, 2, 3),
+            )
 
         val filtered = snapshot.filterReadable(permissions, 1)
 
@@ -118,18 +123,19 @@ class IpcTest {
         val permissions = PeerPermissions()
         permissions.allowMany(1, OpKind.Read, listOf(1, 2, 5))
 
-        val delta = Delta.next(
-            8,
-            listOf(
-                DeltaOp.cellSet(1, byteArrayOf(1)),
-                DeltaOp.slotValue(2, byteArrayOf(2)),
-                DeltaOp.invalidate(3),
-                DeltaOp.nodeAdd(4, "u8", NodeState.Payload(byteArrayOf(4))),
-                DeltaOp.nodeRemove(5),
-                DeltaOp.edgeAdd(2, 1),
-                DeltaOp.edgeRemove(3, 1),
-            ),
-        )
+        val delta =
+            Delta.next(
+                8,
+                listOf(
+                    DeltaOp.cellSet(1, byteArrayOf(1)),
+                    DeltaOp.slotValue(2, byteArrayOf(2)),
+                    DeltaOp.invalidate(3),
+                    DeltaOp.nodeAdd(4, "u8", NodeState.Payload(byteArrayOf(4))),
+                    DeltaOp.nodeRemove(5),
+                    DeltaOp.edgeAdd(2, 1),
+                    DeltaOp.edgeRemove(3, 1),
+                ),
+            )
 
         val filtered = delta.filterReadable(permissions, 1)
 

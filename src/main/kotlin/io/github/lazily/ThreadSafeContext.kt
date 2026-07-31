@@ -12,8 +12,11 @@ import kotlin.concurrent.withLock
  * `ThreadSafeComputed<T>: Copy`.
  */
 @JvmInline
-value class ThreadSafeComputed<T : Any> @PublishedApi internal constructor(val id: Int) :
-    ThreadSafeGraphNode {
+value class ThreadSafeComputed<T : Any>
+@PublishedApi
+internal constructor(
+    val id: Int,
+) : ThreadSafeGraphNode {
     override val nodeId: Int get() = id
 }
 
@@ -22,8 +25,11 @@ value class ThreadSafeComputed<T : Any> @PublishedApi internal constructor(val i
  * Clonable by value, mirroring lazily-rs `ThreadSafeSource<T>: Copy`.
  */
 @JvmInline
-value class ThreadSafeSource<T : Any> @PublishedApi internal constructor(val id: Int) :
-    ThreadSafeGraphNode {
+value class ThreadSafeSource<T : Any>
+@PublishedApi
+internal constructor(
+    val id: Int,
+) : ThreadSafeGraphNode {
     override val nodeId: Int get() = id
 }
 
@@ -38,8 +44,11 @@ typealias ThreadSafeCellHandle<T> = ThreadSafeSource<T>
  * Clonable by value. Dispose to stop reruns.
  */
 @JvmInline
-value class ThreadSafeEffectHandle @PublishedApi internal constructor(val id: Int) :
-    ThreadSafeGraphNode {
+value class ThreadSafeEffectHandle
+@PublishedApi
+internal constructor(
+    val id: Int,
+) : ThreadSafeGraphNode {
     override val nodeId: Int get() = id
 }
 
@@ -53,7 +62,9 @@ value class ThreadSafeEffectHandle @PublishedApi internal constructor(val id: In
     "Retired by the Cell kernel (#lzcellkernel); retained for compatibility until " +
         "the thread-safe plane exposes eager Computed.",
 )
-class ThreadSafeSignalHandle<T : Any> @PublishedApi internal constructor(
+class ThreadSafeSignalHandle<T : Any>
+@PublishedApi
+internal constructor(
     @PublishedApi internal val slot: ThreadSafeComputed<T>,
     @PublishedApi internal val effect: ThreadSafeEffectHandle,
 ) {
@@ -104,7 +115,11 @@ private const val INITIAL_NODE_CAPACITY = 16
  */
 class ThreadSafeContext {
     private sealed interface Node {
-        class Cell(var value: Any?, val dependents: SmallEdgeList = SmallEdgeList()) : Node
+        class Cell(
+            var value: Any?,
+            val dependents: SmallEdgeList = SmallEdgeList(),
+        ) : Node
+
         class Slot(
             var value: Any? = null,
             var hasValue: Boolean = false,
@@ -116,6 +131,7 @@ class ThreadSafeContext {
             var forceRecompute: Boolean = false,
             var inProgress: Boolean = false,
         ) : Node
+
         class Effect(
             val run: ThreadSafeContext.() -> (() -> Unit)?,
             val dependencies: SmallEdgeList = SmallEdgeList(),
@@ -125,6 +141,7 @@ class ThreadSafeContext {
     }
 
     private val lock = ReentrantLock()
+
     // Dense node arena indexed directly by id (mirrors lazily-rs
     // `Vec<Option<Node>>`; see Context for the recycling contract).
     private var nodes: Array<Node?> = arrayOfNulls(INITIAL_NODE_CAPACITY)
@@ -157,18 +174,18 @@ class ThreadSafeContext {
     // -- Creation ----------------------------------------------------------
 
     /** A mutable source with an initial value. `set` invalidates dependents on `==` change. */
-    inline fun <reified T : Any> source(value: T): ThreadSafeSource<T> =
-        ThreadSafeSource(cellAny(value))
+    inline fun <reified T : Any> source(value: T): ThreadSafeSource<T> = ThreadSafeSource(cellAny(value))
 
     @Deprecated("Renamed to source (#lzcellkernel).", ReplaceWith("source(value)"))
     inline fun <reified T : Any> cell(value: T): ThreadSafeSource<T> = source(value)
 
     @PublishedApi
-    internal fun cellAny(value: Any): Int = locked {
-        val id = allocId()
-        nodes[id] = Node.Cell(value)
-        id
-    }
+    internal fun cellAny(value: Any): Int =
+        locked {
+            val id = allocId()
+            nodes[id] = Node.Cell(value)
+            id
+        }
 
     /** A lazy guarded computed: equal recomputation suppresses downstream invalidation. */
     inline fun <reified T : Any> computed(noinline compute: ThreadSafeContext.() -> T): ThreadSafeComputed<T> =
@@ -176,20 +193,22 @@ class ThreadSafeContext {
 
     /** Deprecated compatibility spelling for guarded [computed]. */
     @Deprecated("Renamed to computed (#lzcellkernel).", ReplaceWith("computed(compute)"))
-    inline fun <reified T : Any> slot(noinline compute: ThreadSafeContext.() -> T): ThreadSafeComputed<T> =
-        computed(compute)
+    inline fun <reified T : Any> slot(noinline compute: ThreadSafeContext.() -> T): ThreadSafeComputed<T> = computed(compute)
 
     /** Deprecated compatibility spelling for guarded [computed]. */
     @Deprecated("Use computed; every computed is guarded (#lzcellkernel).", ReplaceWith("computed(compute)"))
-    inline fun <reified T : Any> memo(noinline compute: ThreadSafeContext.() -> T): ThreadSafeComputed<T> =
-        computed(compute)
+    inline fun <reified T : Any> memo(noinline compute: ThreadSafeContext.() -> T): ThreadSafeComputed<T> = computed(compute)
 
     @PublishedApi
-    internal fun slotAny(memo: Boolean, compute: ThreadSafeContext.() -> Any?): Int = locked {
-        val id = allocId()
-        nodes[id] = Node.Slot(memo = memo, compute = compute)
-        id
-    }
+    internal fun slotAny(
+        memo: Boolean,
+        compute: ThreadSafeContext.() -> Any?,
+    ): Int =
+        locked {
+            val id = allocId()
+            nodes[id] = Node.Slot(memo = memo, compute = compute)
+            id
+        }
 
     /**
      * An **eager** derived value: a memo slot plus a puller effect. The value is
@@ -209,31 +228,39 @@ class ThreadSafeContext {
     }
 
     @PublishedApi
-    internal class SignalIds(@PublishedApi internal val slot: Int, @PublishedApi internal val effect: Int)
+    internal class SignalIds(
+        @PublishedApi internal val slot: Int,
+        @PublishedApi internal val effect: Int,
+    )
 
     @PublishedApi
-    internal fun signalAny(compute: ThreadSafeContext.() -> Any?): SignalIds = locked {
-        val slot = slotAny(memo = true, compute = compute)
-        val effect = effectAny { getSlotAny(slot); null }
-        SignalIds(slot, effect)
-    }
+    internal fun signalAny(compute: ThreadSafeContext.() -> Any?): SignalIds =
+        locked {
+            val slot = slotAny(memo = true, compute = compute)
+            val effect =
+                effectAny {
+                    getSlotAny(slot)
+                    null
+                }
+            SignalIds(slot, effect)
+        }
 
     /**
      * Run [run] immediately, then rerun it after any tracked cell/slot/signal it
      * reads invalidates. [run] may return a cleanup closure (`(() -> Unit)?`);
      * cleanup runs before each rerun and on dispose.
      */
-    fun effect(run: ThreadSafeContext.() -> (() -> Unit)?): ThreadSafeEffectHandle =
-        ThreadSafeEffectHandle(effectAny(run))
+    fun effect(run: ThreadSafeContext.() -> (() -> Unit)?): ThreadSafeEffectHandle = ThreadSafeEffectHandle(effectAny(run))
 
     @PublishedApi
-    internal fun effectAny(run: ThreadSafeContext.() -> (() -> Unit)?): Int = locked {
-        val id = allocId()
-        nodes[id] = Node.Effect(run = run, forceRun = true)
-        scheduleEffect(id, force = false)
-        flushEffects()
-        id
-    }
+    internal fun effectAny(run: ThreadSafeContext.() -> (() -> Unit)?): Int =
+        locked {
+            val id = allocId()
+            nodes[id] = Node.Effect(run = run, forceRun = true)
+            scheduleEffect(id, force = false)
+            flushEffects()
+            id
+        }
 
     // -- Read --------------------------------------------------------------
 
@@ -250,9 +277,7 @@ class ThreadSafeContext {
     }
 
     @Deprecated("Reads are unified — use get (#lzcellkernel).", ReplaceWith("get(handle)"))
-    inline fun <reified T : Any> getCell(handle: ThreadSafeSource<T>): T {
-        return get(handle)
-    }
+    inline fun <reified T : Any> getCell(handle: ThreadSafeSource<T>): T = get(handle)
 
     /** Read a retired signal compatibility handle; auto-subscribes to its backing computed. */
     @Deprecated(
@@ -261,34 +286,45 @@ class ThreadSafeContext {
     inline fun <reified T : Any> getSignal(handle: ThreadSafeSignalHandle<T>): T = get(handle.slot)
 
     @PublishedApi
-    internal fun getSlotAny(id: Int): Any = locked {
-        // Disposed check before the edge registration; see Context.getSlotAny
-        // for why a recycling arena makes that ordering load-bearing.
-        if (nodes[id] !is Node.Slot) throw DisposedNodeException(id, "slot")
-        currentFrame()?.let { registerDependency(id, it) }
-        refreshSlot(id)
-        val node = nodes[id] as? Node.Slot ?: throw DisposedNodeException(id, "slot")
-        check(node.hasValue) { "slot $id has no value" }
-        node.value as Any
-    }
+    internal fun getSlotAny(id: Int): Any =
+        locked {
+            // Disposed check before the edge registration; see Context.getSlotAny
+            // for why a recycling arena makes that ordering load-bearing.
+            if (nodes[id] !is Node.Slot) throw DisposedNodeException(id, "slot")
+            currentFrame()?.let { registerDependency(id, it) }
+            refreshSlot(id)
+            val node = nodes[id] as? Node.Slot ?: throw DisposedNodeException(id, "slot")
+            check(node.hasValue) { "slot $id has no value" }
+            node.value as Any
+        }
 
     @PublishedApi
-    internal fun getCellAny(id: Int): Any = locked {
-        val node = nodes[id] as? Node.Cell ?: throw DisposedNodeException(id, "cell")
-        currentFrame()?.let { registerDependency(id, it) }
-        node.value as Any
-    }
+    internal fun getCellAny(id: Int): Any =
+        locked {
+            val node = nodes[id] as? Node.Cell ?: throw DisposedNodeException(id, "cell")
+            currentFrame()?.let { registerDependency(id, it) }
+            node.value as Any
+        }
 
     // -- Write -------------------------------------------------------------
 
     /** Set a source's value. A no-op when the new value `==` the old. */
-    fun <T : Any> set(handle: ThreadSafeSource<T>, value: T) = setCellAny(handle.id, value)
+    fun <T : Any> set(
+        handle: ThreadSafeSource<T>,
+        value: T,
+    ) = setCellAny(handle.id, value)
 
     @Deprecated("Writes are unified — use set (#lzcellkernel).", ReplaceWith("set(handle, value)"))
-    fun <T : Any> setCell(handle: ThreadSafeSource<T>, value: T) = set(handle, value)
+    fun <T : Any> setCell(
+        handle: ThreadSafeSource<T>,
+        value: T,
+    ) = set(handle, value)
 
     @PublishedApi
-    internal fun setCellAny(id: Int, value: Any) = locked {
+    internal fun setCellAny(
+        id: Int,
+        value: Any,
+    ) = locked {
         val node = nodes[id] as? Node.Cell ?: throw DisposedNodeException(id, "cell")
         if (node.value != value) {
             node.value = value
@@ -328,16 +364,17 @@ class ThreadSafeContext {
      * reader kinds become dirty atomically and lock ordering stays
      * context-then-storage.
      */
-    internal fun invalidateSlots(ids: IntArray) = locked {
-        if (ids.isEmpty()) return@locked
-        val stack = ArrayDeque<Int>()
-        val forceStack = ArrayDeque<Boolean>()
-        for (id in ids) {
-            stack.addLast(id)
-            forceStack.addLast(true)
+    internal fun invalidateSlots(ids: IntArray) =
+        locked {
+            if (ids.isEmpty()) return@locked
+            val stack = ArrayDeque<Int>()
+            val forceStack = ArrayDeque<Boolean>()
+            for (id in ids) {
+                stack.addLast(id)
+                forceStack.addLast(true)
+            }
+            if (runFrontier(stack, forceStack)) flushEffects()
         }
-        if (runFrontier(stack, forceStack)) flushEffects()
-    }
 
     @PublishedApi
     internal fun finishBatch() {
@@ -352,7 +389,10 @@ class ThreadSafeContext {
         val forceStack = ArrayDeque<Boolean>()
         for (cellId in batchedCells) {
             val cell = nodes[cellId] as? Node.Cell ?: continue
-            for (dep in cell.dependents) { stack.addLast(dep); forceStack.addLast(true) }
+            for (dep in cell.dependents) {
+                stack.addLast(dep)
+                forceStack.addLast(true)
+            }
         }
         batchedCells.clear()
         runFrontier(stack, forceStack)
@@ -387,31 +427,34 @@ class ThreadSafeContext {
     }
 
     /** Size of [node]'s reverse edge set. See `Context.dependentCount`. */
-    fun dependentCount(node: ThreadSafeGraphNode): Int = locked {
-        when (val n = resolve(node)) {
-            is Node.Cell -> n.dependents.size
-            is Node.Slot -> n.dependents.size
-            else -> 0
+    fun dependentCount(node: ThreadSafeGraphNode): Int =
+        locked {
+            when (val n = resolve(node)) {
+                is Node.Cell -> n.dependents.size
+                is Node.Slot -> n.dependents.size
+                else -> 0
+            }
         }
-    }
 
     /** Size of [node]'s forward edge set. See `Context.dependencyCount`. */
-    fun dependencyCount(node: ThreadSafeGraphNode): Int = locked {
-        when (val n = resolve(node)) {
-            is Node.Slot -> n.dependencies.size
-            is Node.Effect -> n.dependencies.size
-            else -> 0
+    fun dependencyCount(node: ThreadSafeGraphNode): Int =
+        locked {
+            when (val n = resolve(node)) {
+                is Node.Slot -> n.dependencies.size
+                is Node.Effect -> n.dependencies.size
+                else -> 0
+            }
         }
-    }
 
     /** Whether [node] has been torn down. See `Context.isDisposed`. */
     fun isDisposed(node: ThreadSafeGraphNode): Boolean = locked { resolve(node) == null }
 
     /** Tear [node] out of the graph. See `Context.disposeNode`. */
-    fun disposeNode(node: ThreadSafeGraphNode) = locked {
-        val resolved = resolve(node) ?: return@locked
-        disposeResolved(node.nodeId, resolved)
-    }
+    fun disposeNode(node: ThreadSafeGraphNode) =
+        locked {
+            val resolved = resolve(node) ?: return@locked
+            disposeResolved(node.nodeId, resolved)
+        }
 
     /** Tear down a derived slot. See [disposeNode]. */
     fun disposeSlot(handle: ThreadSafeComputed<*>) = disposeNode(handle)
@@ -426,7 +469,10 @@ class ThreadSafeContext {
     }
 
     /** The shared teardown path. Caller holds [lock]. See `Context.disposeResolved`. */
-    private fun disposeResolved(id: Int, node: Node) {
+    private fun disposeResolved(
+        id: Int,
+        node: Node,
+    ) {
         nodes[id] = null
         freeIds.addLast(id)
         when (node) {
@@ -449,7 +495,10 @@ class ThreadSafeContext {
     }
 
     /** Detach dependents, then dirty the surviving cone mark-only. Caller holds [lock]. */
-    private fun detachDependents(id: Int, dependents: SmallEdgeList) {
+    private fun detachDependents(
+        id: Int,
+        dependents: SmallEdgeList,
+    ) {
         if (dependents.isEmpty()) return
         val snapshot = dependents.toList()
         dependents.clear()
@@ -458,7 +507,10 @@ class ThreadSafeContext {
         try {
             val stack = ArrayDeque<Int>()
             val forceStack = ArrayDeque<Boolean>()
-            for (parent in snapshot) { stack.addLast(parent); forceStack.addLast(true) }
+            for (parent in snapshot) {
+                stack.addLast(parent)
+                forceStack.addLast(true)
+            }
             runFrontier(stack, forceStack)
         } finally {
             disposalDepth--
@@ -466,7 +518,10 @@ class ThreadSafeContext {
     }
 
     /** Remove [depId] from [parentId]'s forward edge set. Caller holds [lock]. */
-    private fun removeDependencyEdge(parentId: Int, depId: Int) {
+    private fun removeDependencyEdge(
+        parentId: Int,
+        depId: Int,
+    ) {
         when (val parent = nodes[parentId]) {
             is Node.Slot -> removeEdge(parent.dependencies, depId)
             is Node.Effect -> removeEdge(parent.dependencies, depId)
@@ -477,9 +532,10 @@ class ThreadSafeContext {
     /** Open a teardown scope. See `Context.scope`. */
     fun scope(): ThreadSafeTeardownScope = ThreadSafeTeardownScope(this)
 
-    fun isEffectActive(handle: ThreadSafeEffectHandle): Boolean = locked {
-        nodes[handle.id] is Node.Effect
-    }
+    fun isEffectActive(handle: ThreadSafeEffectHandle): Boolean =
+        locked {
+            nodes[handle.id] is Node.Effect
+        }
 
     /** Dispose a signal's eager puller; the backing value stays readable (reverts to lazy). */
     fun disposeSignal(handle: ThreadSafeSignalHandle<*>) = disposeEffect(handle.effect)
@@ -487,10 +543,11 @@ class ThreadSafeContext {
     fun isSignalActive(handle: ThreadSafeSignalHandle<*>): Boolean = isEffectActive(handle.effect)
 
     /** Whether a slot currently has a fresh cached value (testing). */
-    fun isSet(handle: ThreadSafeComputed<*>): Boolean = locked {
-        val node = nodes[handle.id] as? Node.Slot ?: return@locked false
-        node.hasValue && !node.dirty
-    }
+    fun isSet(handle: ThreadSafeComputed<*>): Boolean =
+        locked {
+            val node = nodes[handle.id] as? Node.Slot ?: return@locked false
+            node.hasValue && !node.dirty
+        }
 
     // -- Internals: lock helper -------------------------------------------
 
@@ -515,15 +572,24 @@ class ThreadSafeContext {
     // promotes to a hash index above EDGE_INDEX_THRESHOLD (#lzspecedgeindex).
     // Before this, both add and remove were an unconditional linear scan, so a
     // width-N fan-out cost ~N^2/2 comparisons to build.
-    private fun addEdge(edges: SmallEdgeList, id: Int) {
+    private fun addEdge(
+        edges: SmallEdgeList,
+        id: Int,
+    ) {
         edges.add(id)
     }
 
-    private fun removeEdge(edges: SmallEdgeList, id: Int) {
+    private fun removeEdge(
+        edges: SmallEdgeList,
+        id: Int,
+    ) {
         edges.remove(id)
     }
 
-    private fun registerDependency(depId: Int, parentId: Int) {
+    private fun registerDependency(
+        depId: Int,
+        parentId: Int,
+    ) {
         when (val dep = nodes[depId]) {
             is Node.Cell -> addEdge(dep.dependents, parentId)
             is Node.Slot -> addEdge(dep.dependents, parentId)
@@ -536,7 +602,10 @@ class ThreadSafeContext {
         }
     }
 
-    private fun removeDependentEdge(depId: Int, parentId: Int) {
+    private fun removeDependentEdge(
+        depId: Int,
+        parentId: Int,
+    ) {
         when (val dep = nodes[depId]) {
             is Node.Cell -> removeEdge(dep.dependents, parentId)
             is Node.Slot -> removeEdge(dep.dependents, parentId)
@@ -577,17 +646,21 @@ class ThreadSafeContext {
         }
     }
 
-    private fun recomputeSlotNow(id: Int, node: Node.Slot): Boolean {
+    private fun recomputeSlotNow(
+        id: Int,
+        node: Node.Slot,
+    ): Boolean {
         for (dep in node.dependencies) removeDependentEdge(dep, id)
         node.dependencies.clear()
         val compute = node.compute
         val stack = trackingStack.get()
         stack.addLast(id)
-        val result: Any? = try {
-            compute()
-        } finally {
-            stack.removeLast()
-        }
+        val result: Any? =
+            try {
+                compute()
+            } finally {
+                stack.removeLast()
+            }
         val unchanged = node.memo && node.hasValue && node.value == result
         node.dirty = false
         node.forceRecompute = false
@@ -611,7 +684,8 @@ class ThreadSafeContext {
             // redundantly re-run it (glitch-free guarantee). Port of the Context
             // guard (trackingStack is ThreadLocal here).
             if (d in frame) continue
-            stack.addLast(d); forceStack.addLast(true)
+            stack.addLast(d)
+            forceStack.addLast(true)
         }
         runFrontier(stack, forceStack)
     }
@@ -623,7 +697,10 @@ class ThreadSafeContext {
      * mark_frontier_locked + Context.runFrontier). Returns true iff at least one
      * Effect was scheduled (store-without-cascade gate).
      */
-    private fun runFrontier(stack: ArrayDeque<Int>, forceStack: ArrayDeque<Boolean>): Boolean {
+    private fun runFrontier(
+        stack: ArrayDeque<Int>,
+        forceStack: ArrayDeque<Boolean>,
+    ): Boolean {
         var scheduled = false
         while (stack.isNotEmpty()) {
             val id = stack.removeLast()
@@ -635,7 +712,8 @@ class ThreadSafeContext {
                     if (force) node.forceRecompute = true
                     if (shouldPropagate) {
                         for (dep in node.dependents) {
-                            stack.addLast(dep); forceStack.addLast(false)
+                            stack.addLast(dep)
+                            forceStack.addLast(false)
                         }
                     }
                 }
@@ -655,13 +733,19 @@ class ThreadSafeContext {
         val deps = (nodes[id] as? Node.Cell)?.dependents ?: return false
         val stack = ArrayDeque<Int>()
         val forceStack = ArrayDeque<Boolean>()
-        for (d in deps) { stack.addLast(d); forceStack.addLast(true) }
+        for (d in deps) {
+            stack.addLast(d)
+            forceStack.addLast(true)
+        }
         return runFrontier(stack, forceStack)
     }
 
     // -- Internals: effect scheduling / flush ------------------------------
 
-    private fun scheduleEffect(id: Int, force: Boolean) {
+    private fun scheduleEffect(
+        id: Int,
+        force: Boolean,
+    ) {
         // Disposal is not a publish — see [disposalDepth].
         if (disposalDepth > 0) return
         val node = nodes[id] as? Node.Effect ?: return
@@ -695,14 +779,18 @@ class ThreadSafeContext {
         cleanup?.invoke()
         val stack = trackingStack.get()
         stack.addLast(id)
-        val nextCleanup = try {
-            run()
-        } finally {
-            stack.removeLast()
-        }
+        val nextCleanup =
+            try {
+                run()
+            } finally {
+                stack.removeLast()
+            }
         val current = nodes[id] as? Node.Effect
-        if (current != null) current.cleanup = nextCleanup
-        else nextCleanup?.invoke()
+        if (current != null) {
+            current.cleanup = nextCleanup
+        } else {
+            nextCleanup?.invoke()
+        }
     }
 
     private fun effectShouldRun(id: Int): Boolean {
@@ -756,25 +844,18 @@ class ThreadSafeTeardownScope internal constructor(
     inline fun <reified T : Any> cell(value: T): ThreadSafeSource<T> = source(value)
 
     /** A lazy derived slot owned by this scope. */
-    inline fun <reified T : Any> computed(
-        noinline compute: ThreadSafeContext.() -> T,
-    ): ThreadSafeComputed<T> = adopt(ctx.computed(compute))
+    inline fun <reified T : Any> computed(noinline compute: ThreadSafeContext.() -> T): ThreadSafeComputed<T> = adopt(ctx.computed(compute))
 
     /** Deprecated compatibility alias of [computed]. */
     @Deprecated("Renamed to computed (#lzcellkernel).", ReplaceWith("computed(compute)"))
-    inline fun <reified T : Any> slot(
-        noinline compute: ThreadSafeContext.() -> T,
-    ): ThreadSafeComputed<T> = computed(compute)
+    inline fun <reified T : Any> slot(noinline compute: ThreadSafeContext.() -> T): ThreadSafeComputed<T> = computed(compute)
 
     /** Deprecated compatibility alias of guarded [computed]. */
     @Deprecated("Use computed; every computed is guarded (#lzcellkernel).", ReplaceWith("computed(compute)"))
-    inline fun <reified T : Any> memo(
-        noinline compute: ThreadSafeContext.() -> T,
-    ): ThreadSafeComputed<T> = computed(compute)
+    inline fun <reified T : Any> memo(noinline compute: ThreadSafeContext.() -> T): ThreadSafeComputed<T> = computed(compute)
 
     /** An effect owned by this scope. */
-    fun effect(run: ThreadSafeContext.() -> (() -> Unit)?): ThreadSafeEffectHandle =
-        adopt(ctx.effect(run))
+    fun effect(run: ThreadSafeContext.() -> (() -> Unit)?): ThreadSafeEffectHandle = adopt(ctx.effect(run))
 
     /** Cancel this scope's teardown. See `TeardownScope.disarm`. */
     fun disarm() {
@@ -792,6 +873,5 @@ class ThreadSafeTeardownScope internal constructor(
     /** [end], so `ctx.scope().use { ... }` is the lexical form. */
     override fun close() = end()
 
-    override fun toString(): String =
-        if (ended) "ThreadSafeTeardownScope(ended)" else "ThreadSafeTeardownScope(${owned.size} owned)"
+    override fun toString(): String = if (ended) "ThreadSafeTeardownScope(ended)" else "ThreadSafeTeardownScope(${owned.size} owned)"
 }

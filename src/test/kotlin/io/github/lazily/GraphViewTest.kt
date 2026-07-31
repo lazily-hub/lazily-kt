@@ -14,13 +14,14 @@ class GraphViewTest {
         replica.applySnapshot(
             Snapshot(
                 epoch = 3,
-                nodes = listOf(
+                nodes =
+                listOf(
                     NodeSnapshot(1L, "doc.route", NodeState.Payload("hello".toByteArray())),
                     NodeSnapshot(2L, "doc.proof", NodeState.Opaque),
                 ),
                 edges = listOf(EdgeSnapshot(2L, 1L)),
                 roots = listOf(1L),
-            )
+            ),
         )
 
         assertTrue(replica.isInitialized)
@@ -33,13 +34,14 @@ class GraphViewTest {
             Delta(
                 baseEpoch = 3,
                 epoch = 5,
-                ops = listOf(
+                ops =
+                listOf(
                     DeltaOp.CellSet(1L, IpcValue.Inline("world".toByteArray())),
                     DeltaOp.NodeAdd(3L, "doc.transport", NodeState.Payload("x".toByteArray())),
                     DeltaOp.NodeRemove(2L),
                     DeltaOp.EdgeRemove(2L, 1L),
                 ),
-            )
+            ),
         )
 
         assertEquals(5L, replica.epoch)
@@ -54,7 +56,7 @@ class GraphViewTest {
     fun reemitted_delta_is_idempotent() {
         val replica = GraphView()
         replica.applySnapshot(
-            Snapshot(epoch = 1, nodes = listOf(NodeSnapshot(1L, "t", NodeState.Payload("a".toByteArray()))))
+            Snapshot(epoch = 1, nodes = listOf(NodeSnapshot(1L, "t", NodeState.Payload("a".toByteArray())))),
         )
         val delta = Delta(1, 2, listOf(DeltaOp.CellSet(1L, IpcValue.Inline("b".toByteArray()))))
         replica.applyDelta(delta)

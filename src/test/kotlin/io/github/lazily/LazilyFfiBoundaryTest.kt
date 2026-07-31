@@ -46,14 +46,15 @@ class LazilyFfiBoundaryTest {
 
     @Test
     fun `encode and decode round trip re-encodes canonical json bytes`() {
-        val original = IpcMessage.ofSnapshot(
-            Snapshot(
-                epoch = 1,
-                nodes = listOf(NodeSnapshot.payload(7, "i32", byteArrayOf(1, 2, 3))),
-                edges = emptyList(),
-                roots = listOf(7),
-            ),
-        )
+        val original =
+            IpcMessage.ofSnapshot(
+                Snapshot(
+                    epoch = 1,
+                    nodes = listOf(NodeSnapshot.payload(7, "i32", byteArrayOf(1, 2, 3))),
+                    edges = emptyList(),
+                    roots = listOf(7),
+                ),
+            )
         val encoded = LazilyFfiChannel.encode(original)
         assertEquals(LazilyFfiStatus.Ok, encoded.status)
 
@@ -67,12 +68,19 @@ class LazilyFfiBoundaryTest {
 
     @Test
     fun `crdt sync frame crosses the ffi channel`() {
-        val frame = CrdtSync(
-            frontier = listOf(1L to WireStamp(100, 0, 1)),
-            ops = listOf(
-                CrdtOp(node = 1, key = NodeKey.from("scores/alice"), stamp = WireStamp(100, 0, 1), state = IpcValue.Inline(byteArrayOf(9))),
-            ),
-        )
+        val frame =
+            CrdtSync(
+                frontier = listOf(1L to WireStamp(100, 0, 1)),
+                ops =
+                listOf(
+                    CrdtOp(
+                        node = 1,
+                        key = NodeKey.from("scores/alice"),
+                        stamp = WireStamp(100, 0, 1),
+                        state = IpcValue.Inline(byteArrayOf(9)),
+                    ),
+                ),
+            )
         val encoded = LazilyFfiChannel.encode(IpcMessage.ofCrdtSync(frame))
         val decoded = LazilyFfiChannel.decode(LazilyFfiMessageKind.CrdtSync, LazilyFfiBytes(encoded.canonicalBytes))
         assertEquals(LazilyFfiStatus.Ok, decoded.status)
@@ -89,10 +97,11 @@ class LazilyFfiBoundaryTest {
 
     @Test
     fun `malformed input returns InvalidMessage without throwing`() {
-        val decoded = LazilyFfiChannel.decode(
-            LazilyFfiMessageKind.Snapshot,
-            LazilyFfiBytes("{not valid json".encodeToByteArray()),
-        )
+        val decoded =
+            LazilyFfiChannel.decode(
+                LazilyFfiMessageKind.Snapshot,
+                LazilyFfiBytes("{not valid json".encodeToByteArray()),
+            )
         assertEquals(LazilyFfiStatus.InvalidMessage, decoded.status)
         assertNull(decoded.message)
     }
@@ -110,19 +119,23 @@ class LazilyFfiBoundaryTest {
         val len = IntArray(1)
 
         // A well-formed snapshot encode succeeds.
-        val status = LazilyFfiNative.lazilyFfiEncode(
-            IpcMessage.ofSnapshot(Snapshot(epoch = 1)),
-            out, len,
-        )
+        val status =
+            LazilyFfiNative.lazilyFfiEncode(
+                IpcMessage.ofSnapshot(Snapshot(epoch = 1)),
+                out,
+                len,
+            )
         assertEquals(LazilyFfiStatus.Ok, status)
         assertEquals(out[0]!!.len, len[0])
 
         // Decoding valid bytes re-encodes them canonically.
-        val decStatus = LazilyFfiNative.lazilyFfiDecode(
-            LazilyFfiMessageKind.Snapshot,
-            out[0]!!,
-            out, len,
-        )
+        val decStatus =
+            LazilyFfiNative.lazilyFfiDecode(
+                LazilyFfiMessageKind.Snapshot,
+                out[0]!!,
+                out,
+                len,
+            )
         assertEquals(LazilyFfiStatus.Ok, decStatus)
 
         // An empty decode returns Empty (panic guard stays out of the happy path).

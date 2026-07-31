@@ -31,6 +31,7 @@ class ThreadSafeSourceMap<K : Any, V : Any> : ReactiveMap<K, V> {
     override val entryKind: EntryKind get() = EntryKind.Source
 
     private val lock = ReentrantLock()
+
     /**
      * Present set + key order + the move algebra, shared with every other
      * flavor. Graph-agnostic; the reactivity below is this map's own.
@@ -42,7 +43,11 @@ class ThreadSafeSourceMap<K : Any, V : Any> : ReactiveMap<K, V> {
      * Subsequent calls return the cached handle. Safe to call concurrently: the
      * first writer wins a race so the key keeps a stable handle (cell-identity).
      */
-    fun entry(ctx: ThreadSafeContext, key: K, default: (K) -> V): ThreadSafeSource<V> {
+    fun entry(
+        ctx: ThreadSafeContext,
+        key: K,
+        default: (K) -> V,
+    ): ThreadSafeSource<V> {
         lock.withLock { keyed.get(key)?.let { return it } }
         val handle = ThreadSafeSource<V>(ctx.cellAny(default(key)))
         val (stored, mutation) = lock.withLock { keyed.insert(key, handle) }
@@ -56,12 +61,20 @@ class ThreadSafeSourceMap<K : Any, V : Any> : ReactiveMap<K, V> {
      * Eagerly pre-mint a value cell for every key in [keys] via [default]. Input
      * cells are always materialized, so this is the eager build for a cell map.
      */
-    fun materializeAll(ctx: ThreadSafeContext, keys: Iterable<K>, default: (K) -> V) {
+    fun materializeAll(
+        ctx: ThreadSafeContext,
+        keys: Iterable<K>,
+        default: (K) -> V,
+    ) {
         for (key in keys) entry(ctx, key, default)
     }
 
     /** Set the value at [key], inserting a new entry (via [default]) if it does not exist yet. */
-    fun set(ctx: ThreadSafeContext, key: K, value: V) {
+    fun set(
+        ctx: ThreadSafeContext,
+        key: K,
+        value: V,
+    ) {
         val existing = lock.withLock { keyed.get(key) }
         if (existing != null) {
             ctx.set(existing, value)
@@ -74,14 +87,20 @@ class ThreadSafeSourceMap<K : Any, V : Any> : ReactiveMap<K, V> {
     fun handle(key: K): ThreadSafeSource<V>? = lock.withLock { keyed.get(key) }
 
     /** Observe [key]'s value (subscribes the reader); throws if [key] is absent. */
-    fun observe(ctx: ThreadSafeContext, key: K): V {
+    fun observe(
+        ctx: ThreadSafeContext,
+        key: K,
+    ): V {
         val handle = handle(key) ?: error("ThreadSafeSourceMap has no entry for key $key")
         @Suppress("UNCHECKED_CAST")
         return ctx.getCellAny(handle.id) as V
     }
 
     /** Read the value at [key] if present; `null` if absent. */
-    fun get(ctx: ThreadSafeContext, key: K): V? {
+    fun get(
+        ctx: ThreadSafeContext,
+        key: K,
+    ): V? {
         val handle = handle(key) ?: return null
         @Suppress("UNCHECKED_CAST")
         return ctx.getCellAny(handle.id) as V
@@ -101,11 +120,9 @@ class ThreadSafeSourceMap<K : Any, V : Any> : ReactiveMap<K, V> {
     private var membershipVersion = 0
     private var orderVersion = 0
 
-    private fun membershipId(ctx: ThreadSafeContext): Int =
-        lock.withLock { membershipCell ?: ctx.cellAny(0).also { membershipCell = it } }
+    private fun membershipId(ctx: ThreadSafeContext): Int = lock.withLock { membershipCell ?: ctx.cellAny(0).also { membershipCell = it } }
 
-    private fun orderId(ctx: ThreadSafeContext): Int =
-        lock.withLock { orderCell ?: ctx.cellAny(0).also { orderCell = it } }
+    private fun orderId(ctx: ThreadSafeContext): Int = lock.withLock { orderCell ?: ctx.cellAny(0).also { orderCell = it } }
 
     private fun bumpOrder(ctx: ThreadSafeContext) {
         val target = orderId(ctx)
@@ -120,7 +137,10 @@ class ThreadSafeSourceMap<K : Any, V : Any> : ReactiveMap<K, V> {
         bumpOrder(ctx)
     }
 
-    private fun applyMove(ctx: ThreadSafeContext, outcome: MapMove): Boolean {
+    private fun applyMove(
+        ctx: ThreadSafeContext,
+        outcome: MapMove,
+    ): Boolean {
         if (!outcome.applied) return false
         if (outcome.changed) bumpOrder(ctx)
         return true
@@ -157,7 +177,10 @@ class ThreadSafeSourceMap<K : Any, V : Any> : ReactiveMap<K, V> {
      * Reactive membership test for [key]. Subscribes the caller to membership
      * changes (add/remove of any key), not to value changes.
      */
-    fun containsKey(ctx: ThreadSafeContext, key: K): Boolean {
+    fun containsKey(
+        ctx: ThreadSafeContext,
+        key: K,
+    ): Boolean {
         val target = membershipId(ctx)
         ctx.getCellAny(target)
         return isPresent(key)
@@ -175,22 +198,34 @@ class ThreadSafeSourceMap<K : Any, V : Any> : ReactiveMap<K, V> {
      * re-mint, which re-allocates and bumps membership twice. Only the order
      * signal is bumped. [index] is clamped to `[0, len)`.
      */
-    fun moveTo(ctx: ThreadSafeContext, key: K, index: Int): Boolean =
-        applyMove(ctx, lock.withLock { keyed.moveTo(key, index) })
+    fun moveTo(
+        ctx: ThreadSafeContext,
+        key: K,
+        index: Int,
+    ): Boolean = applyMove(ctx, lock.withLock { keyed.moveTo(key, index) })
 
     /** Atomically move [key] to just before [anchor] (`#lzcellmove`). */
-    fun moveBefore(ctx: ThreadSafeContext, key: K, anchor: K): Boolean =
-        applyMove(ctx, lock.withLock { keyed.moveBefore(key, anchor) })
+    fun moveBefore(
+        ctx: ThreadSafeContext,
+        key: K,
+        anchor: K,
+    ): Boolean = applyMove(ctx, lock.withLock { keyed.moveBefore(key, anchor) })
 
     /** Atomically move [key] to just after [anchor] (`#lzcellmove`). */
-    fun moveAfter(ctx: ThreadSafeContext, key: K, anchor: K): Boolean =
-        applyMove(ctx, lock.withLock { keyed.moveAfter(key, anchor) })
+    fun moveAfter(
+        ctx: ThreadSafeContext,
+        key: K,
+        anchor: K,
+    ): Boolean = applyMove(ctx, lock.withLock { keyed.moveAfter(key, anchor) })
 
     /**
      * Remove [key]'s entry and bump reactive membership. Returns whether the key
      * was present.
      */
-    fun remove(ctx: ThreadSafeContext, key: K): Boolean {
+    fun remove(
+        ctx: ThreadSafeContext,
+        key: K,
+    ): Boolean {
         val (_, mutation) = lock.withLock { keyed.remove(key) }
         if (!mutation.changed) return false
         bumpMembership(ctx)
@@ -208,13 +243,18 @@ class ThreadSafeComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
     override val entryKind: EntryKind get() = EntryKind.Computed
 
     private val lock = ReentrantLock()
+
     /**
      * Present set + key order + the move algebra, shared with every other
      * flavor. Graph-agnostic; the reactivity below is this map's own.
      */
     private val keyed = KeyedOrder<K, ThreadSafeComputed<V>>()
 
-    private fun mint(ctx: ThreadSafeContext, key: K, factory: (K) -> V): ThreadSafeComputed<V> {
+    private fun mint(
+        ctx: ThreadSafeContext,
+        key: K,
+        factory: (K) -> V,
+    ): ThreadSafeComputed<V> {
         // Fast path: already allocated. Release the map lock before touching `ctx`
         // so a context operation can never re-enter this lock.
         lock.withLock { keyed.get(key)?.let { return it } }
@@ -229,13 +269,21 @@ class ThreadSafeComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
     }
 
     /** Lazy materialization: read [key], minting the derived slot via [factory] if absent. */
-    fun getOrInsertWith(ctx: ThreadSafeContext, key: K, factory: (K) -> V): V {
+    fun getOrInsertWith(
+        ctx: ThreadSafeContext,
+        key: K,
+        factory: (K) -> V,
+    ): V {
         @Suppress("UNCHECKED_CAST")
         return ctx.getSlotAny(mint(ctx, key, factory).id) as V
     }
 
     /** Eager materialization: pre-mint a derived slot for every key in [keys] via [factory]. */
-    fun materializeAll(ctx: ThreadSafeContext, keys: Iterable<K>, factory: (K) -> V) {
+    fun materializeAll(
+        ctx: ThreadSafeContext,
+        keys: Iterable<K>,
+        factory: (K) -> V,
+    ) {
         for (key in keys) mint(ctx, key, factory)
     }
 
@@ -243,7 +291,10 @@ class ThreadSafeComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
     fun handle(key: K): ThreadSafeComputed<V>? = lock.withLock { keyed.get(key) }
 
     /** Read the value at [key] if present (does not mint); `null` if absent. */
-    fun get(ctx: ThreadSafeContext, key: K): V? {
+    fun get(
+        ctx: ThreadSafeContext,
+        key: K,
+    ): V? {
         val handle = handle(key) ?: return null
         @Suppress("UNCHECKED_CAST")
         return ctx.getSlotAny(handle.id) as V
@@ -263,11 +314,9 @@ class ThreadSafeComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
     private var membershipVersion = 0
     private var orderVersion = 0
 
-    private fun membershipId(ctx: ThreadSafeContext): Int =
-        lock.withLock { membershipCell ?: ctx.cellAny(0).also { membershipCell = it } }
+    private fun membershipId(ctx: ThreadSafeContext): Int = lock.withLock { membershipCell ?: ctx.cellAny(0).also { membershipCell = it } }
 
-    private fun orderId(ctx: ThreadSafeContext): Int =
-        lock.withLock { orderCell ?: ctx.cellAny(0).also { orderCell = it } }
+    private fun orderId(ctx: ThreadSafeContext): Int = lock.withLock { orderCell ?: ctx.cellAny(0).also { orderCell = it } }
 
     private fun bumpOrder(ctx: ThreadSafeContext) {
         val target = orderId(ctx)
@@ -282,7 +331,10 @@ class ThreadSafeComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
         bumpOrder(ctx)
     }
 
-    private fun applyMove(ctx: ThreadSafeContext, outcome: MapMove): Boolean {
+    private fun applyMove(
+        ctx: ThreadSafeContext,
+        outcome: MapMove,
+    ): Boolean {
         if (!outcome.applied) return false
         if (outcome.changed) bumpOrder(ctx)
         return true
@@ -319,7 +371,10 @@ class ThreadSafeComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
      * Reactive membership test for [key]. Subscribes the caller to membership
      * changes (add/remove of any key), not to value changes.
      */
-    fun containsKey(ctx: ThreadSafeContext, key: K): Boolean {
+    fun containsKey(
+        ctx: ThreadSafeContext,
+        key: K,
+    ): Boolean {
         val target = membershipId(ctx)
         ctx.getCellAny(target)
         return isPresent(key)
@@ -337,22 +392,34 @@ class ThreadSafeComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
      * re-mint, which re-allocates and bumps membership twice. Only the order
      * signal is bumped. [index] is clamped to `[0, len)`.
      */
-    fun moveTo(ctx: ThreadSafeContext, key: K, index: Int): Boolean =
-        applyMove(ctx, lock.withLock { keyed.moveTo(key, index) })
+    fun moveTo(
+        ctx: ThreadSafeContext,
+        key: K,
+        index: Int,
+    ): Boolean = applyMove(ctx, lock.withLock { keyed.moveTo(key, index) })
 
     /** Atomically move [key] to just before [anchor] (`#lzcellmove`). */
-    fun moveBefore(ctx: ThreadSafeContext, key: K, anchor: K): Boolean =
-        applyMove(ctx, lock.withLock { keyed.moveBefore(key, anchor) })
+    fun moveBefore(
+        ctx: ThreadSafeContext,
+        key: K,
+        anchor: K,
+    ): Boolean = applyMove(ctx, lock.withLock { keyed.moveBefore(key, anchor) })
 
     /** Atomically move [key] to just after [anchor] (`#lzcellmove`). */
-    fun moveAfter(ctx: ThreadSafeContext, key: K, anchor: K): Boolean =
-        applyMove(ctx, lock.withLock { keyed.moveAfter(key, anchor) })
+    fun moveAfter(
+        ctx: ThreadSafeContext,
+        key: K,
+        anchor: K,
+    ): Boolean = applyMove(ctx, lock.withLock { keyed.moveAfter(key, anchor) })
 
     /**
      * Remove [key]'s entry and bump reactive membership. Returns whether the key
      * was present.
      */
-    fun remove(ctx: ThreadSafeContext, key: K): Boolean {
+    fun remove(
+        ctx: ThreadSafeContext,
+        key: K,
+    ): Boolean {
         val (_, mutation) = lock.withLock { keyed.remove(key) }
         if (!mutation.changed) return false
         bumpMembership(ctx)

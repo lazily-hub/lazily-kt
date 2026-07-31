@@ -7,7 +7,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import kotlin.test.assertEquals
@@ -88,22 +87,23 @@ class AssertionKeys(
     fun int(key: String): Int? = long(key)?.toInt()
 
     /** Booleans, tolerating the `"true"`/`"false"` string spelling the corpus also uses. */
-    fun boolean(key: String): Boolean? = when (val e = this[key]) {
-        null -> null
-        is JsonPrimitive -> e.booleanOrNull ?: when (e.contentOrNull) {
-            "true" -> true
-            "false" -> false
+    fun boolean(key: String): Boolean? =
+        when (val e = this[key]) {
+            null -> null
+            is JsonPrimitive ->
+                e.booleanOrNull ?: when (e.contentOrNull) {
+                    "true" -> true
+                    "false" -> false
+                    else -> error("$where: assertion key '$key' is not a boolean: $e")
+                }
             else -> error("$where: assertion key '$key' is not a boolean: $e")
         }
-        else -> error("$where: assertion key '$key' is not a boolean: $e")
-    }
 
     fun obj(key: String): JsonObject? = (this[key] as? JsonObject)
 
     fun array(key: String): JsonArray? = (this[key] as? JsonArray)
 
-    fun strings(key: String): List<String>? =
-        array(key)?.map { it.jsonPrimitive.content }
+    fun strings(key: String): List<String>? = array(key)?.map { it.jsonPrimitive.content }
 
     /**
      * Consume every key starting with [prefix] and return the matches.
@@ -126,35 +126,50 @@ class AssertionKeys(
      * [actual] is by-name because the key is optional and the observable is
      * often unreachable when the fixture does not carry it.
      */
-    fun assertLong(key: String, actual: () -> Long) {
+    fun assertLong(
+        key: String,
+        actual: () -> Long,
+    ) {
         val want = long(key) ?: return
         asserted += key
         assertEquals(want, actual(), "$where: $key")
     }
 
     /** Assert [actual] against the fixture's `Int` value for [key]. */
-    fun assertInt(key: String, actual: () -> Int) {
+    fun assertInt(
+        key: String,
+        actual: () -> Int,
+    ) {
         val want = int(key) ?: return
         asserted += key
         assertEquals(want, actual(), "$where: $key")
     }
 
     /** Assert [actual] against the fixture's boolean value for [key]. */
-    fun assertBoolean(key: String, actual: () -> Boolean) {
+    fun assertBoolean(
+        key: String,
+        actual: () -> Boolean,
+    ) {
         val want = boolean(key) ?: return
         asserted += key
         assertEquals(want, actual(), "$where: $key")
     }
 
     /** Assert [actual] against the fixture's string value for [key]. */
-    fun assertString(key: String, actual: () -> String?) {
+    fun assertString(
+        key: String,
+        actual: () -> String?,
+    ) {
         val want = string(key) ?: return
         asserted += key
         assertEquals(want, actual(), "$where: $key")
     }
 
     /** Assert [actual] against the fixture's string-array value for [key]. */
-    fun assertStrings(key: String, actual: () -> List<String>) {
+    fun assertStrings(
+        key: String,
+        actual: () -> List<String>,
+    ) {
         val want = strings(key) ?: return
         asserted += key
         assertEquals(want, actual(), "$where: $key")
@@ -171,7 +186,10 @@ class AssertionKeys(
      * its argument is the very defect this class exists to name, and there is no
      * way to detect that from here, so do not write one — use [excuseKey].
      */
-    fun assertKeyWith(key: String, check: (JsonElement) -> Unit) {
+    fun assertKeyWith(
+        key: String,
+        check: (JsonElement) -> Unit,
+    ) {
         val want = this[key] ?: return
         asserted += key
         check(want)
@@ -190,7 +208,10 @@ class AssertionKeys(
      * is also asserted, or one the fixture does not carry, fails. Prefer
      * converting the excuse into a real assertion — excusing is the fallback.
      */
-    fun excuseKey(key: String, reason: String) {
+    fun excuseKey(
+        key: String,
+        reason: String,
+    ) {
         require(reason.isNotBlank()) {
             "$where: excuseKey('$key') needs a reason — an excuse without one is an allowlist entry"
         }
@@ -249,7 +270,10 @@ class AssertionKeys(
  * carried a stale excuse. [where] should identify the fixture (and step, where
  * there is one) so the error is actionable.
  */
-inline fun JsonObject.consuming(where: String, block: (AssertionKeys) -> Unit) {
+inline fun JsonObject.consuming(
+    where: String,
+    block: (AssertionKeys) -> Unit,
+) {
     val keys = AssertionKeys(where, this)
     block(keys)
     keys.requireAllSatisfied()

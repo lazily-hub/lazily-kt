@@ -39,10 +39,10 @@ class TopicCellTest {
                 TopicSnapshot(
                     elements = listOf("a", "b", "c"),
                     subscriptions =
-                        mapOf(
-                            "fast" to TopicSubscriptionSnapshot(3, TopicDurability.Durable, true),
-                            "slow" to TopicSubscriptionSnapshot(0, TopicDurability.Durable, true),
-                        ),
+                    mapOf(
+                        "fast" to TopicSubscriptionSnapshot(3, TopicDurability.Durable, true),
+                        "slow" to TopicSubscriptionSnapshot(0, TopicDurability.Durable, true),
+                    ),
                 ),
             )
 
@@ -138,14 +138,14 @@ class TopicCellTest {
                 Context(),
                 TopicSnapshot(
                     subscriptions =
-                        mapOf(
-                            "viewer" to
-                                TopicSubscriptionSnapshot(
-                                    cursor = 0,
-                                    durability = TopicDurability.Ephemeral,
-                                    connected = false,
-                                ),
-                        ),
+                    mapOf(
+                        "viewer" to
+                            TopicSubscriptionSnapshot(
+                                cursor = 0,
+                                durability = TopicDurability.Ephemeral,
+                                connected = false,
+                            ),
+                    ),
                 ),
             )
         }

@@ -14,11 +14,17 @@ package io.github.lazily
 /** Sentinel for "nothing emitted yet" — the reactive cell requires a non-null [Any]. */
 private object WindowEmpty
 
-private fun <T> foldWindow(items: List<T>, merge: (T, T) -> T): T? = items.reduceOrNull(merge)
+private fun <T> foldWindow(
+    items: List<T>,
+    merge: (T, T) -> T,
+): T? = items.reduceOrNull(merge)
 
 // -- Tumbling (count) --------------------------------------------------------
 
-class TumblingCountCore<T : Any>(n: Long, private val merge: (T, T) -> T) {
+class TumblingCountCore<T : Any>(
+    n: Long,
+    private val merge: (T, T) -> T,
+) {
     private val n = maxOf(1L, n)
     private var acc: T? = null
     private var count: Long = 0
@@ -38,12 +44,18 @@ class TumblingCountCore<T : Any>(n: Long, private val merge: (T, T) -> T) {
 
 // -- Tumbling (time) ---------------------------------------------------------
 
-class TumblingTimeCore<T : Any>(period: Long, private val merge: (T, T) -> T) {
+class TumblingTimeCore<T : Any>(
+    period: Long,
+    private val merge: (T, T) -> T,
+) {
     private val period = maxOf(1L, period)
     private var next = this.period
     private var acc: T? = null
 
-    fun push(now: Long, v: T) {
+    fun push(
+        now: Long,
+        v: T,
+    ) {
         acc = acc?.let { merge(it, v) } ?: v
     }
 
@@ -58,7 +70,11 @@ class TumblingTimeCore<T : Any>(period: Long, private val merge: (T, T) -> T) {
 
 // -- Sliding (count) ---------------------------------------------------------
 
-class SlidingCore<T : Any>(size: Long, slide: Long, private val merge: (T, T) -> T) {
+class SlidingCore<T : Any>(
+    size: Long,
+    slide: Long,
+    private val merge: (T, T) -> T,
+) {
     private val size = maxOf(1, size.toInt())
     private val slide = maxOf(1L, slide)
     private val buffer = ArrayDeque<T>()
@@ -78,11 +94,17 @@ class SlidingCore<T : Any>(size: Long, slide: Long, private val merge: (T, T) ->
 
 // -- Session (gap-based) -----------------------------------------------------
 
-class SessionCore<T : Any>(private val gap: Long, private val merge: (T, T) -> T) {
+class SessionCore<T : Any>(
+    private val gap: Long,
+    private val merge: (T, T) -> T,
+) {
     private var acc: T? = null
     private var last: Long? = null
 
-    fun push(now: Long, v: T): T? {
+    fun push(
+        now: Long,
+        v: T,
+    ): T? {
         val l = last
         val idleBreak = l != null && now - l > gap && acc != null
         return if (idleBreak) {
@@ -112,46 +134,83 @@ class SessionCore<T : Any>(private val gap: Long, private val merge: (T, T) -> T
 // -- Reactive cells ----------------------------------------------------------
 
 /** Shared reactive-cell projection: last emitted aggregate on a `Cell`. */
-private class WindowOutput<T : Any>(val ctx: Context) {
+private class WindowOutput<T : Any>(
+    val ctx: Context,
+) {
     val cell: Source<Any> = ctx.source<Any>(WindowEmpty)
+
     fun emit(e: T?): T? {
         if (e != null) cell.set(ctx, e)
         return e
     }
+
     @Suppress("UNCHECKED_CAST")
     fun value(ops: ComputeOps = ctx): T? = ops.get(cell).let { if (it === WindowEmpty) null else it as T }
 }
 
-class TumblingCountWindow<T : Any>(ctx: Context, n: Long, merge: (T, T) -> T) {
+class TumblingCountWindow<T : Any>(
+    ctx: Context,
+    n: Long,
+    merge: (T, T) -> T,
+) {
     private val core = TumblingCountCore(n, merge)
     private val out = WindowOutput<T>(ctx)
     val outputCell: Source<Any> get() = out.cell
+
     fun push(v: T): T? = out.emit(core.push(v))
+
     fun output(ops: ComputeOps = out.ctx): T? = out.value(ops)
 }
 
-class TumblingTimeWindow<T : Any>(ctx: Context, period: Long, merge: (T, T) -> T) {
+class TumblingTimeWindow<T : Any>(
+    ctx: Context,
+    period: Long,
+    merge: (T, T) -> T,
+) {
     private val core = TumblingTimeCore(period, merge)
     private val out = WindowOutput<T>(ctx)
     val outputCell: Source<Any> get() = out.cell
-    fun push(now: Long, v: T) = core.push(now, v)
+
+    fun push(
+        now: Long,
+        v: T,
+    ) = core.push(now, v)
+
     fun tick(now: Long): T? = out.emit(core.tick(now))
+
     fun output(ops: ComputeOps = out.ctx): T? = out.value(ops)
 }
 
-class SlidingWindow<T : Any>(ctx: Context, size: Long, slide: Long, merge: (T, T) -> T) {
+class SlidingWindow<T : Any>(
+    ctx: Context,
+    size: Long,
+    slide: Long,
+    merge: (T, T) -> T,
+) {
     private val core = SlidingCore(size, slide, merge)
     private val out = WindowOutput<T>(ctx)
     val outputCell: Source<Any> get() = out.cell
+
     fun push(v: T): T? = out.emit(core.push(v))
+
     fun output(ops: ComputeOps = out.ctx): T? = out.value(ops)
 }
 
-class SessionWindow<T : Any>(ctx: Context, gap: Long, merge: (T, T) -> T) {
+class SessionWindow<T : Any>(
+    ctx: Context,
+    gap: Long,
+    merge: (T, T) -> T,
+) {
     private val core = SessionCore(gap, merge)
     private val out = WindowOutput<T>(ctx)
     val outputCell: Source<Any> get() = out.cell
-    fun push(now: Long, v: T): T? = out.emit(core.push(now, v))
+
+    fun push(
+        now: Long,
+        v: T,
+    ): T? = out.emit(core.push(now, v))
+
     fun flush(now: Long): T? = out.emit(core.flush(now))
+
     fun output(ops: ComputeOps = out.ctx): T? = out.value(ops)
 }

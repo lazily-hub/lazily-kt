@@ -102,9 +102,10 @@ class ThreadSafeMapConformanceTest {
         val ctx = ThreadSafeContext()
         val liveness = ThreadSafeSourceMap<Long, Boolean>()
         liveness.materializeAll(ctx, listOf(10L, 20L, 30L)) { true }
-        val liveCount = ctx.computed {
-            liveness.presentKeys().count { k -> liveness.observe(this, k) }
-        }
+        val liveCount =
+            ctx.computed {
+                liveness.presentKeys().count { k -> liveness.observe(this, k) }
+            }
         assertEquals(3, ctx.get(liveCount))
         // Flip one editor offline → derived count recomputes reactively.
         liveness.set(ctx, 20L, false)
@@ -118,9 +119,10 @@ class ThreadSafeMapConformanceTest {
     fun sharedAcrossThreads() {
         val ctx = ThreadSafeContext()
         val map = ThreadSafeSourceMap<Int, Boolean>()
-        val threads = (1..8).map { k ->
-            thread { assertTrue(ctx.getCellAny(map.entry(ctx, k) { true }.id) as Boolean) }
-        }
+        val threads =
+            (1..8).map { k ->
+                thread { assertTrue(ctx.getCellAny(map.entry(ctx, k) { true }.id) as Boolean) }
+            }
         threads.forEach { it.join() }
         assertEquals(8, map.presentCount)
     }

@@ -27,7 +27,11 @@ class ThreadSafeContextTest {
         val ctx = ThreadSafeContext()
         val src = ctx.source(1)
         var runs = 0
-        val derived = ctx.computed { runs++; ctx.get(src) * 2 }
+        val derived =
+            ctx.computed {
+                runs++
+                ctx.get(src) * 2
+            }
         assertEquals(2, ctx.get(derived))
         assertEquals(1, runs)
         ctx.set(src, 1) // equal: no invalidation
@@ -42,7 +46,11 @@ class ThreadSafeContextTest {
     fun slot_is_lazy_and_caches() {
         val ctx = ThreadSafeContext()
         var calls = 0
-        val s = ctx.computed { calls++; 42 }
+        val s =
+            ctx.computed {
+                calls++
+                42
+            }
         assertFalse(ctx.isSet(s))
         assertEquals(42, ctx.get(s))
         assertEquals(1, calls)
@@ -80,9 +88,17 @@ class ThreadSafeContextTest {
     fun memo_guard_suppresses_downstream_on_equal_recompute() {
         val ctx = ThreadSafeContext()
         val trigger = ctx.source(1)
-        val constant = ctx.computed { ctx.get(trigger); 7 }
+        val constant =
+            ctx.computed {
+                ctx.get(trigger)
+                7
+            }
         var leafRuns = 0
-        val leaf = ctx.computed { leafRuns++; ctx.get(constant) + 1 }
+        val leaf =
+            ctx.computed {
+                leafRuns++
+                ctx.get(constant) + 1
+            }
         assertEquals(8, ctx.get(leaf))
         assertEquals(1, leafRuns)
         ctx.set(trigger, 2) // constant recomputes to 7 (equal) → leaf must NOT recompute
@@ -122,7 +138,11 @@ class ThreadSafeContextTest {
         val ctx = ThreadSafeContext()
         val src = ctx.source(1)
         val seen = mutableListOf<Int>()
-        val eff = ctx.effect { seen.add(ctx.get(src)); null }
+        val eff =
+            ctx.effect {
+                seen.add(ctx.get(src))
+                null
+            }
         assertTrue(ctx.isEffectActive(eff))
         assertEquals(listOf(1), seen)
         ctx.set(src, 2)
@@ -137,7 +157,11 @@ class ThreadSafeContextTest {
         val b = ctx.source(10)
         var runs = 0
         var lastSum = 0
-        ctx.effect { lastSum = ctx.get(a) + ctx.get(b); runs++; null }
+        ctx.effect {
+            lastSum = ctx.get(a) + ctx.get(b)
+            runs++
+            null
+        }
         assertEquals(1, runs)
         assertEquals(11, lastSum)
         ctx.batch {
@@ -155,7 +179,11 @@ class ThreadSafeContextTest {
         val ctx = ThreadSafeContext()
         val src = ctx.source(0)
         var cleanups = 0
-        val eff = ctx.effect { ctx.get(src); { cleanups++ } }
+        val eff =
+            ctx.effect {
+                ctx.get(src);
+                { cleanups++ }
+            }
         ctx.set(src, 1) // rerun → previous cleanup runs
         assertEquals(1, cleanups)
         ctx.disposeEffect(eff)
@@ -171,7 +199,11 @@ class ThreadSafeContextTest {
         val ctx = ThreadSafeContext()
         val src = ctx.source(1)
         var computeRuns = 0
-        val sig = ctx.signal { computeRuns++; ctx.get(src) + 1 }
+        val sig =
+            ctx.signal {
+                computeRuns++
+                ctx.get(src) + 1
+            }
         assertEquals(2, ctx.getSignal(sig))
         assertEquals(1, computeRuns)
         assertTrue(ctx.isSignalActive(sig))
@@ -202,11 +234,12 @@ class ThreadSafeContextTest {
         // (without the gate the worker could read the pre-write value and race).
         val published = CountDownLatch(1)
         try {
-            val future = pool.submit<Int> {
-                published.await()
-                ctx.get(srcCopy) // cross-thread read through a cloned handle
-                ctx.get(derivedCopy)
-            }
+            val future =
+                pool.submit<Int> {
+                    published.await()
+                    ctx.get(srcCopy) // cross-thread read through a cloned handle
+                    ctx.get(derivedCopy)
+                }
             ctx.set(src, 21)
             published.countDown()
             // Worker observes the happens-before-published value.
@@ -258,8 +291,18 @@ class ThreadSafeContextTest {
         val pool = Executors.newFixedThreadPool(8)
         val done = CountDownLatch(2000)
         try {
-            repeat(1000) { pool.submit { ctx.set(a, it); done.countDown() } }
-            repeat(1000) { pool.submit { ctx.set(b, it); done.countDown() } }
+            repeat(1000) {
+                pool.submit {
+                    ctx.set(a, it)
+                    done.countDown()
+                }
+            }
+            repeat(1000) {
+                pool.submit {
+                    ctx.set(b, it)
+                    done.countDown()
+                }
+            }
             assertTrue(done.await(30, TimeUnit.SECONDS))
         } finally {
             pool.shutdown()
@@ -304,9 +347,15 @@ class ThreadSafeContextTest {
     @Test
     fun thread_safe_state_machine_stays_consistent_across_threads() {
         val ctx = ThreadSafeContext()
-        val m = ThreadSafeStateMachine(ctx, "Red") { s, _: String ->
-            when (s) { "Red" -> "Green"; "Green" -> "Yellow"; "Yellow" -> "Red"; else -> null }
-        }
+        val m =
+            ThreadSafeStateMachine(ctx, "Red") { s, _: String ->
+                when (s) {
+                    "Red" -> "Green"
+                    "Green" -> "Yellow"
+                    "Yellow" -> "Red"
+                    else -> null
+                }
+            }
         val transitions = AtomicInteger(0)
         m.onTransition { _, _ -> transitions.incrementAndGet() }
 

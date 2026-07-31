@@ -11,13 +11,18 @@ import io.github.lazily.OutboxStore
  * This lives in the `outbox` namespace because the root package already has a
  * relay-role `Outbox<T>` type.
  */
-open class Outbox<S : OutboxStore>(val store: S) : DurableOutbox {
+open class Outbox<S : OutboxStore>(
+    val store: S,
+) : DurableOutbox {
     private var localAckedThrough: Long = store.loadCursor()
 
     val ackedThrough: Long
         get() = maxOf(localAckedThrough, store.loadCursor())
 
-    override fun append(epoch: Long, msg: IpcMessage) {
+    override fun append(
+        epoch: Long,
+        msg: IpcMessage,
+    ) {
         store.put(epoch, msg.encodeJson())
     }
 
@@ -29,7 +34,8 @@ open class Outbox<S : OutboxStore>(val store: S) : DurableOutbox {
     }
 
     override fun replayFrom(cursor: Long): List<Pair<Long, IpcMessage>> =
-        store.scanAfter(maxOf(cursor, ackedThrough))
+        store
+            .scanAfter(maxOf(cursor, ackedThrough))
             .sortedBy { it.first }
             .map { (epoch, frame) -> epoch to IpcMessage.decodeJson(frame) }
 

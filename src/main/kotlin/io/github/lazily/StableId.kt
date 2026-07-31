@@ -25,13 +25,19 @@ package io.github.lazily
  * @property anchor in-band stable id, if the source provides one
  * @property text the block's raw text
  */
-data class Block(val anchor: String?, val text: String) {
+data class Block(
+    val anchor: String?,
+    val text: String,
+) {
     companion object {
         /** A block with no anchor. */
         fun text(text: String): Block = Block(anchor = null, text = text)
 
         /** A block with an in-band anchor id. */
-        fun anchored(anchor: String, text: String): Block = Block(anchor = anchor, text = text)
+        fun anchored(
+            anchor: String,
+            text: String,
+        ): Block = Block(anchor = anchor, text = text)
     }
 }
 
@@ -42,16 +48,21 @@ data class Block(val anchor: String?, val text: String) {
  */
 sealed class BlockKey {
     /** From an in-band anchor — survives a full rewrite of the block body. */
-    data class Anchored(val id: String) : BlockKey()
+    data class Anchored(
+        val id: String,
+    ) : BlockKey()
 
     /** Hash of normalized content — survives reflow/reorder, changes on edit. */
-    data class Content(val hash: Long) : BlockKey()
+    data class Content(
+        val hash: Long,
+    ) : BlockKey()
 
     /** A stable string form usable as a reconciliation key. */
-    fun asString(): String = when (this) {
-        is Anchored -> "a:$id"
-        is Content -> "c:%016x".format(hash)
-    }
+    fun asString(): String =
+        when (this) {
+            is Anchored -> "a:$id"
+            is Content -> "c:%016x".format(hash)
+        }
 }
 
 /**
@@ -59,7 +70,11 @@ sealed class BlockKey {
  * content key: collapse all whitespace runs to single spaces and trim.
  */
 private fun normalize(text: String): String =
-    text.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
+    text
+        .trim()
+        .split(Regex("\\s+"))
+        .filter { it.isNotEmpty() }
+        .joinToString(" ")
 
 /** Deterministic 64-bit FNV-1a hash over the *normalized* text. */
 private fun contentHash(text: String): Long {
@@ -73,20 +88,26 @@ private fun contentHash(text: String): Long {
 }
 
 /** The identity key for a block: its anchor if present, else a content hash. */
-fun blockKey(b: Block): BlockKey = when (b.anchor) {
-    null -> BlockKey.Content(contentHash(b.text))
-    else -> BlockKey.Anchored(b.anchor)
-}
+fun blockKey(b: Block): BlockKey =
+    when (b.anchor) {
+        null -> BlockKey.Content(contentHash(b.text))
+        else -> BlockKey.Anchored(b.anchor)
+    }
 
 /**
  * How a new block relates to the old sequence.
  */
 sealed class Match {
     /** Exact key match (anchor or content hash) — identity preserved. */
-    data class Same(val old: Int) : Match()
+    data class Same(
+        val old: Int,
+    ) : Match()
 
     /** Matched to a predecessor by similarity; the content changed (an edit). */
-    data class Edited(val old: Int, val similarity: Float) : Match()
+    data class Edited(
+        val old: Int,
+        val similarity: Float,
+    ) : Match()
 
     /** No match — a genuine insertion. */
     data object Inserted : Match()
@@ -98,13 +119,19 @@ sealed class Match {
  * @property newMatches one entry per new block, in order
  * @property removed old block indices that were not matched
  */
-data class Alignment(val newMatches: List<Match>, val removed: List<Int>)
+data class Alignment(
+    val newMatches: List<Match>,
+    val removed: List<Int>,
+)
 
 /**
  * Word-LCS similarity ratio in `[0,1]`: `2·|LCS| / (|a|+|b|)` over whitespace
  * tokens (the difflib/Myers-style ratio). 1.0 = identical token sequence.
  */
-fun similarity(a: String, b: String): Float {
+fun similarity(
+    a: String,
+    b: String,
+): Float {
     val aw = a.split(Regex("\\s+")).filter { it.isNotEmpty() }
     val bw = b.split(Regex("\\s+")).filter { it.isNotEmpty() }
     if (aw.isEmpty() && bw.isEmpty()) return 1.0f
@@ -112,7 +139,10 @@ fun similarity(a: String, b: String): Float {
     return (2f * lcs) / (aw.size + bw.size)
 }
 
-private fun lcsLen(a: List<String>, b: List<String>): Int {
+private fun lcsLen(
+    a: List<String>,
+    b: List<String>,
+): Int {
     val dp = IntArray(b.size + 1)
     for (x in a) {
         var prev = 0
@@ -135,7 +165,10 @@ const val EDIT_THRESHOLD: Float = 0.5f
  * breaks ties) and classified `Edited`, else `Inserted`. Unmatched old blocks
  * are `removed`.
  */
-fun align(old: List<Block>, new: List<Block>): Alignment {
+fun align(
+    old: List<Block>,
+    new: List<Block>,
+): Alignment {
     val oldKeys = old.map { blockKey(it) }
     val newKeys = new.map { blockKey(it) }
     val oldUsed = BooleanArray(old.size)
@@ -159,9 +192,10 @@ fun align(old: List<Block>, new: List<Block>): Alignment {
         for (oi in old.indices) {
             if (oldUsed[oi]) continue
             val sim = similarity(new[ni].text, old[oi].text)
-            val better = best == null ||
-                sim > best!!.second ||
-                (sim == best!!.second && kotlin.math.abs(oi - ni) < kotlin.math.abs(best!!.first - ni))
+            val better =
+                best == null ||
+                    sim > best!!.second ||
+                    (sim == best!!.second && kotlin.math.abs(oi - ni) < kotlin.math.abs(best!!.first - ni))
             if (better) best = oi to sim
         }
         if (best == null) {
@@ -187,7 +221,10 @@ fun align(old: List<Block>, new: List<Block>): Alignment {
  * flows through an edit (the reconciler emits `Update`, not remove+insert). An
  * `Inserted` block gets its own anchor/content key.
  */
-fun assignStableKeys(old: List<Block>, new: List<Block>): List<String> {
+fun assignStableKeys(
+    old: List<Block>,
+    new: List<Block>,
+): List<String> {
     val oldKeys = old.map { blockKey(it).asString() }
     val alignment = align(old, new)
     return alignment.newMatches.mapIndexed { ni, m ->

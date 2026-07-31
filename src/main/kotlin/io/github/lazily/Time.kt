@@ -19,8 +19,14 @@ package io.github.lazily
 /** A value paired with a liveness state: [Live] until its deadline, then [Expired]. */
 sealed class Deadlined<out T> {
     abstract val value: T
-    data class Live<out T>(override val value: T) : Deadlined<T>()
-    data class Expired<out T>(override val value: T) : Deadlined<T>()
+
+    data class Live<out T>(
+        override val value: T,
+    ) : Deadlined<T>()
+
+    data class Expired<out T>(
+        override val value: T,
+    ) : Deadlined<T>()
 
     val isExpired: Boolean get() = this is Expired
 }
@@ -28,7 +34,9 @@ sealed class Deadlined<out T> {
 // -- Single-shot timer -------------------------------------------------------
 
 /** Single-shot core: fires exactly once at the first tick with `now >= fireAt`. */
-class TimerCore(private val fireAt: Long) {
+class TimerCore(
+    private val fireAt: Long,
+) {
     var fired: Boolean = false
         private set
 
@@ -43,7 +51,10 @@ class TimerCore(private val fireAt: Long) {
 }
 
 /** Reactive single-shot timer: edge-only invalidation of `fired`/`value`. */
-class TimerCell(private val ctx: Context, fireAt: Long) {
+class TimerCell(
+    private val ctx: Context,
+    fireAt: Long,
+) {
     private val core = TimerCore(fireAt)
     val firedCell: Source<Boolean> = ctx.source(false)
 
@@ -54,7 +65,9 @@ class TimerCell(private val ctx: Context, fireAt: Long) {
     }
 
     fun hasFired(ops: ComputeOps = ctx): Boolean = ops.get(firedCell)
+
     fun value(ops: ComputeOps = ctx): Unit? = if (ops.get(firedCell)) Unit else null
+
     fun nextFire(): Long? = core.nextFire()
 }
 
@@ -62,14 +75,15 @@ class TimerCell(private val ctx: Context, fireAt: Long) {
 
 /** Periodic core: boundaries at `period, 2*period, ...`; a tick counts every
  * boundary in `(frontier, now]`, so a jump past several counts them all. */
-class IntervalCore(period: Long) {
+class IntervalCore(
+    period: Long,
+) {
     private val period: Long = if (period < 1L) 1L else period
     private var next: Long = this.period
     var count: Long = 0L
         private set
 
-    private fun firesThisTick(now: Long): Long =
-        if (now < next) 0L else (now - next) / period + 1L
+    private fun firesThisTick(now: Long): Long = if (now < next) 0L else (now - next) / period + 1L
 
     fun tick(now: Long): Boolean {
         val fires = firesThisTick(now)
@@ -83,7 +97,10 @@ class IntervalCore(period: Long) {
 }
 
 /** Reactive periodic interval: invalidates only when `count` changes. */
-class IntervalCell(private val ctx: Context, period: Long) {
+class IntervalCell(
+    private val ctx: Context,
+    period: Long,
+) {
     private val core = IntervalCore(period)
     val countCell: Source<Long> = ctx.source(0L)
 
@@ -94,6 +111,7 @@ class IntervalCell(private val ctx: Context, period: Long) {
     }
 
     fun count(ops: ComputeOps = ctx): Long = ops.get(countCell)
+
     fun nextFire(): Long = core.nextFire()
 }
 
@@ -101,7 +119,10 @@ class IntervalCell(private val ctx: Context, period: Long) {
 
 /** Pattern-periodic core: a tick `m >= 1` fires iff `m mod cycle` is in
  * `offsets` — an interval with a match set (a cron expression's shape). */
-class CronCore(cycle: Long, offsets: List<Long>) {
+class CronCore(
+    cycle: Long,
+    offsets: List<Long>,
+) {
     private val cycle: Long = if (cycle < 1L) 1L else cycle
     private val offsets: List<Long> =
         offsets.map { ((it % this.cycle) + this.cycle) % this.cycle }.distinct().sorted()
@@ -110,11 +131,22 @@ class CronCore(cycle: Long, offsets: List<Long>) {
         private set
 
     /** Count of `m in 1..=n` with `m mod cycle == o` (`0 <= o < cycle`). */
-    private fun countUpto(n: Long, o: Long): Long =
-        if (o == 0L) n / cycle else if (o <= n) (n - o) / cycle + 1L else 0L
+    private fun countUpto(
+        n: Long,
+        o: Long,
+    ): Long =
+        if (o == 0L) {
+            n / cycle
+        } else if (o <= n) {
+            (n - o) / cycle + 1L
+        } else {
+            0L
+        }
 
-    private fun matchesIn(lo: Long, hi: Long): Long =
-        offsets.sumOf { countUpto(hi, it) - countUpto(lo, it) }
+    private fun matchesIn(
+        lo: Long,
+        hi: Long,
+    ): Long = offsets.sumOf { countUpto(hi, it) - countUpto(lo, it) }
 
     fun tick(now: Long): Boolean {
         if (now <= cursor) {
@@ -144,7 +176,11 @@ class CronCore(cycle: Long, offsets: List<Long>) {
 }
 
 /** Reactive cron source: same reactive contract as [IntervalCell]. */
-class CronCell(private val ctx: Context, cycle: Long, offsets: List<Long>) {
+class CronCell(
+    private val ctx: Context,
+    cycle: Long,
+    offsets: List<Long>,
+) {
     private val core = CronCore(cycle, offsets)
     val countCell: Source<Long> = ctx.source(0L)
 
@@ -155,23 +191,31 @@ class CronCell(private val ctx: Context, cycle: Long, offsets: List<Long>) {
     }
 
     fun count(ops: ComputeOps = ctx): Long = ops.get(countCell)
+
     fun nextFire(): Long? = core.nextFire()
 }
 
 // -- Value + deadline --------------------------------------------------------
 
 /** Deadline core (bytes-eligible): a [TimerCore] over the deadline. */
-class DeadlineCore(deadline: Long) {
+class DeadlineCore(
+    deadline: Long,
+) {
     private val timer = TimerCore(deadline)
     val isExpired: Boolean get() = timer.fired
 
     fun tick(now: Long): Boolean = timer.tick(now)
+
     fun nextFire(): Long? = timer.nextFire()
 }
 
 /** Reactive value + deadline: flips `Live(v) -> Expired(v)` at the deadline,
  * preserving the value; `state` invalidates only on the expiry edge. */
-class DeadlineCell<T : Any>(private val ctx: Context, private val value: T, deadline: Long) {
+class DeadlineCell<T : Any>(
+    private val ctx: Context,
+    private val value: T,
+    deadline: Long,
+) {
     private val core = DeadlineCore(deadline)
     val expiredCell: Source<Boolean> = ctx.source(false)
 
@@ -181,9 +225,9 @@ class DeadlineCell<T : Any>(private val ctx: Context, private val value: T, dead
         return edge
     }
 
-    fun state(ops: ComputeOps = ctx): Deadlined<T> =
-        if (ops.get(expiredCell)) Deadlined.Expired(value) else Deadlined.Live(value)
+    fun state(ops: ComputeOps = ctx): Deadlined<T> = if (ops.get(expiredCell)) Deadlined.Expired(value) else Deadlined.Live(value)
 
     fun isExpired(ops: ComputeOps = ctx): Boolean = ops.get(expiredCell)
+
     fun nextFire(): Long? = core.nextFire()
 }

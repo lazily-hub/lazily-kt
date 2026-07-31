@@ -87,9 +87,10 @@ class StateMachine<S : Any, E>(
 
     /** An eager computed that is `true` when the machine is in [target], else `false`. */
     fun stateIs(target: S): Computed<Boolean> =
-        ctx.computed {
-            // Tracked read through the computed's Compute view (#lzcellkernel).
-            @Suppress("UNCHECKED_CAST")
-            (getCellAny(stateId) as S) == target
-        }.eager(ctx)
+        ctx
+            .computed {
+                // Tracked read through the computed's Compute view (#lzcellkernel).
+                @Suppress("UNCHECKED_CAST")
+                (getCellAny(stateId) as S) == target
+            }.eager(ctx)
 }

@@ -8,7 +8,7 @@ package io.github.lazily
  * convenience operation over the same join-semilattice.
  */
 interface CrdtTree<Self, VersionVector, Delta, Value>
-where Self : CrdtTree<Self, VersionVector, Delta, Value> {
+    where Self : CrdtTree<Self, VersionVector, Delta, Value> {
     fun versionVector(): VersionVector
 
     fun deltaSince(theirVersion: VersionVector): Delta

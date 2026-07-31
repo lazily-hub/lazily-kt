@@ -17,7 +17,10 @@ import kotlin.test.assertTrue
  */
 class SyncDriverTest {
     /** Records sent frames; `up=false` models a downed transport (send fails). */
-    private class TestSink(val sent: MutableList<IpcMessage> = mutableListOf(), var up: Boolean = true) : IpcSink {
+    private class TestSink(
+        val sent: MutableList<IpcMessage> = mutableListOf(),
+        var up: Boolean = true,
+    ) : IpcSink {
         override fun send(message: IpcMessage): Boolean {
             if (!up) return false
             sent.add(message)
@@ -26,7 +29,10 @@ class SyncDriverTest {
     }
 
     /** Replays a scripted inbound queue; `err=true` throws once (the reconnect signal). */
-    private class TestSource(val inbound: ArrayDeque<IpcMessage> = ArrayDeque(), var err: Boolean = false) : IpcSource {
+    private class TestSource(
+        val inbound: ArrayDeque<IpcMessage> = ArrayDeque(),
+        var err: Boolean = false,
+    ) : IpcSource {
         override fun recv(): IpcMessage? {
             if (err) {
                 err = false
@@ -42,18 +48,21 @@ class SyncDriverTest {
 
     /** Answers a `ResyncRequest{from}` with a snapshot at `from + 5`. */
     private object SnapAhead : SnapshotProvider {
-        override fun snapshot(fromEpoch: Long): IpcMessage =
-            IpcMessage.ofSnapshot(Snapshot(epoch = fromEpoch + 5))
+        override fun snapshot(fromEpoch: Long): IpcMessage = IpcMessage.ofSnapshot(Snapshot(epoch = fromEpoch + 5))
     }
 
-    private class Harness(lastEpoch: Long = 0) {
+    private class Harness(
+        lastEpoch: Long = 0,
+    ) {
         val sink = TestSink()
         val source = TestSource()
         val driver = SyncDriver(sink, source, InMemoryOutbox(), Zero, SnapAhead, lastEpoch)
     }
 
-    private fun delta(base: Long, epoch: Long): IpcMessage =
-        IpcMessage.ofDelta(Delta(baseEpoch = base, epoch = epoch))
+    private fun delta(
+        base: Long,
+        epoch: Long,
+    ): IpcMessage = IpcMessage.ofDelta(Delta(baseEpoch = base, epoch = epoch))
 
     @Test
     fun drainsAppendBeforeSendAndRetainsUntilAcked() {
@@ -114,7 +123,12 @@ class SyncDriverTest {
     fun redeliveryIsIdempotentNoOp() {
         val h = Harness()
         h.source.inbound.addLast(delta(0, 1))
-        assertEquals(1, h.driver.tick().applied.size)
+        assertEquals(
+            1,
+            h.driver
+                .tick()
+                .applied.size,
+        )
         // Re-deliver the exact same frame (an outbox replay from the peer).
         h.source.inbound.addLast(delta(0, 1))
         val p = h.driver.tick()

@@ -31,8 +31,7 @@ private fun scaleN(): Int =
     System.getenv("LAZILY_SCALE_N")?.toIntOrNull()
         ?: DEFAULT_SCALE_N
 
-private fun viewportSize(n: Int): Int =
-    (System.getenv("LAZILY_SCALE_VIEWPORT")?.toIntOrNull() ?: DEFAULT_VIEWPORT).coerceAtMost(n)
+private fun viewportSize(n: Int): Int = (System.getenv("LAZILY_SCALE_VIEWPORT")?.toIntOrNull() ?: DEFAULT_VIEWPORT).coerceAtMost(n)
 
 private const val DEFAULT_SCALE_N = 1_000_000
 private const val DEFAULT_VIEWPORT = 1_000
@@ -50,13 +49,21 @@ private fun buildGraph(n: Int): Graph {
     return Graph(ctx, inputs, formulas)
 }
 
-private fun readAll(ctx: Context, formulas: List<Computed<Long>>): Long {
+private fun readAll(
+    ctx: Context,
+    formulas: List<Computed<Long>>,
+): Long {
     var acc = 0L
     for (f in formulas) acc += ctx.get(f)
     return acc
 }
 
-data class ScaleResult(val name: String, val n: Int, val elapsedMillis: Double, val perElementNanos: Double) {
+data class ScaleResult(
+    val name: String,
+    val n: Int,
+    val elapsedMillis: Double,
+    val perElementNanos: Double,
+) {
     fun format(): String {
         val perUs = elapsedMillis * 1000.0 / n
         val unit = if (perUs >= 1.0) String.format("%.3f us/element", perUs) else String.format("%.1f ns/element", perUs * 1000.0)
@@ -64,7 +71,11 @@ data class ScaleResult(val name: String, val n: Int, val elapsedMillis: Double, 
     }
 }
 
-private fun timeMillis(name: String, n: Int, body: () -> Long): ScaleResult {
+private fun timeMillis(
+    name: String,
+    n: Int,
+    body: () -> Long,
+): ScaleResult {
     val start = System.nanoTime()
     val acc = body()
     val elapsedMs = (System.nanoTime() - start).toDouble() / 1_000_000.0
@@ -74,7 +85,10 @@ private fun timeMillis(name: String, n: Int, body: () -> Long): ScaleResult {
 
 private object BlackholeSinkScale {
     @Volatile private var sink: Long = 0L
-    fun consume(v: Long) { sink = sink xor (v * 0x9E3779B97F4A7C15uL.toLong()) }
+
+    fun consume(v: Long) {
+        sink = sink xor (v * 0x9E3779B97F4A7C15uL.toLong())
+    }
 }
 
 fun runScaleBenchmarks(n: Int = scaleN()): List<ScaleResult> {
@@ -82,17 +96,19 @@ fun runScaleBenchmarks(n: Int = scaleN()): List<ScaleResult> {
     val results = ArrayList<ScaleResult>()
 
     // build: construct all 2N nodes from scratch.
-    results += timeMillis("build", n) {
-        val graph = buildGraph(n)
-        BlackholeSinkScale.consume((graph.inputs.size + graph.formulas.size).toLong())
-        graph.inputs.size.toLong()
-    }
+    results +=
+        timeMillis("build", n) {
+            val graph = buildGraph(n)
+            BlackholeSinkScale.consume((graph.inputs.size + graph.formulas.size).toLong())
+            graph.inputs.size.toLong()
+        }
 
     // cold_full_recalc: first read of every formula forces every compute.
-    results += timeMillis("cold_full_recalc", n) {
-        val graph = buildGraph(n)
-        readAll(graph.ctx, graph.formulas)
-    }
+    results +=
+        timeMillis("cold_full_recalc", n) {
+            val graph = buildGraph(n)
+            readAll(graph.ctx, graph.formulas)
+        }
 
     // viewport_recalc: build + warm ONCE; each iteration edits one input and
     // reads only a viewport window. Off-viewport formulas stay dirty.
@@ -104,15 +120,16 @@ fun runScaleBenchmarks(n: Int = scaleN()): List<ScaleResult> {
         BlackholeSinkScale.consume(readAll(graph.ctx, graph.formulas))
         var tick = 0L
         val iters = 20
-        results += timeMillis("viewport_recalc", n) {
-            var acc = 0L
-            repeat(iters) {
-                tick += 1
-                graph.inputs[mid].set(graph.ctx, tick)
-                for (f in graph.formulas.subList(lo, hi)) acc += graph.ctx.get(f)
+        results +=
+            timeMillis("viewport_recalc", n) {
+                var acc = 0L
+                repeat(iters) {
+                    tick += 1
+                    graph.inputs[mid].set(graph.ctx, tick)
+                    for (f in graph.formulas.subList(lo, hi)) acc += graph.ctx.get(f)
+                }
+                acc
             }
-            acc
-        }
     }
 
     // full_recalc_invalidate_all: build + warm ONCE; each iteration touches every
@@ -122,18 +139,19 @@ fun runScaleBenchmarks(n: Int = scaleN()): List<ScaleResult> {
         BlackholeSinkScale.consume(readAll(graph.ctx, graph.formulas))
         var tick = 0L
         val iters = 3
-        results += timeMillis("full_recalc_invalidate_all", n) {
-            var acc = 0L
-            repeat(iters) {
-                tick += 1
-                val base = tick
-                for ((i, cell) in graph.inputs.withIndex()) {
-                    cell.set(graph.ctx, base + i)
+        results +=
+            timeMillis("full_recalc_invalidate_all", n) {
+                var acc = 0L
+                repeat(iters) {
+                    tick += 1
+                    val base = tick
+                    for ((i, cell) in graph.inputs.withIndex()) {
+                        cell.set(graph.ctx, base + i)
+                    }
+                    acc += readAll(graph.ctx, graph.formulas)
                 }
-                acc += readAll(graph.ctx, graph.formulas)
+                acc
             }
-            acc
-        }
     }
 
     return results

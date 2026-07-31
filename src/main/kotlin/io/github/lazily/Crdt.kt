@@ -20,8 +20,10 @@ package io.github.lazily
  * negative, zero, or positive integer per [Comparable] convention.
  */
 fun WireStamp.compareTo(other: WireStamp): Int {
-    var c = wallTime.compareTo(other.wallTime); if (c != 0) return c
-    c = logical.compareTo(other.logical); if (c != 0) return c
+    var c = wallTime.compareTo(other.wallTime)
+    if (c != 0) return c
+    c = logical.compareTo(other.logical)
+    if (c != 0) return c
     return peer.compareTo(other.peer)
 }
 
@@ -57,14 +59,19 @@ fun WireStamp.dominates(other: WireStamp): Boolean = other.happensBefore(this)
  * lose an edit (the GC safety property the spec pins to the version-vector
  * minimum, never a single replica's clock).
  */
-class StampFrontier(entries: Map<PeerId, WireStamp> = emptyMap()) {
+class StampFrontier(
+    entries: Map<PeerId, WireStamp> = emptyMap(),
+) {
     private val stamps: MutableMap<PeerId, WireStamp> = LinkedHashMap(entries)
 
     /** The current per-peer stamp map (a defensive copy). */
     fun entries(): Map<PeerId, WireStamp> = stamps.toMap()
 
     /** Observe [peer] → [stamp], keeping the per-peer maximum. Idempotent. */
-    fun observe(peer: PeerId, stamp: WireStamp): Boolean {
+    fun observe(
+        peer: PeerId,
+        stamp: WireStamp,
+    ): Boolean {
         val prev = stamps[peer]
         if (prev != null && !stamp.isAfter(prev)) return false
         stamps[peer] = stamp
@@ -113,17 +120,21 @@ fun interface CrdtCodec<V> {
         val string: CrdtCodec<String> = CrdtCodec { it.encodeToByteArray() }
 
         /** Big-endian Int codec. */
-        val int: CrdtCodec<Int> = CrdtCodec {
-            byteArrayOf(
-                (it shr 24).toByte(), (it shr 16).toByte(),
-                (it shr 8).toByte(), it.toByte(),
-            )
-        }
+        val int: CrdtCodec<Int> =
+            CrdtCodec {
+                byteArrayOf(
+                    (it shr 24).toByte(),
+                    (it shr 16).toByte(),
+                    (it shr 8).toByte(),
+                    it.toByte(),
+                )
+            }
 
         /** Big-endian Long codec. */
-        val long: CrdtCodec<Long> = CrdtCodec {
-            ByteArray(8) { i -> (it shr (56 - 8 * i)).toByte() }
-        }
+        val long: CrdtCodec<Long> =
+            CrdtCodec {
+                ByteArray(8) { i -> (it shr (56 - 8 * i)).toByte() }
+            }
 
         /** Single-byte Boolean codec (`1` = true, `0` = false). */
         val bool: CrdtCodec<Boolean> = CrdtCodec { byteArrayOf(if (it) 1 else 0) }
@@ -135,8 +146,10 @@ fun CrdtCodec<String>.decode(bytes: ByteArray): String = String(bytes)
 
 /** Decode [bytes] via the [CrdtCodec.int] codec. */
 fun CrdtCodec<Int>.decode(bytes: ByteArray): Int =
-    ((bytes[0].toInt() and 0xff shl 24) or (bytes[1].toInt() and 0xff shl 16) or
-        (bytes[2].toInt() and 0xff shl 8) or (bytes[3].toInt() and 0xff))
+    (
+        (bytes[0].toInt() and 0xff shl 24) or (bytes[1].toInt() and 0xff shl 16) or
+            (bytes[2].toInt() and 0xff shl 8) or (bytes[3].toInt() and 0xff)
+        )
 
 /** Decode [bytes] via the [CrdtCodec.long] codec. */
 fun CrdtCodec<Long>.decode(bytes: ByteArray): Long {
@@ -148,7 +161,10 @@ fun CrdtCodec<Long>.decode(bytes: ByteArray): Long {
 /** Decode [bytes] via the [CrdtCodec.bool] codec. */
 fun CrdtCodec<Boolean>.decode(bytes: ByteArray): Boolean = bytes.isNotEmpty() && bytes[0].toInt() != 0
 
-private fun decodeInline(state: IpcValue, codec: CrdtCodec<*>): ByteArray =
+private fun decodeInline(
+    state: IpcValue,
+    codec: CrdtCodec<*>,
+): ByteArray =
     when (state) {
         is IpcValue.Inline -> state.toByteArray()
         is IpcValue.SharedBlob ->
@@ -175,7 +191,10 @@ sealed class CrdtRegister<V> {
      * @return `true` if the converged value changed (callers feed it into the
      *   reactive cell, guarded by `==`).
      */
-    abstract fun merge(value: V, stamp: WireStamp): Boolean
+    abstract fun merge(
+        value: V,
+        stamp: WireStamp,
+    ): Boolean
 
     /** Collect tombstones stable at or before [watermark]; returns whether any were dropped. */
     open fun gc(watermark: WireStamp): Boolean = false
@@ -189,12 +208,17 @@ class LwwRegister<V>(
     private val codec: CrdtCodec<V>,
 ) : CrdtRegister<V>() {
     @Volatile private var current: V? = null
+
     @Volatile private var stamp: WireStamp? = null
 
     override fun value(): V? = current
+
     override fun lastStamp(): WireStamp? = stamp
 
-    override fun merge(value: V, stamp: WireStamp): Boolean {
+    override fun merge(
+        value: V,
+        stamp: WireStamp,
+    ): Boolean {
         val prev = this.stamp
         if (prev != null && !stamp.isAfter(prev)) return false // dominated/equal → idempotent
         val changed = current != value
@@ -226,7 +250,10 @@ class MvRegister<V>(
 
     override fun lastStamp(): WireStamp? = entries.keys.maxWithOrNull { a, b -> a.compareTo(b) }
 
-    override fun merge(value: V, stamp: WireStamp): Boolean {
+    override fun merge(
+        value: V,
+        stamp: WireStamp,
+    ): Boolean {
         // Drop entries this stamp causally dominates (wall/logical only — the
         // peer tiebreak would wrongly merge concurrent same-clock writes);
         // keep concurrent ones so they surface as a multi-value set.
@@ -253,34 +280,53 @@ class PnCounter : CrdtRegister<Long>() {
     private val n: MutableMap<PeerId, Long> = HashMap()
 
     /** Increment peer [peer]'s positive counter by [delta] (local edit). */
-    fun increment(peer: PeerId, delta: Long = 1L) {
+    fun increment(
+        peer: PeerId,
+        delta: Long = 1L,
+    ) {
         require(delta >= 0) { "increment delta must be non-negative" }
         p.merge(peer, delta, Long::plus)
     }
 
     /** Decrement peer [peer]'s negative counter by [delta] (local edit). */
-    fun decrement(peer: PeerId, delta: Long = 1L) {
+    fun decrement(
+        peer: PeerId,
+        delta: Long = 1L,
+    ) {
         require(delta >= 0) { "decrement delta must be non-negative" }
         n.merge(peer, delta, Long::plus)
     }
 
     override fun value(): Long = p.values.sum() - n.values.sum()
+
     override fun lastStamp(): WireStamp? = null // counters are per-peer state, not stamp-keyed
 
     /**
      * Merge a remote `(value, peer)` observation. [value] encodes the peer's
      * full `(p, n)` state as a packed long (high 32 = p, low 32 = n).
      */
-    fun mergeRemote(peer: PeerId, packedState: Long): Boolean {
+    fun mergeRemote(
+        peer: PeerId,
+        packedState: Long,
+    ): Boolean {
         val rp = (packedState ushr 32).toInt().toLong() and 0xffffffffL
         val rn = packedState.toInt().toLong() and 0xffffffffL
         var changed = false
-        if (rp > p.getOrDefault(peer, 0L)) { p[peer] = rp; changed = true }
-        if (rn > n.getOrDefault(peer, 0L)) { n[peer] = rn; changed = true }
+        if (rp > p.getOrDefault(peer, 0L)) {
+            p[peer] = rp
+            changed = true
+        }
+        if (rn > n.getOrDefault(peer, 0L)) {
+            n[peer] = rn
+            changed = true
+        }
         return changed
     }
 
-    override fun merge(value: Long, stamp: WireStamp): Boolean = mergeRemote(stamp.peer, value)
+    override fun merge(
+        value: Long,
+        stamp: WireStamp,
+    ): Boolean = mergeRemote(stamp.peer, value)
 
     /** Pack this peer's local `(p, n)` state for emission. */
     fun packLocal(peer: PeerId): Long {
@@ -299,26 +345,40 @@ class PnCounter : CrdtRegister<Long>() {
  * single-threaded, so [tick]/[observe] need no monitor (#lzktclocklock) — the
  * JVM's lack of locking removes the per-op monitor-enter cost.
  */
-class CrdtClock(private val peer: PeerId) {
+class CrdtClock(
+    private val peer: PeerId,
+) {
     private var wall: Long = 0L
     private var logical: Long = 0L
 
     /** Advance the clock and return a fresh, strictly-increasing [WireStamp]. */
     fun tick(): WireStamp {
         val now = System.currentTimeMillis()
-        if (now > wall) { wall = now; logical = 0L } else { logical++ }
+        if (now > wall) {
+            wall = now
+            logical = 0L
+        } else {
+            logical++
+        }
         return WireStamp(wallTime = wall, logical = logical, peer = peer)
     }
 
     /** Observe a remote [stamp] so future local stamps causally succeed it. */
     fun observe(stamp: WireStamp) {
         val now = System.currentTimeMillis()
-        logical = when {
-            now > wall && now > stamp.wallTime -> { wall = now; 0L }
-            stamp.wallTime > wall -> { wall = stamp.wallTime; stamp.logical + 1 }
-            wall > stamp.wallTime -> logical + 1
-            else -> maxOf(logical, stamp.logical) + 1
-        }
+        logical =
+            when {
+                now > wall && now > stamp.wallTime -> {
+                    wall = now
+                    0L
+                }
+                stamp.wallTime > wall -> {
+                    wall = stamp.wallTime
+                    stamp.logical + 1
+                }
+                wall > stamp.wallTime -> logical + 1
+                else -> maxOf(logical, stamp.logical) + 1
+            }
     }
 }
 
@@ -352,6 +412,7 @@ class ReplicatedCell<V : Any>(
         clock.observe(op.stamp)
         frontier.observe(op.stamp.peer, op.stamp)
         val bytes = decodeInline(op.state, codec)
+
         @Suppress("UNCHECKED_CAST")
         val value = decodeValue(codec, bytes) as V
         val changed = register.merge(value, op.stamp)
@@ -363,19 +424,28 @@ class ReplicatedCell<V : Any>(
     }
 
     /** Build a [CrdtOp] for a local edit at the next clock stamp. */
-    fun localEdit(value: V, node: NodeId, key: NodeKey? = null): CrdtOp {
+    fun localEdit(
+        value: V,
+        node: NodeId,
+        key: NodeKey? = null,
+    ): CrdtOp {
         val stamp = clock.tick()
         frontier.observe(stamp.peer, stamp)
-        val bytes = when (register) {
-            is LwwRegister -> (register as LwwRegister<V>).encode(value)
-            is MvRegister -> (register as MvRegister<V>).encode(value)
-            is PnCounter -> error("PnCounter local edits use localPnEdit")
-        }
+        val bytes =
+            when (register) {
+                is LwwRegister -> (register as LwwRegister<V>).encode(value)
+                is MvRegister -> (register as MvRegister<V>).encode(value)
+                is PnCounter -> error("PnCounter local edits use localPnEdit")
+            }
         return CrdtOp(node = node, key = key, stamp = stamp, state = IpcValue.Inline(bytes))
     }
 
     /** Build a [CrdtOp] for a local PN-counter edit (packed peer state). */
-    fun localPnEdit(peer: PeerId, node: NodeId, key: NodeKey? = null): CrdtOp {
+    fun localPnEdit(
+        peer: PeerId,
+        node: NodeId,
+        key: NodeKey? = null,
+    ): CrdtOp {
         val counter = register as? PnCounter ?: error("localPnEdit on non-PnCounter")
         val stamp = clock.tick()
         frontier.observe(stamp.peer, stamp)
@@ -392,7 +462,10 @@ class ReplicatedCell<V : Any>(
 }
 
 @Suppress("UNCHECKED_CAST")
-internal fun decodeCrdtValue(codec: CrdtCodec<*>, bytes: ByteArray): Any? =
+internal fun decodeCrdtValue(
+    codec: CrdtCodec<*>,
+    bytes: ByteArray,
+): Any? =
     when (codec) {
         CrdtCodec.string -> CrdtCodec.string.decode(bytes)
         CrdtCodec.int -> CrdtCodec.int.decode(bytes)
@@ -401,7 +474,10 @@ internal fun decodeCrdtValue(codec: CrdtCodec<*>, bytes: ByteArray): Any? =
         else -> error("unsupported CRDT codec")
     }
 
-private fun decodeValue(codec: CrdtCodec<*>, bytes: ByteArray): Any? = decodeCrdtValue(codec, bytes)
+private fun decodeValue(
+    codec: CrdtCodec<*>,
+    bytes: ByteArray,
+): Any? = decodeCrdtValue(codec, bytes)
 
 /**
  * Allocate a [ReplicatedCell] backed by a fresh root cell seeded with
@@ -427,5 +503,7 @@ fun <V : Any> Context.replicatedCell(
  * carrying the current [frontier] and the given ops. The receiver applies each
  * op via [ReplicatedCell.applyRemote] and merges the frontier.
  */
-fun crdtSyncFrame(frontier: StampFrontier, ops: List<CrdtOp>): CrdtSync =
-    CrdtSync(frontier = frontier.entries().entries.map { it.key to it.value }, ops = ops)
+fun crdtSyncFrame(
+    frontier: StampFrontier,
+    ops: List<CrdtOp>,
+): CrdtSync = CrdtSync(frontier = frontier.entries().entries.map { it.key to it.value }, ops = ops)

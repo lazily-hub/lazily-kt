@@ -76,9 +76,7 @@ class ThreadSafeIngressCell<K : Any, T : Any>(
             IngressSchedule.forKind(get(transportKindCell), get(pollIntervalCell))
         }
 
-    private fun receiptReader(
-        channel: IngressReceiptChannel,
-    ): ThreadSafeComputed<List<IngressReceipt<K>>> =
+    private fun receiptReader(channel: IngressReceiptChannel): ThreadSafeComputed<List<IngressReceipt<K>>> =
         ThreadSafeComputed(ctx.slotAny(memo = true) { lock.withLock { core.receipts(channel) } })
 
     /**
@@ -91,27 +89,27 @@ class ThreadSafeIngressCell<K : Any, T : Any>(
         val minted =
             ThreadSafeIngressScopeReaders<T>(
                 value =
-                    ThreadSafeComputed(
-                        ctx.slotAny(memo = true) {
-                            IngressReading(lock.withLock { core.peek(key) })
-                        },
-                    ),
+                ThreadSafeComputed(
+                    ctx.slotAny(memo = true) {
+                        IngressReading(lock.withLock { core.peek(key) })
+                    },
+                ),
                 readiness =
-                    ThreadSafeComputed(
-                        ctx.slotAny(memo = true) { lock.withLock { core.readiness(key) } },
-                    ),
+                ThreadSafeComputed(
+                    ctx.slotAny(memo = true) { lock.withLock { core.readiness(key) } },
+                ),
                 authority =
-                    ThreadSafeComputed(
-                        ctx.slotAny(memo = true) {
-                            IngressReading(lock.withLock { core.authority(key) })
-                        },
-                    ),
+                ThreadSafeComputed(
+                    ctx.slotAny(memo = true) {
+                        IngressReading(lock.withLock { core.authority(key) })
+                    },
+                ),
                 retry =
-                    ThreadSafeComputed(
-                        ctx.slotAny(memo = true) {
-                            IngressReading(lock.withLock { core.retry(key) })
-                        },
-                    ),
+                ThreadSafeComputed(
+                    ctx.slotAny(memo = true) {
+                        IngressReading(lock.withLock { core.retry(key) })
+                    },
+                ),
             )
         return lock.withLock { scopeReaders.getOrPut(key) { minted } }
     }
@@ -136,7 +134,10 @@ class ThreadSafeIngressCell<K : Any, T : Any>(
     // -- Mutators ----------------------------------------------------------
 
     /** Open (or reopen) a keyed scope at [generation]. */
-    fun open(key: K, generation: Long) = apply(lock.withLock { core.open(key, generation) })
+    fun open(
+        key: K,
+        generation: Long,
+    ) = apply(lock.withLock { core.open(key, generation) })
 
     /** Admit one decoded envelope. */
     fun admit(envelope: IngressEnvelope<K, T>): IngressAdmission {
@@ -153,7 +154,10 @@ class ThreadSafeIngressCell<K : Any, T : Any>(
     }
 
     /** Reconnect a scope at [generation], clearing its error streak. */
-    fun reconnect(key: K, generation: Long): ReplayRequest {
+    fun reconnect(
+        key: K,
+        generation: Long,
+    ): ReplayRequest {
         val (change, request) = lock.withLock { core.reconnect(key, generation) }
         apply(change)
         return request
@@ -163,7 +167,10 @@ class ThreadSafeIngressCell<K : Any, T : Any>(
     fun close(key: K) = apply(lock.withLock { core.close(key) })
 
     /** Record a transport/decode failure, deepening the scope's backoff. */
-    fun fail(key: K, error: IngressError) = apply(lock.withLock { core.fail(key, error) })
+    fun fail(
+        key: K,
+        error: IngressError,
+    ) = apply(lock.withLock { core.fail(key, error) })
 
     /** Advance logical time. */
     fun tick(now: Long) = apply(lock.withLock { core.tick(now) })
@@ -203,8 +210,7 @@ class ThreadSafeIngressCell<K : Any, T : Any>(
     fun value(key: K): T? = reading(readers(key).value)
 
     /** Derived readiness. */
-    fun readiness(key: K): IngressReadiness =
-        ctx.getSlotAny(readers(key).readiness.id) as IngressReadiness
+    fun readiness(key: K): IngressReadiness = ctx.getSlotAny(readers(key).readiness.id) as IngressReadiness
 
     /** Derived authority; `null` for a closed or unknown scope. */
     fun authority(key: K): IngressAuthority? = reading(readers(key).authority)
@@ -213,9 +219,8 @@ class ThreadSafeIngressCell<K : Any, T : Any>(
     fun retry(key: K): IngressRetry? = reading(readers(key).retry)
 
     @Suppress("UNCHECKED_CAST")
-    private fun receipts(
-        handle: ThreadSafeComputed<List<IngressReceipt<K>>>,
-    ): List<IngressReceipt<K>> = ctx.getSlotAny(handle.id) as List<IngressReceipt<K>>
+    private fun receipts(handle: ThreadSafeComputed<List<IngressReceipt<K>>>): List<IngressReceipt<K>> =
+        ctx.getSlotAny(handle.id) as List<IngressReceipt<K>>
 
     /** Reactive read: accepted receipts, oldest first. */
     fun accepted(): List<IngressReceipt<K>> = receipts(acceptedReader)
@@ -289,9 +294,7 @@ class AsyncIngressCell<K : Any, T : Any>(
             IngressSchedule.forKind(get(transportKindCell), get(pollIntervalCell))
         }
 
-    private fun receiptReader(
-        channel: IngressReceiptChannel,
-    ): AsyncContext.AsyncComputed<List<IngressReceipt<K>>> =
+    private fun receiptReader(channel: IngressReceiptChannel): AsyncContext.AsyncComputed<List<IngressReceipt<K>>> =
         ctx.computed { lock.withLock { core.receipts(channel) } }
 
     /** Mint (or return) one scope's four readers, off the core lock. */
@@ -327,7 +330,10 @@ class AsyncIngressCell<K : Any, T : Any>(
     // -- Mutators ----------------------------------------------------------
 
     /** Open (or reopen) a keyed scope at [generation]. */
-    fun open(key: K, generation: Long) = apply(lock.withLock { core.open(key, generation) })
+    fun open(
+        key: K,
+        generation: Long,
+    ) = apply(lock.withLock { core.open(key, generation) })
 
     /** Admit one decoded envelope. */
     fun admit(envelope: IngressEnvelope<K, T>): IngressAdmission {
@@ -344,7 +350,10 @@ class AsyncIngressCell<K : Any, T : Any>(
     }
 
     /** Reconnect a scope at [generation], clearing its error streak. */
-    fun reconnect(key: K, generation: Long): ReplayRequest {
+    fun reconnect(
+        key: K,
+        generation: Long,
+    ): ReplayRequest {
         val (change, request) = lock.withLock { core.reconnect(key, generation) }
         apply(change)
         return request
@@ -354,7 +363,10 @@ class AsyncIngressCell<K : Any, T : Any>(
     fun close(key: K) = apply(lock.withLock { core.close(key) })
 
     /** Record a transport/decode failure, deepening the scope's backoff. */
-    fun fail(key: K, error: IngressError) = apply(lock.withLock { core.fail(key, error) })
+    fun fail(
+        key: K,
+        error: IngressError,
+    ) = apply(lock.withLock { core.fail(key, error) })
 
     /** Advance logical time. */
     fun tick(now: Long) = apply(lock.withLock { core.tick(now) })
@@ -393,26 +405,34 @@ class AsyncIngressCell<K : Any, T : Any>(
     /** The coalesced window awaiting drain. */
     fun value(key: K): T? = requireNotNull(ctx.get(readers(key).value)).value
 
-    fun value(key: K, compute: AsyncComputeContext): T? =
-        requireNotNull(compute.get(readers(key).value)).value
+    fun value(
+        key: K,
+        compute: AsyncComputeContext,
+    ): T? = requireNotNull(compute.get(readers(key).value)).value
 
     /** Derived readiness. */
     fun readiness(key: K): IngressReadiness = requireNotNull(ctx.get(readers(key).readiness))
 
-    fun readiness(key: K, compute: AsyncComputeContext): IngressReadiness =
-        requireNotNull(compute.get(readers(key).readiness))
+    fun readiness(
+        key: K,
+        compute: AsyncComputeContext,
+    ): IngressReadiness = requireNotNull(compute.get(readers(key).readiness))
 
     /** Derived authority; `null` for a closed or unknown scope. */
     fun authority(key: K): IngressAuthority? = requireNotNull(ctx.get(readers(key).authority)).value
 
-    fun authority(key: K, compute: AsyncComputeContext): IngressAuthority? =
-        requireNotNull(compute.get(readers(key).authority)).value
+    fun authority(
+        key: K,
+        compute: AsyncComputeContext,
+    ): IngressAuthority? = requireNotNull(compute.get(readers(key).authority)).value
 
     /** Derived retry decision; `null` while no error is outstanding. */
     fun retry(key: K): IngressRetry? = requireNotNull(ctx.get(readers(key).retry)).value
 
-    fun retry(key: K, compute: AsyncComputeContext): IngressRetry? =
-        requireNotNull(compute.get(readers(key).retry)).value
+    fun retry(
+        key: K,
+        compute: AsyncComputeContext,
+    ): IngressRetry? = requireNotNull(compute.get(readers(key).retry)).value
 
     /** Reactive read: accepted receipts, oldest first. */
     fun accepted(): List<IngressReceipt<K>> = requireNotNull(ctx.get(acceptedReader))

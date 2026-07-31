@@ -33,7 +33,10 @@ private class FlavorWorkQueueCore<T : Any>(
         return if (Long.MAX_VALUE - now < visibilityTimeout) Long.MAX_VALUE else now + visibilityTimeout
     }
 
-    private fun fail(delivery: WorkQueueDelivery<T>, reason: WorkQueueDeadLetterReason) {
+    private fun fail(
+        delivery: WorkQueueDelivery<T>,
+        reason: WorkQueueDeadLetterReason,
+    ) {
         if (delivery.attempt < maxDeliveries) {
             pending.addLast(WorkQueueItem(delivery.itemId, delivery.value, delivery.attempt))
         } else {
@@ -54,7 +57,10 @@ private class FlavorWorkQueueCore<T : Any>(
         return id
     }
 
-    fun claim(worker: String, now: Long): WorkQueueDelivery<T>? {
+    fun claim(
+        worker: String,
+        now: Long,
+    ): WorkQueueDelivery<T>? {
         require(now >= 0) { "now must be non-negative" }
         val item = pending.removeFirstOrNull() ?: return null
         check(nextDeliveryId < Long.MAX_VALUE) { "delivery id exhausted" }
@@ -71,14 +77,20 @@ private class FlavorWorkQueueCore<T : Any>(
         return delivery
     }
 
-    fun ack(worker: String, deliveryId: Long): Boolean {
+    fun ack(
+        worker: String,
+        deliveryId: Long,
+    ): Boolean {
         val delivery = inFlight[deliveryId] ?: return false
         if (delivery.worker != worker) return false
         inFlight.remove(deliveryId)
         return true
     }
 
-    fun nack(worker: String, deliveryId: Long): Boolean {
+    fun nack(
+        worker: String,
+        deliveryId: Long,
+    ): Boolean {
         val delivery = inFlight[deliveryId] ?: return false
         if (delivery.worker != worker) return false
         inFlight.remove(deliveryId)
@@ -127,7 +139,10 @@ class ThreadSafeWorkQueueCell<T : Any>(
             )
     }
 
-    private fun invalidate(before: FlavorWorkQueueCounts, after: FlavorWorkQueueCounts) {
+    private fun invalidate(
+        before: FlavorWorkQueueCounts,
+        after: FlavorWorkQueueCounts,
+    ) {
         val roots = ArrayList<Int>(4)
         if (before.pending != after.pending) roots += readers.pendingLen.id
         if ((before.pending == 0) != (after.pending == 0)) roots += readers.isEmpty.id
@@ -148,20 +163,37 @@ class ThreadSafeWorkQueueCell<T : Any>(
     }
 
     fun push(value: T): Long = mutate { push(value) }
-    fun claim(worker: String, now: Long): WorkQueueDelivery<T>? = mutate { claim(worker, now) }
-    fun ack(worker: String, deliveryId: Long): Boolean = mutate { ack(worker, deliveryId) }
-    fun nack(worker: String, deliveryId: Long): Boolean = mutate { nack(worker, deliveryId) }
+
+    fun claim(
+        worker: String,
+        now: Long,
+    ): WorkQueueDelivery<T>? = mutate { claim(worker, now) }
+
+    fun ack(
+        worker: String,
+        deliveryId: Long,
+    ): Boolean = mutate { ack(worker, deliveryId) }
+
+    fun nack(
+        worker: String,
+        deliveryId: Long,
+    ): Boolean = mutate { nack(worker, deliveryId) }
+
     fun reapExpired(now: Long): Int = mutate { reapExpired(now) }
 
     fun pendingLen(): Int = ctx.get(readers.pendingLen)
+
     fun isEmpty(): Boolean = ctx.get(readers.isEmpty)
+
     fun inFlightLen(): Int = ctx.get(readers.inFlightLen)
+
     fun deadLetterLen(): Int = ctx.get(readers.deadLetterLen)
+
     fun pendingItems(): List<WorkQueueItem<T>> = lock.withLock { core.pending.toList() }
-    fun inFlightDeliveries(): List<WorkQueueDelivery<T>> =
-        lock.withLock { core.inFlight.values.sortedBy { it.deliveryId } }
-    fun deadLetterItems(): List<WorkQueueDeadLetter<T>> =
-        lock.withLock { core.deadLetters.toList() }
+
+    fun inFlightDeliveries(): List<WorkQueueDelivery<T>> = lock.withLock { core.inFlight.values.sortedBy { it.deliveryId } }
+
+    fun deadLetterItems(): List<WorkQueueDeadLetter<T>> = lock.withLock { core.deadLetters.toList() }
 }
 
 data class AsyncWorkQueueReaderHandles(
@@ -194,7 +226,10 @@ class AsyncWorkQueueCell<T : Any>(
             )
     }
 
-    private fun invalidate(before: FlavorWorkQueueCounts, after: FlavorWorkQueueCounts) {
+    private fun invalidate(
+        before: FlavorWorkQueueCounts,
+        after: FlavorWorkQueueCounts,
+    ) {
         val roots = ArrayList<Int>(4)
         if (before.pending != after.pending) roots += readers.pendingLen.id
         if ((before.pending == 0) != (after.pending == 0)) roots += readers.isEmpty.id
@@ -215,25 +250,43 @@ class AsyncWorkQueueCell<T : Any>(
     }
 
     fun push(value: T): Long = mutate { push(value) }
-    fun claim(worker: String, now: Long): WorkQueueDelivery<T>? = mutate { claim(worker, now) }
-    fun ack(worker: String, deliveryId: Long): Boolean = mutate { ack(worker, deliveryId) }
-    fun nack(worker: String, deliveryId: Long): Boolean = mutate { nack(worker, deliveryId) }
+
+    fun claim(
+        worker: String,
+        now: Long,
+    ): WorkQueueDelivery<T>? = mutate { claim(worker, now) }
+
+    fun ack(
+        worker: String,
+        deliveryId: Long,
+    ): Boolean = mutate { ack(worker, deliveryId) }
+
+    fun nack(
+        worker: String,
+        deliveryId: Long,
+    ): Boolean = mutate { nack(worker, deliveryId) }
+
     fun reapExpired(now: Long): Int = mutate { reapExpired(now) }
 
     fun pendingLen(): Int = requireNotNull(ctx.get(readers.pendingLen))
+
     fun pendingLen(compute: AsyncComputeContext): Int = requireNotNull(compute.get(readers.pendingLen))
+
     fun isEmpty(): Boolean = requireNotNull(ctx.get(readers.isEmpty))
+
     fun isEmpty(compute: AsyncComputeContext): Boolean = requireNotNull(compute.get(readers.isEmpty))
+
     fun inFlightLen(): Int = requireNotNull(ctx.get(readers.inFlightLen))
-    fun inFlightLen(compute: AsyncComputeContext): Int =
-        requireNotNull(compute.get(readers.inFlightLen))
+
+    fun inFlightLen(compute: AsyncComputeContext): Int = requireNotNull(compute.get(readers.inFlightLen))
+
     fun deadLetterLen(): Int = requireNotNull(ctx.get(readers.deadLetterLen))
-    fun deadLetterLen(compute: AsyncComputeContext): Int =
-        requireNotNull(compute.get(readers.deadLetterLen))
+
+    fun deadLetterLen(compute: AsyncComputeContext): Int = requireNotNull(compute.get(readers.deadLetterLen))
 
     fun pendingItems(): List<WorkQueueItem<T>> = lock.withLock { core.pending.toList() }
-    fun inFlightDeliveries(): List<WorkQueueDelivery<T>> =
-        lock.withLock { core.inFlight.values.sortedBy { it.deliveryId } }
-    fun deadLetterItems(): List<WorkQueueDeadLetter<T>> =
-        lock.withLock { core.deadLetters.toList() }
+
+    fun inFlightDeliveries(): List<WorkQueueDelivery<T>> = lock.withLock { core.inFlight.values.sortedBy { it.deliveryId } }
+
+    fun deadLetterItems(): List<WorkQueueDeadLetter<T>> = lock.withLock { core.deadLetters.toList() }
 }

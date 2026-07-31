@@ -11,7 +11,6 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import kotlinx.serialization.json.put
@@ -19,32 +18,29 @@ import kotlinx.serialization.json.put
 typealias NodeId = Long
 typealias PeerId = Long
 
-private val ipcJson = Json {
-    prettyPrint = false
-}
+private val ipcJson =
+    Json {
+        prettyPrint = false
+    }
 
-private fun JsonElement.asObject(name: String): JsonObject =
-    this as? JsonObject ?: error("$name must be a JSON object")
+private fun JsonElement.asObject(name: String): JsonObject = this as? JsonObject ?: error("$name must be a JSON object")
 
-private fun JsonElement.asArray(name: String): JsonArray =
-    this as? JsonArray ?: error("$name must be a JSON array")
+private fun JsonElement.asArray(name: String): JsonArray = this as? JsonArray ?: error("$name must be a JSON array")
 
-private fun JsonObject.required(name: String): JsonElement =
-    this[name] ?: error("missing required field: $name")
+private fun JsonObject.required(name: String): JsonElement = this[name] ?: error("missing required field: $name")
 
-private fun JsonObject.longField(name: String): Long =
-    required(name).jsonPrimitive.long
+private fun JsonObject.longField(name: String): Long = required(name).jsonPrimitive.long
 
-private fun JsonObject.stringField(name: String): String =
-    required(name).jsonPrimitive.content
+private fun JsonObject.stringField(name: String): String = required(name).jsonPrimitive.content
 
 // #lzktindexedloop: indexed loop over the primitive ByteArray (a `for-in` would
 // box each element through an iterator).
-private fun bytesToJson(bytes: ByteArray): JsonArray = buildJsonArray {
-    for (i in bytes.indices) {
-        add(JsonPrimitive(bytes[i].toInt() and 0xff))
+private fun bytesToJson(bytes: ByteArray): JsonArray =
+    buildJsonArray {
+        for (i in bytes.indices) {
+            add(JsonPrimitive(bytes[i].toInt() and 0xff))
+        }
     }
-}
 
 // #lzktindexedloop: indexed decode into a primitive ByteArray (no boxed List).
 private fun bytesFromJson(element: JsonElement): ByteArray {
@@ -65,12 +61,19 @@ const val NODE_KEY_MAX_LEN: Int = 1024
 const val NODE_KEY_MAX_SEGMENTS: Int = 32
 
 /** Why a [NodeKey] failed validation. Mirrors lazily-rs `NodeKeyError`. */
-sealed class NodeKeyError(message: String) : RuntimeException(message) {
+sealed class NodeKeyError(
+    message: String,
+) : RuntimeException(message) {
     data object Empty : NodeKeyError("node key path is empty")
-    data class TooLong(val len: Int) :
-        NodeKeyError("node key path is $len bytes, exceeds $NODE_KEY_MAX_LEN")
-    data class TooManySegments(val segments: Int) :
-        NodeKeyError("node key has $segments segments, exceeds $NODE_KEY_MAX_SEGMENTS")
+
+    data class TooLong(
+        val len: Int,
+    ) : NodeKeyError("node key path is $len bytes, exceeds $NODE_KEY_MAX_LEN")
+
+    data class TooManySegments(
+        val segments: Int,
+    ) : NodeKeyError("node key has $segments segments, exceeds $NODE_KEY_MAX_SEGMENTS")
+
     data object EmptySegment : NodeKeyError("node key path has an empty segment")
 }
 
@@ -89,7 +92,9 @@ sealed class NodeKeyError(message: String) : RuntimeException(message) {
  * unchanged. See `lazily-spec/protocol.md` § NodeKey.
  */
 @JvmInline
-value class NodeKey private constructor(val path: String) {
+value class NodeKey private constructor(
+    val path: String,
+) {
     init {
         validate(path)
     }
@@ -142,14 +147,15 @@ data class ShmBlobRef(
      */
     val backend: BlobBackendKind = BlobBackendKind.Shm,
 ) {
-    fun toJson(): JsonObject = buildJsonObject {
-        put("offset", offset)
-        put("len", len)
-        put("generation", generation)
-        put("epoch", epoch)
-        put("checksum", checksum)
-        if (!backend.isDefault) put("backend", backend.wire)
-    }
+    fun toJson(): JsonObject =
+        buildJsonObject {
+            put("offset", offset)
+            put("len", len)
+            put("generation", generation)
+            put("epoch", epoch)
+            put("checksum", checksum)
+            if (!backend.isDefault) put("backend", backend.wire)
+        }
 
     companion object {
         fun fromJson(element: JsonElement): ShmBlobRef {
@@ -160,7 +166,9 @@ data class ShmBlobRef(
                 generation = obj.longField("generation"),
                 epoch = obj.longField("epoch"),
                 checksum = obj.longField("checksum"),
-                backend = (obj["backend"] as? JsonPrimitive)?.contentOrNull
+                backend =
+                (obj["backend"] as? JsonPrimitive)
+                    ?.contentOrNull
                     ?.let { BlobBackendKind.fromWire(it) }
                     ?: BlobBackendKind.Shm,
             )
@@ -175,23 +183,28 @@ sealed interface NodeState {
     // byte) instead of a List<Int> (one boxed Integer per byte). The eager
     // `init { bytesToJson(bytes) }` range validation is dropped — a ByteArray
     // holds valid bytes by construction.
-    data class Payload(val bytes: ByteArray) : NodeState {
+    data class Payload(
+        val bytes: ByteArray,
+    ) : NodeState {
         fun toByteArray(): ByteArray = bytes
 
-        override fun toJson(): JsonElement = buildJsonObject {
-            put("Payload", bytesToJson(bytes))
-        }
+        override fun toJson(): JsonElement =
+            buildJsonObject {
+                put("Payload", bytesToJson(bytes))
+            }
 
-        override fun equals(other: Any?): Boolean =
-            other is Payload && bytes.contentEquals(other.bytes)
+        override fun equals(other: Any?): Boolean = other is Payload && bytes.contentEquals(other.bytes)
 
         override fun hashCode(): Int = bytes.contentHashCode()
     }
 
-    data class SharedBlob(val blob: ShmBlobRef) : NodeState {
-        override fun toJson(): JsonElement = buildJsonObject {
-            put("SharedBlob", blob.toJson())
-        }
+    data class SharedBlob(
+        val blob: ShmBlobRef,
+    ) : NodeState {
+        override fun toJson(): JsonElement =
+            buildJsonObject {
+                put("SharedBlob", blob.toJson())
+            }
     }
 
     data object Opaque : NodeState {
@@ -223,27 +236,33 @@ sealed interface IpcValue {
 
     // #lzktbytearray: primitive ByteArray payload — no boxed Integer per byte,
     // no eager init validation (bytes are valid by construction).
-    data class Inline(val bytes: ByteArray) : IpcValue {
+    data class Inline(
+        val bytes: ByteArray,
+    ) : IpcValue {
         fun toByteArray(): ByteArray = bytes
 
-        override fun toJson(): JsonElement = buildJsonObject {
-            put("Inline", bytesToJson(bytes))
-        }
+        override fun toJson(): JsonElement =
+            buildJsonObject {
+                put("Inline", bytesToJson(bytes))
+            }
 
-        override fun equals(other: Any?): Boolean =
-            other is Inline && bytes.contentEquals(other.bytes)
+        override fun equals(other: Any?): Boolean = other is Inline && bytes.contentEquals(other.bytes)
 
         override fun hashCode(): Int = bytes.contentHashCode()
     }
 
-    data class SharedBlob(val blob: ShmBlobRef) : IpcValue {
-        override fun toJson(): JsonElement = buildJsonObject {
-            put("SharedBlob", blob.toJson())
-        }
+    data class SharedBlob(
+        val blob: ShmBlobRef,
+    ) : IpcValue {
+        override fun toJson(): JsonElement =
+            buildJsonObject {
+                put("SharedBlob", blob.toJson())
+            }
     }
 
     companion object {
         fun inline(bytes: ByteArray): IpcValue = Inline(bytes)
+
         fun sharedBlob(blob: ShmBlobRef): IpcValue = SharedBlob(blob)
 
         fun fromJson(element: JsonElement): IpcValue {
@@ -265,25 +284,34 @@ data class NodeSnapshot(
     val state: NodeState,
     val key: NodeKey? = null,
 ) {
-    fun toJson(): JsonObject = buildJsonObject {
-        put("node", node)
-        put("type_tag", typeTag)
-        put("state", state.toJson())
-        if (key != null) put("key", key.toJson())
-    }
+    fun toJson(): JsonObject =
+        buildJsonObject {
+            put("node", node)
+            put("type_tag", typeTag)
+            put("state", state.toJson())
+            if (key != null) put("key", key.toJson())
+        }
 
     /** Attach a wire-stable [NodeKey] to this node (builder style). */
     fun withKey(key: NodeKey): NodeSnapshot = copy(key = key)
 
     companion object {
-        fun payload(node: NodeId, typeTag: String, bytes: ByteArray): NodeSnapshot =
-            NodeSnapshot(node, typeTag, NodeState.Payload(bytes))
+        fun payload(
+            node: NodeId,
+            typeTag: String,
+            bytes: ByteArray,
+        ): NodeSnapshot = NodeSnapshot(node, typeTag, NodeState.Payload(bytes))
 
-        fun sharedBlob(node: NodeId, typeTag: String, blob: ShmBlobRef): NodeSnapshot =
-            NodeSnapshot(node, typeTag, NodeState.SharedBlob(blob))
+        fun sharedBlob(
+            node: NodeId,
+            typeTag: String,
+            blob: ShmBlobRef,
+        ): NodeSnapshot = NodeSnapshot(node, typeTag, NodeState.SharedBlob(blob))
 
-        fun opaque(node: NodeId, typeTag: String): NodeSnapshot =
-            NodeSnapshot(node, typeTag, NodeState.Opaque)
+        fun opaque(
+            node: NodeId,
+            typeTag: String,
+        ): NodeSnapshot = NodeSnapshot(node, typeTag, NodeState.Opaque)
 
         fun fromJson(element: JsonElement): NodeSnapshot {
             val obj = element.asObject("NodeSnapshot")
@@ -301,13 +329,16 @@ data class EdgeSnapshot(
     val dependent: NodeId,
     val dependency: NodeId,
 ) {
-    fun toJson(): JsonObject = buildJsonObject {
-        put("dependent", dependent)
-        put("dependency", dependency)
-    }
+    fun toJson(): JsonObject =
+        buildJsonObject {
+            put("dependent", dependent)
+            put("dependency", dependency)
+        }
 
-    fun isReadableBy(permissions: PeerPermissions, peer: PeerId): Boolean =
-        permissions.canRead(peer, dependent) && permissions.canRead(peer, dependency)
+    fun isReadableBy(
+        permissions: PeerPermissions,
+        peer: PeerId,
+    ): Boolean = permissions.canRead(peer, dependent) && permissions.canRead(peer, dependency)
 
     companion object {
         fun fromJson(element: JsonElement): EdgeSnapshot {
@@ -326,14 +357,18 @@ data class Snapshot(
     val edges: List<EdgeSnapshot> = emptyList(),
     val roots: List<NodeId> = emptyList(),
 ) {
-    fun toJson(): JsonObject = buildJsonObject {
-        put("epoch", epoch)
-        put("nodes", buildJsonArray { nodes.forEach { add(it.toJson()) } })
-        put("edges", buildJsonArray { edges.forEach { add(it.toJson()) } })
-        put("roots", buildJsonArray { roots.forEach { add(JsonPrimitive(it)) } })
-    }
+    fun toJson(): JsonObject =
+        buildJsonObject {
+            put("epoch", epoch)
+            put("nodes", buildJsonArray { nodes.forEach { add(it.toJson()) } })
+            put("edges", buildJsonArray { edges.forEach { add(it.toJson()) } })
+            put("roots", buildJsonArray { roots.forEach { add(JsonPrimitive(it)) } })
+        }
 
-    fun filterReadable(permissions: PeerPermissions, peer: PeerId): Snapshot =
+    fun filterReadable(
+        permissions: PeerPermissions,
+        peer: PeerId,
+    ): Snapshot =
         Snapshot(
             epoch = epoch,
             nodes = nodes.filter { permissions.canRead(peer, it.node) },
@@ -356,45 +391,75 @@ data class Snapshot(
 
 sealed interface DeltaOp {
     fun toJson(): JsonObject
-    fun targetReadable(permissions: PeerPermissions, peer: PeerId): Boolean
 
-    data class CellSet(val node: NodeId, val payload: IpcValue) : DeltaOp {
+    fun targetReadable(
+        permissions: PeerPermissions,
+        peer: PeerId,
+    ): Boolean
+
+    data class CellSet(
+        val node: NodeId,
+        val payload: IpcValue,
+    ) : DeltaOp {
         constructor(node: NodeId, bytes: ByteArray) : this(node, IpcValue.Inline(bytes))
 
-        override fun toJson(): JsonObject = buildJsonObject {
-            put("CellSet", buildJsonObject {
-                put("node", node)
-                put("payload", payload.toJson())
-            })
-        }
+        override fun toJson(): JsonObject =
+            buildJsonObject {
+                put(
+                    "CellSet",
+                    buildJsonObject {
+                        put("node", node)
+                        put("payload", payload.toJson())
+                    },
+                )
+            }
 
-        override fun targetReadable(permissions: PeerPermissions, peer: PeerId): Boolean =
-            permissions.canRead(peer, node)
+        override fun targetReadable(
+            permissions: PeerPermissions,
+            peer: PeerId,
+        ): Boolean = permissions.canRead(peer, node)
     }
 
-    data class SlotValue(val node: NodeId, val payload: IpcValue) : DeltaOp {
+    data class SlotValue(
+        val node: NodeId,
+        val payload: IpcValue,
+    ) : DeltaOp {
         constructor(node: NodeId, bytes: ByteArray) : this(node, IpcValue.Inline(bytes))
 
-        override fun toJson(): JsonObject = buildJsonObject {
-            put("SlotValue", buildJsonObject {
-                put("node", node)
-                put("payload", payload.toJson())
-            })
-        }
+        override fun toJson(): JsonObject =
+            buildJsonObject {
+                put(
+                    "SlotValue",
+                    buildJsonObject {
+                        put("node", node)
+                        put("payload", payload.toJson())
+                    },
+                )
+            }
 
-        override fun targetReadable(permissions: PeerPermissions, peer: PeerId): Boolean =
-            permissions.canRead(peer, node)
+        override fun targetReadable(
+            permissions: PeerPermissions,
+            peer: PeerId,
+        ): Boolean = permissions.canRead(peer, node)
     }
 
-    data class Invalidate(val node: NodeId) : DeltaOp {
-        override fun toJson(): JsonObject = buildJsonObject {
-            put("Invalidate", buildJsonObject {
-                put("node", node)
-            })
-        }
+    data class Invalidate(
+        val node: NodeId,
+    ) : DeltaOp {
+        override fun toJson(): JsonObject =
+            buildJsonObject {
+                put(
+                    "Invalidate",
+                    buildJsonObject {
+                        put("node", node)
+                    },
+                )
+            }
 
-        override fun targetReadable(permissions: PeerPermissions, peer: PeerId): Boolean =
-            permissions.canRead(peer, node)
+        override fun targetReadable(
+            permissions: PeerPermissions,
+            peer: PeerId,
+        ): Boolean = permissions.canRead(peer, node)
     }
 
     data class NodeAdd(
@@ -403,69 +468,133 @@ sealed interface DeltaOp {
         val state: NodeState,
         val key: NodeKey? = null,
     ) : DeltaOp {
-        override fun toJson(): JsonObject = buildJsonObject {
-            put("NodeAdd", buildJsonObject {
-                put("node", node)
-                put("type_tag", typeTag)
-                put("state", state.toJson())
-                if (key != null) put("key", key.toJson())
-            })
-        }
+        override fun toJson(): JsonObject =
+            buildJsonObject {
+                put(
+                    "NodeAdd",
+                    buildJsonObject {
+                        put("node", node)
+                        put("type_tag", typeTag)
+                        put("state", state.toJson())
+                        if (key != null) put("key", key.toJson())
+                    },
+                )
+            }
 
-        override fun targetReadable(permissions: PeerPermissions, peer: PeerId): Boolean =
-            permissions.canRead(peer, node)
+        override fun targetReadable(
+            permissions: PeerPermissions,
+            peer: PeerId,
+        ): Boolean = permissions.canRead(peer, node)
     }
 
-    data class NodeRemove(val node: NodeId) : DeltaOp {
-        override fun toJson(): JsonObject = buildJsonObject {
-            put("NodeRemove", buildJsonObject {
-                put("node", node)
-            })
-        }
+    data class NodeRemove(
+        val node: NodeId,
+    ) : DeltaOp {
+        override fun toJson(): JsonObject =
+            buildJsonObject {
+                put(
+                    "NodeRemove",
+                    buildJsonObject {
+                        put("node", node)
+                    },
+                )
+            }
 
-        override fun targetReadable(permissions: PeerPermissions, peer: PeerId): Boolean =
-            permissions.canRead(peer, node)
+        override fun targetReadable(
+            permissions: PeerPermissions,
+            peer: PeerId,
+        ): Boolean = permissions.canRead(peer, node)
     }
 
-    data class EdgeAdd(val dependent: NodeId, val dependency: NodeId) : DeltaOp {
-        override fun toJson(): JsonObject = buildJsonObject {
-            put("EdgeAdd", buildJsonObject {
-                put("dependent", dependent)
-                put("dependency", dependency)
-            })
-        }
+    data class EdgeAdd(
+        val dependent: NodeId,
+        val dependency: NodeId,
+    ) : DeltaOp {
+        override fun toJson(): JsonObject =
+            buildJsonObject {
+                put(
+                    "EdgeAdd",
+                    buildJsonObject {
+                        put("dependent", dependent)
+                        put("dependency", dependency)
+                    },
+                )
+            }
 
-        override fun targetReadable(permissions: PeerPermissions, peer: PeerId): Boolean =
-            permissions.canRead(peer, dependent) && permissions.canRead(peer, dependency)
+        override fun targetReadable(
+            permissions: PeerPermissions,
+            peer: PeerId,
+        ): Boolean = permissions.canRead(peer, dependent) && permissions.canRead(peer, dependency)
     }
 
-    data class EdgeRemove(val dependent: NodeId, val dependency: NodeId) : DeltaOp {
-        override fun toJson(): JsonObject = buildJsonObject {
-            put("EdgeRemove", buildJsonObject {
-                put("dependent", dependent)
-                put("dependency", dependency)
-            })
-        }
+    data class EdgeRemove(
+        val dependent: NodeId,
+        val dependency: NodeId,
+    ) : DeltaOp {
+        override fun toJson(): JsonObject =
+            buildJsonObject {
+                put(
+                    "EdgeRemove",
+                    buildJsonObject {
+                        put("dependent", dependent)
+                        put("dependency", dependency)
+                    },
+                )
+            }
 
-        override fun targetReadable(permissions: PeerPermissions, peer: PeerId): Boolean =
-            permissions.canRead(peer, dependent) && permissions.canRead(peer, dependency)
+        override fun targetReadable(
+            permissions: PeerPermissions,
+            peer: PeerId,
+        ): Boolean = permissions.canRead(peer, dependent) && permissions.canRead(peer, dependency)
     }
 
     companion object {
-        fun cellSet(node: NodeId, bytes: ByteArray): DeltaOp = CellSet(node, bytes)
-        fun cellSet(node: NodeId, payload: IpcValue): DeltaOp = CellSet(node, payload)
-        fun slotValue(node: NodeId, bytes: ByteArray): DeltaOp = SlotValue(node, bytes)
-        fun slotValue(node: NodeId, payload: IpcValue): DeltaOp = SlotValue(node, payload)
+        fun cellSet(
+            node: NodeId,
+            bytes: ByteArray,
+        ): DeltaOp = CellSet(node, bytes)
+
+        fun cellSet(
+            node: NodeId,
+            payload: IpcValue,
+        ): DeltaOp = CellSet(node, payload)
+
+        fun slotValue(
+            node: NodeId,
+            bytes: ByteArray,
+        ): DeltaOp = SlotValue(node, bytes)
+
+        fun slotValue(
+            node: NodeId,
+            payload: IpcValue,
+        ): DeltaOp = SlotValue(node, payload)
+
         fun invalidate(node: NodeId): DeltaOp = Invalidate(node)
-        fun nodeAdd(node: NodeId, typeTag: String, state: NodeState): DeltaOp =
-            NodeAdd(node, typeTag, state)
-        fun nodeAdd(node: NodeId, typeTag: String, state: NodeState, key: NodeKey?): DeltaOp =
-            NodeAdd(node, typeTag, state, key)
+
+        fun nodeAdd(
+            node: NodeId,
+            typeTag: String,
+            state: NodeState,
+        ): DeltaOp = NodeAdd(node, typeTag, state)
+
+        fun nodeAdd(
+            node: NodeId,
+            typeTag: String,
+            state: NodeState,
+            key: NodeKey?,
+        ): DeltaOp = NodeAdd(node, typeTag, state, key)
+
         fun nodeRemove(node: NodeId): DeltaOp = NodeRemove(node)
-        fun edgeAdd(dependent: NodeId, dependency: NodeId): DeltaOp =
-            EdgeAdd(dependent, dependency)
-        fun edgeRemove(dependent: NodeId, dependency: NodeId): DeltaOp =
-            EdgeRemove(dependent, dependency)
+
+        fun edgeAdd(
+            dependent: NodeId,
+            dependency: NodeId,
+        ): DeltaOp = EdgeAdd(dependent, dependency)
+
+        fun edgeRemove(
+            dependent: NodeId,
+            dependency: NodeId,
+        ): DeltaOp = EdgeRemove(dependent, dependency)
 
         fun fromJson(element: JsonElement): DeltaOp {
             val obj = element.asObject("DeltaOp")
@@ -473,30 +602,35 @@ sealed interface DeltaOp {
             val (tag, bodyElement) = obj.entries.single()
             val body = bodyElement.asObject(tag)
             return when (tag) {
-                "CellSet" -> CellSet(
-                    node = body.longField("node"),
-                    payload = IpcValue.fromJson(body.required("payload")),
-                )
-                "SlotValue" -> SlotValue(
-                    node = body.longField("node"),
-                    payload = IpcValue.fromJson(body.required("payload")),
-                )
+                "CellSet" ->
+                    CellSet(
+                        node = body.longField("node"),
+                        payload = IpcValue.fromJson(body.required("payload")),
+                    )
+                "SlotValue" ->
+                    SlotValue(
+                        node = body.longField("node"),
+                        payload = IpcValue.fromJson(body.required("payload")),
+                    )
                 "Invalidate" -> Invalidate(body.longField("node"))
-                "NodeAdd" -> NodeAdd(
-                    node = body.longField("node"),
-                    typeTag = body.stringField("type_tag"),
-                    state = NodeState.fromJson(body.required("state")),
-                    key = (body["key"] as? JsonPrimitive)?.let { NodeKey.fromJson(it) },
-                )
+                "NodeAdd" ->
+                    NodeAdd(
+                        node = body.longField("node"),
+                        typeTag = body.stringField("type_tag"),
+                        state = NodeState.fromJson(body.required("state")),
+                        key = (body["key"] as? JsonPrimitive)?.let { NodeKey.fromJson(it) },
+                    )
                 "NodeRemove" -> NodeRemove(body.longField("node"))
-                "EdgeAdd" -> EdgeAdd(
-                    dependent = body.longField("dependent"),
-                    dependency = body.longField("dependency"),
-                )
-                "EdgeRemove" -> EdgeRemove(
-                    dependent = body.longField("dependent"),
-                    dependency = body.longField("dependency"),
-                )
+                "EdgeAdd" ->
+                    EdgeAdd(
+                        dependent = body.longField("dependent"),
+                        dependency = body.longField("dependency"),
+                    )
+                "EdgeRemove" ->
+                    EdgeRemove(
+                        dependent = body.longField("dependent"),
+                        dependency = body.longField("dependency"),
+                    )
                 else -> error("unknown DeltaOp variant: $tag")
             }
         }
@@ -505,6 +639,7 @@ sealed interface DeltaOp {
 
 sealed interface DeltaApplyStatus {
     data object Apply : DeltaApplyStatus
+
     data class ResyncRequired(
         val lastEpoch: Long,
         val baseEpoch: Long,
@@ -517,8 +652,7 @@ data class Delta(
     val epoch: Long,
     val ops: List<DeltaOp> = emptyList(),
 ) {
-    fun isNextAfter(lastEpoch: Long): Boolean =
-        baseEpoch == lastEpoch && epoch == baseEpoch + 1
+    fun isNextAfter(lastEpoch: Long): Boolean = baseEpoch == lastEpoch && epoch == baseEpoch + 1
 
     /**
      * The accepted-event span this delta advances: `epoch - baseEpoch` (usually 1,
@@ -534,18 +668,23 @@ data class Delta(
             DeltaApplyStatus.ResyncRequired(lastEpoch, baseEpoch, epoch)
         }
 
-    fun filterReadable(permissions: PeerPermissions, peer: PeerId): Delta =
-        Delta(baseEpoch, epoch, ops.filter { it.targetReadable(permissions, peer) })
+    fun filterReadable(
+        permissions: PeerPermissions,
+        peer: PeerId,
+    ): Delta = Delta(baseEpoch, epoch, ops.filter { it.targetReadable(permissions, peer) })
 
-    fun toJson(): JsonObject = buildJsonObject {
-        put("base_epoch", baseEpoch)
-        put("epoch", epoch)
-        put("ops", buildJsonArray { ops.forEach { add(it.toJson()) } })
-    }
+    fun toJson(): JsonObject =
+        buildJsonObject {
+            put("base_epoch", baseEpoch)
+            put("epoch", epoch)
+            put("ops", buildJsonArray { ops.forEach { add(it.toJson()) } })
+        }
 
     companion object {
-        fun next(baseEpoch: Long, ops: List<DeltaOp>): Delta =
-            Delta(baseEpoch = baseEpoch, epoch = baseEpoch + 1, ops = ops)
+        fun next(
+            baseEpoch: Long,
+            ops: List<DeltaOp>,
+        ): Delta = Delta(baseEpoch = baseEpoch, epoch = baseEpoch + 1, ops = ops)
 
         fun fromJson(element: JsonElement): Delta {
             val obj = element.asObject("Delta")
@@ -569,11 +708,12 @@ data class WireStamp(
     val logical: Long,
     val peer: PeerId,
 ) {
-    fun toJson(): JsonObject = buildJsonObject {
-        put("wall_time", wallTime)
-        put("logical", logical)
-        put("peer", peer)
-    }
+    fun toJson(): JsonObject =
+        buildJsonObject {
+            put("wall_time", wallTime)
+            put("logical", logical)
+            put("peer", peer)
+        }
 
     companion object {
         fun fromJson(element: JsonElement): WireStamp {
@@ -604,15 +744,18 @@ data class CrdtOp(
     val stamp: WireStamp,
     val state: IpcValue,
 ) {
-    fun targetReadable(permissions: PeerPermissions, peer: PeerId): Boolean =
-        permissions.canRead(peer, node)
+    fun targetReadable(
+        permissions: PeerPermissions,
+        peer: PeerId,
+    ): Boolean = permissions.canRead(peer, node)
 
-    fun toJson(): JsonObject = buildJsonObject {
-        put("node", node)
-        put("key", key?.toJson() ?: JsonNull)
-        put("stamp", stamp.toJson())
-        put("state", state.toJson())
-    }
+    fun toJson(): JsonObject =
+        buildJsonObject {
+            put("node", node)
+            put("key", key?.toJson() ?: JsonNull)
+            put("stamp", stamp.toJson())
+            put("state", state.toJson())
+        }
 
     companion object {
         fun fromJson(element: JsonElement): CrdtOp {
@@ -649,23 +792,32 @@ data class CrdtSync(
      * node content, and the receiver needs the whole frontier to compute a
      * sound causal-stability watermark.
      */
-    fun filterReadable(permissions: PeerPermissions, peer: PeerId): CrdtSync =
+    fun filterReadable(
+        permissions: PeerPermissions,
+        peer: PeerId,
+    ): CrdtSync =
         CrdtSync(
             frontier = frontier,
             ops = ops.filter { it.targetReadable(permissions, peer) },
         )
 
-    fun toJson(): JsonObject = buildJsonObject {
-        put("frontier", buildJsonArray {
-            for ((peer, stamp) in frontier) {
-                add(buildJsonArray {
-                    add(JsonPrimitive(peer))
-                    add(stamp.toJson())
-                })
-            }
-        })
-        put("ops", buildJsonArray { ops.forEach { add(it.toJson()) } })
-    }
+    fun toJson(): JsonObject =
+        buildJsonObject {
+            put(
+                "frontier",
+                buildJsonArray {
+                    for ((peer, stamp) in frontier) {
+                        add(
+                            buildJsonArray {
+                                add(JsonPrimitive(peer))
+                                add(stamp.toJson())
+                            },
+                        )
+                    }
+                },
+            )
+            put("ops", buildJsonArray { ops.forEach { add(it.toJson()) } })
+        }
 
     companion object {
         fun fromJson(element: JsonElement): CrdtSync {
@@ -674,12 +826,14 @@ data class CrdtSync(
                 // `frontier` is optional (#lzspecfrontiersuppress): an omitted
                 // frontier is equivalent to `[]` and means "unchanged since the
                 // last accepted frame" — the receiver reuses its last-merged one.
-                frontier = (obj["frontier"] ?: JsonArray(emptyList()))
-                    .asArray("frontier").map { entry ->
-                    val pair = entry.asArray("frontier entry")
-                    require(pair.size == 2) { "frontier entry must be a [peer, stamp] pair" }
-                    pair[0].jsonPrimitive.long to WireStamp.fromJson(pair[1])
-                },
+                frontier =
+                (obj["frontier"] ?: JsonArray(emptyList()))
+                    .asArray("frontier")
+                    .map { entry ->
+                        val pair = entry.asArray("frontier entry")
+                        require(pair.size == 2) { "frontier entry must be a [peer, stamp] pair" }
+                        pair[0].jsonPrimitive.long to WireStamp.fromJson(pair[1])
+                    },
                 ops = obj.required("ops").asArray("ops").map { CrdtOp.fromJson(it) },
             )
         }
@@ -690,12 +844,13 @@ data class CrdtSync(
  * Reliable-sync reverse-channel control frame: request a covering [Snapshot] on a
  * detected gap (`#lzsync`, spec § ResyncCoordinator). Carries no node content.
  */
-data class ResyncRequest(val fromEpoch: Long) {
+data class ResyncRequest(
+    val fromEpoch: Long,
+) {
     fun toJson(): JsonObject = buildJsonObject { put("from_epoch", fromEpoch) }
 
     companion object {
-        fun fromJson(element: JsonElement): ResyncRequest =
-            ResyncRequest(element.asObject("ResyncRequest").longField("from_epoch"))
+        fun fromJson(element: JsonElement): ResyncRequest = ResyncRequest(element.asObject("ResyncRequest").longField("from_epoch"))
     }
 }
 
@@ -704,65 +859,82 @@ data class ResyncRequest(val fromEpoch: Long) {
  * (`#lzsync`, spec § DurableOutbox). Advances the sender's outbox retention cursor
  * and doubles as the reconnect resume cursor. Carries no node content.
  */
-data class OutboxAck(val throughEpoch: Long) {
+data class OutboxAck(
+    val throughEpoch: Long,
+) {
     fun toJson(): JsonObject = buildJsonObject { put("through_epoch", throughEpoch) }
 
     companion object {
-        fun fromJson(element: JsonElement): OutboxAck =
-            OutboxAck(element.asObject("OutboxAck").longField("through_epoch"))
+        fun fromJson(element: JsonElement): OutboxAck = OutboxAck(element.asObject("OutboxAck").longField("through_epoch"))
     }
 }
 
 sealed interface IpcMessage {
     fun toJson(): JsonObject
 
-    data class SnapshotMessage(val snapshot: Snapshot) : IpcMessage {
-        override fun toJson(): JsonObject = buildJsonObject {
-            put("Snapshot", snapshot.toJson())
-        }
+    data class SnapshotMessage(
+        val snapshot: Snapshot,
+    ) : IpcMessage {
+        override fun toJson(): JsonObject =
+            buildJsonObject {
+                put("Snapshot", snapshot.toJson())
+            }
     }
 
-    data class DeltaMessage(val delta: Delta) : IpcMessage {
-        override fun toJson(): JsonObject = buildJsonObject {
-            put("Delta", delta.toJson())
-        }
+    data class DeltaMessage(
+        val delta: Delta,
+    ) : IpcMessage {
+        override fun toJson(): JsonObject =
+            buildJsonObject {
+                put("Delta", delta.toJson())
+            }
     }
 
-    data class CrdtSyncMessage(val sync: CrdtSync) : IpcMessage {
-        override fun toJson(): JsonObject = buildJsonObject {
-            put("CrdtSync", sync.toJson())
-        }
+    data class CrdtSyncMessage(
+        val sync: CrdtSync,
+    ) : IpcMessage {
+        override fun toJson(): JsonObject =
+            buildJsonObject {
+                put("CrdtSync", sync.toJson())
+            }
     }
 
     /** Reliable-sync control frame (reverse channel): request a covering snapshot. */
-    data class ResyncRequestMessage(val request: ResyncRequest) : IpcMessage {
-        override fun toJson(): JsonObject = buildJsonObject {
-            put("ResyncRequest", request.toJson())
-        }
+    data class ResyncRequestMessage(
+        val request: ResyncRequest,
+    ) : IpcMessage {
+        override fun toJson(): JsonObject =
+            buildJsonObject {
+                put("ResyncRequest", request.toJson())
+            }
     }
 
     /** Reliable-sync control frame (reverse channel): ack / resume cursor. */
-    data class OutboxAckMessage(val ack: OutboxAck) : IpcMessage {
-        override fun toJson(): JsonObject = buildJsonObject {
-            put("OutboxAck", ack.toJson())
-        }
+    data class OutboxAckMessage(
+        val ack: OutboxAck,
+    ) : IpcMessage {
+        override fun toJson(): JsonObject =
+            buildJsonObject {
+                put("OutboxAck", ack.toJson())
+            }
     }
 
-    fun encodeJson(): ByteArray =
-        ipcJson.encodeToString(JsonElement.serializer(), toJson()).encodeToByteArray()
+    fun encodeJson(): ByteArray = ipcJson.encodeToString(JsonElement.serializer(), toJson()).encodeToByteArray()
 
     companion object {
         fun ofSnapshot(snapshot: Snapshot): IpcMessage = SnapshotMessage(snapshot)
+
         fun ofDelta(delta: Delta): IpcMessage = DeltaMessage(delta)
+
         fun ofCrdtSync(sync: CrdtSync): IpcMessage = CrdtSyncMessage(sync)
+
         fun ofResyncRequest(request: ResyncRequest): IpcMessage = ResyncRequestMessage(request)
+
         fun ofOutboxAck(ack: OutboxAck): IpcMessage = OutboxAckMessage(ack)
 
-        fun decodeJson(data: ByteArray): IpcMessage =
-            fromJson(ipcJson.parseToJsonElement(data.decodeToString()))
+        fun decodeJson(data: ByteArray): IpcMessage = fromJson(ipcJson.parseToJsonElement(data.decodeToString()))
 
-        fun decodeJson(data: String): IpcMessage =
-            fromJson(ipcJson.parseToJsonElement(data))
+        fun decodeJson(data: String): IpcMessage = fromJson(ipcJson.parseToJsonElement(data))
 
         fun fromJson(element: JsonElement): IpcMessage {
             val obj = element.asObject("IpcMessage")
@@ -786,35 +958,53 @@ enum class OpKind {
     TriggerEffect,
 }
 
-data class RemoteOp(val kind: OpKind, val node: NodeId) {
+data class RemoteOp(
+    val kind: OpKind,
+    val node: NodeId,
+) {
     companion object {
         fun read(node: NodeId): RemoteOp = RemoteOp(OpKind.Read, node)
+
         fun write(node: NodeId): RemoteOp = RemoteOp(OpKind.Write, node)
+
         fun triggerEffect(node: NodeId): RemoteOp = RemoteOp(OpKind.TriggerEffect, node)
     }
 }
 
-class PermissionDenied(val peer: PeerId, val op: RemoteOp) :
-    RuntimeException("peer $peer denied ${op.kind} on node ${op.node}")
+class PermissionDenied(
+    val peer: PeerId,
+    val op: RemoteOp,
+) : RuntimeException("peer $peer denied ${op.kind} on node ${op.node}")
 
 class PeerPermissions {
     private val peers: MutableMap<PeerId, MutableMap<OpKind, MutableSet<NodeId>>> = mutableMapOf()
 
-    fun allow(peer: PeerId, op: RemoteOp): Boolean {
-        val nodes = peers
-            .getOrPut(peer) { mutableMapOf() }
-            .getOrPut(op.kind) { mutableSetOf() }
+    fun allow(
+        peer: PeerId,
+        op: RemoteOp,
+    ): Boolean {
+        val nodes =
+            peers
+                .getOrPut(peer) { mutableMapOf() }
+                .getOrPut(op.kind) { mutableSetOf() }
         return nodes.add(op.node)
     }
 
-    fun allowMany(peer: PeerId, kind: OpKind, nodes: Iterable<NodeId>) {
+    fun allowMany(
+        peer: PeerId,
+        kind: OpKind,
+        nodes: Iterable<NodeId>,
+    ) {
         peers
             .getOrPut(peer) { mutableMapOf() }
             .getOrPut(kind) { mutableSetOf() }
             .addAll(nodes)
     }
 
-    fun revoke(peer: PeerId, op: RemoteOp): Boolean {
+    fun revoke(
+        peer: PeerId,
+        op: RemoteOp,
+    ): Boolean {
         val peerPermissions = peers[peer] ?: return false
         val nodes = peerPermissions[op.kind] ?: return false
         val removed = nodes.remove(op.node)
@@ -824,20 +1014,29 @@ class PeerPermissions {
 
     fun revokePeer(peer: PeerId): Boolean = peers.remove(peer) != null
 
-    fun isAllowed(peer: PeerId, op: RemoteOp): Boolean =
-        peers[peer]?.get(op.kind)?.contains(op.node) == true
+    fun isAllowed(
+        peer: PeerId,
+        op: RemoteOp,
+    ): Boolean = peers[peer]?.get(op.kind)?.contains(op.node) == true
 
-    fun canRead(peer: PeerId, node: NodeId): Boolean =
-        isAllowed(peer, RemoteOp.read(node))
+    fun canRead(
+        peer: PeerId,
+        node: NodeId,
+    ): Boolean = isAllowed(peer, RemoteOp.read(node))
 
-    fun check(peer: PeerId, op: RemoteOp) {
+    fun check(
+        peer: PeerId,
+        op: RemoteOp,
+    ) {
         if (!isAllowed(peer, op)) {
             throw PermissionDenied(peer, op)
         }
     }
 
-    fun filterReadable(peer: PeerId, nodes: Iterable<NodeId>): List<NodeId> =
-        nodes.filter { canRead(peer, it) }
+    fun filterReadable(
+        peer: PeerId,
+        nodes: Iterable<NodeId>,
+    ): List<NodeId> = nodes.filter { canRead(peer, it) }
 
     fun peerCount(): Int = peers.size
 
@@ -850,5 +1049,4 @@ class PeerPermissions {
     }
 }
 
-private fun JsonElement.jsonPrimitiveOrNull() =
-    this as? JsonPrimitive
+private fun JsonElement.jsonPrimitiveOrNull() = this as? JsonPrimitive

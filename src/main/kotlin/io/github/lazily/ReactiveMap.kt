@@ -36,7 +36,9 @@ package io.github.lazily
  * historical `"cell"` / `"slot"`, so the rename cannot leak into fixture or
  * protocol data through Kotlin's default `.name` encoding.
  */
-enum class EntryKind(val wireName: String) {
+enum class EntryKind(
+    val wireName: String,
+) {
     /** An **input** cell ([Source]) — always materialized on read. Wire tag: `"cell"`. */
     Source("cell"),
 
@@ -44,7 +46,8 @@ enum class EntryKind(val wireName: String) {
      * A **derived** slot ([Computed]) — materialized eagerly (pre-mint) or lazily
      * on first read. Wire tag: `"slot"`.
      */
-    Computed("slot");
+    Computed("slot"),
+    ;
 
     companion object {
         /**
@@ -65,11 +68,12 @@ enum class EntryKind(val wireName: String) {
          * spellings the canonical corpus will flip to. Returns `null` for any
          * other tag — callers must treat that as an error, never as a default.
          */
-        fun fromWire(tag: String): EntryKind? = when (tag) {
-            "cell", "source" -> Source
-            "slot", "computed" -> Computed
-            else -> null
-        }
+        fun fromWire(tag: String): EntryKind? =
+            when (tag) {
+                "cell", "source" -> Source
+                "slot", "computed" -> Computed
+                else -> null
+            }
     }
 }
 
@@ -149,7 +153,10 @@ class ComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
         bumpOrder(ctx)
     }
 
-    private fun applyMove(ctx: Context, outcome: MapMove): Boolean {
+    private fun applyMove(
+        ctx: Context,
+        outcome: MapMove,
+    ): Boolean {
         if (!outcome.applied) return false
         if (outcome.changed) bumpOrder(ctx)
         return true
@@ -160,7 +167,11 @@ class ComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
      * [factory] is a [ComputeOps] receiver so upstream reads it performs are
      * value-threaded against the minted slot's recompute (`#lzcellkernel`).
      */
-    private fun mint(ctx: Context, key: K, factory: ComputeOps.(K) -> V): Computed<V> {
+    private fun mint(
+        ctx: Context,
+        key: K,
+        factory: ComputeOps.(K) -> V,
+    ): Computed<V> {
         keyed.get(key)?.let { return it } // warm: already allocated.
         val (stored, mutation) = keyed.insert(key, Computed<V>(ctx.slotAny { factory(key) }))
         if (mutation.changed) bumpMembership(ctx)
@@ -173,7 +184,11 @@ class ComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
      * Re-reading an existing key returns its current value without re-running
      * [factory].
      */
-    fun getOrInsertWith(ops: ComputeOps, key: K, factory: ComputeOps.(K) -> V): V {
+    fun getOrInsertWith(
+        ops: ComputeOps,
+        key: K,
+        factory: ComputeOps.(K) -> V,
+    ): V {
         @Suppress("UNCHECKED_CAST")
         return ops.getSlotAny(mint(ops.computeContext, key, factory).id) as V
     }
@@ -183,7 +198,11 @@ class ComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
      * via [factory], up front. Observationally identical to minting each key
      * lazily on first read — it only changes *when* the nodes are allocated.
      */
-    fun materializeAll(ctx: Context, keys: Iterable<K>, factory: ComputeOps.(K) -> V) {
+    fun materializeAll(
+        ctx: Context,
+        keys: Iterable<K>,
+        factory: ComputeOps.(K) -> V,
+    ) {
         for (key in keys) mint(ctx, key, factory)
     }
 
@@ -191,7 +210,10 @@ class ComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
     fun handle(key: K): Computed<V>? = keyed.get(key)
 
     /** Read the value at [key] if present (does not mint); `null` if absent. Reactive on that entry. */
-    fun get(ops: ComputeOps, key: K): V? {
+    fun get(
+        ops: ComputeOps,
+        key: K,
+    ): V? {
         val handle = keyed.get(key) ?: return null
         @Suppress("UNCHECKED_CAST")
         return ops.getSlotAny(handle.id) as V
@@ -233,7 +255,10 @@ class ComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
      * Reactive membership test for [key]. Subscribes the caller to membership
      * changes (add/remove of any key), not to value changes.
      */
-    fun containsKey(ops: ComputeOps, key: K): Boolean {
+    fun containsKey(
+        ops: ComputeOps,
+        key: K,
+    ): Boolean {
         ops.getCellAny(membershipId(ops.computeContext))
         return keyed.contains(key)
     }
@@ -251,22 +276,34 @@ class ComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
      * signal is bumped, so [keys] readers recompute while [len] readers stay
      * cached. [index] is clamped to `[0, len)`.
      */
-    fun moveTo(ctx: Context, key: K, index: Int): Boolean =
-        applyMove(ctx, keyed.moveTo(key, index))
+    fun moveTo(
+        ctx: Context,
+        key: K,
+        index: Int,
+    ): Boolean = applyMove(ctx, keyed.moveTo(key, index))
 
     /** Atomically move [key] to just before [anchor] (`#lzcellmove`). */
-    fun moveBefore(ctx: Context, key: K, anchor: K): Boolean =
-        applyMove(ctx, keyed.moveBefore(key, anchor))
+    fun moveBefore(
+        ctx: Context,
+        key: K,
+        anchor: K,
+    ): Boolean = applyMove(ctx, keyed.moveBefore(key, anchor))
 
     /** Atomically move [key] to just after [anchor] (`#lzcellmove`). */
-    fun moveAfter(ctx: Context, key: K, anchor: K): Boolean =
-        applyMove(ctx, keyed.moveAfter(key, anchor))
+    fun moveAfter(
+        ctx: Context,
+        key: K,
+        anchor: K,
+    ): Boolean = applyMove(ctx, keyed.moveAfter(key, anchor))
 
     /**
      * Remove [key]'s entry and bump reactive membership. Returns whether the key
      * was present.
      */
-    fun remove(ctx: Context, key: K): Boolean {
+    fun remove(
+        ctx: Context,
+        key: K,
+    ): Boolean {
         val (_, mutation) = keyed.remove(key)
         if (!mutation.changed) return false
         bumpMembership(ctx)

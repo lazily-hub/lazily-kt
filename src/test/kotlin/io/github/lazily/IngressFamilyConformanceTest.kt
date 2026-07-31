@@ -1,7 +1,5 @@
 package io.github.lazily
 
-import java.nio.file.Files
-import java.nio.file.Path
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
@@ -11,6 +9,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import kotlinx.serialization.json.longOrNull
+import java.nio.file.Files
+import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -74,7 +74,11 @@ class IngressFamilyConformanceTest {
         )
 
     /** One ledger row per (primitive, flavor) pair this binding claims. */
-    private data class LedgerRow(val flavor: String, val typeName: String, val shipped: Boolean)
+    private data class LedgerRow(
+        val flavor: String,
+        val typeName: String,
+        val shipped: Boolean,
+    )
 
     private val ledger =
         listOf(
@@ -92,13 +96,29 @@ class IngressFamilyConformanceTest {
      * about the *graph*, and only the shell can answer it.
      */
     private interface IngressModel : AutoCloseable {
-        fun openScope(key: String, generation: Long)
+        fun openScope(
+            key: String,
+            generation: Long,
+        )
+
         fun admit(envelope: IngressEnvelope<String, Long>): IngressAdmission
+
         fun suspendScope(key: String): ReplayRequest?
-        fun reconnect(key: String, generation: Long): ReplayRequest
+
+        fun reconnect(
+            key: String,
+            generation: Long,
+        ): ReplayRequest
+
         fun closeScope(key: String)
-        fun fail(key: String, error: IngressError)
+
+        fun fail(
+            key: String,
+            error: IngressError,
+        )
+
         fun tick(now: Long)
+
         fun drain(key: String): Long?
 
         /**
@@ -106,21 +126,34 @@ class IngressFamilyConformanceTest {
          * makes the next step's validity probe meaningful.
          */
         fun value(key: String): Long?
+
         fun readiness(key: String): IngressReadiness
+
         fun authority(key: String): IngressAuthority?
+
         fun retry(key: String): IngressRetry?
+
         fun acceptedLen(): Int
+
         fun droppedLen(): Int
+
         fun errorsLen(): Int
+
         fun schedule(): IngressSchedule
 
         /** `false` when the reader is invalidated — what `invalidates: true` means. */
         fun valueIsValid(key: String): Boolean
+
         fun readinessIsValid(key: String): Boolean
+
         fun authorityIsValid(key: String): Boolean
+
         fun retryIsValid(key: String): Boolean
+
         fun acceptedIsValid(): Boolean
+
         fun droppedIsValid(): Boolean
+
         fun errorsIsValid(): Boolean
 
         fun view(key: String): IngressScopeView?
@@ -135,33 +168,63 @@ class IngressFamilyConformanceTest {
         private val ctx = Context()
         private val cell = IngressCell<String, Long>(ctx, policy, merge, transport, pollInterval)
 
-        override fun openScope(key: String, generation: Long) = cell.open(key, generation)
+        override fun openScope(
+            key: String,
+            generation: Long,
+        ) = cell.open(key, generation)
+
         override fun admit(envelope: IngressEnvelope<String, Long>) = cell.admit(envelope)
+
         override fun suspendScope(key: String) = cell.suspend(key)
-        override fun reconnect(key: String, generation: Long) = cell.reconnect(key, generation)
+
+        override fun reconnect(
+            key: String,
+            generation: Long,
+        ) = cell.reconnect(key, generation)
+
         override fun closeScope(key: String) = cell.close(key)
-        override fun fail(key: String, error: IngressError) = cell.fail(key, error)
+
+        override fun fail(
+            key: String,
+            error: IngressError,
+        ) = cell.fail(key, error)
+
         override fun tick(now: Long) = cell.tick(now)
+
         override fun drain(key: String) = cell.drain(key)
 
         override fun value(key: String) = cell.value(key)
+
         override fun readiness(key: String) = cell.readiness(key)
+
         override fun authority(key: String) = cell.authority(key)
+
         override fun retry(key: String) = cell.retry(key)
+
         override fun acceptedLen() = cell.accepted().size
+
         override fun droppedLen() = cell.dropped().size
+
         override fun errorsLen() = cell.errors().size
+
         override fun schedule() = cell.schedule()
 
         override fun valueIsValid(key: String) = ctx.isSet(cell.readers(key).value)
+
         override fun readinessIsValid(key: String) = ctx.isSet(cell.readers(key).readiness)
+
         override fun authorityIsValid(key: String) = ctx.isSet(cell.readers(key).authority)
+
         override fun retryIsValid(key: String) = ctx.isSet(cell.readers(key).retry)
+
         override fun acceptedIsValid() = ctx.isSet(cell.acceptedHandle())
+
         override fun droppedIsValid() = ctx.isSet(cell.droppedHandle())
+
         override fun errorsIsValid() = ctx.isSet(cell.errorsHandle())
 
         override fun view(key: String) = cell.view(key)
+
         override fun close() = Unit
     }
 
@@ -175,33 +238,63 @@ class IngressFamilyConformanceTest {
         private val cell =
             ThreadSafeIngressCell<String, Long>(ctx, policy, merge, transport, pollInterval)
 
-        override fun openScope(key: String, generation: Long) = cell.open(key, generation)
+        override fun openScope(
+            key: String,
+            generation: Long,
+        ) = cell.open(key, generation)
+
         override fun admit(envelope: IngressEnvelope<String, Long>) = cell.admit(envelope)
+
         override fun suspendScope(key: String) = cell.suspend(key)
-        override fun reconnect(key: String, generation: Long) = cell.reconnect(key, generation)
+
+        override fun reconnect(
+            key: String,
+            generation: Long,
+        ) = cell.reconnect(key, generation)
+
         override fun closeScope(key: String) = cell.close(key)
-        override fun fail(key: String, error: IngressError) = cell.fail(key, error)
+
+        override fun fail(
+            key: String,
+            error: IngressError,
+        ) = cell.fail(key, error)
+
         override fun tick(now: Long) = cell.tick(now)
+
         override fun drain(key: String) = cell.drain(key)
 
         override fun value(key: String) = cell.value(key)
+
         override fun readiness(key: String) = cell.readiness(key)
+
         override fun authority(key: String) = cell.authority(key)
+
         override fun retry(key: String) = cell.retry(key)
+
         override fun acceptedLen() = cell.accepted().size
+
         override fun droppedLen() = cell.dropped().size
+
         override fun errorsLen() = cell.errors().size
+
         override fun schedule() = cell.schedule()
 
         override fun valueIsValid(key: String) = ctx.isSet(cell.readers(key).value)
+
         override fun readinessIsValid(key: String) = ctx.isSet(cell.readers(key).readiness)
+
         override fun authorityIsValid(key: String) = ctx.isSet(cell.readers(key).authority)
+
         override fun retryIsValid(key: String) = ctx.isSet(cell.readers(key).retry)
+
         override fun acceptedIsValid() = ctx.isSet(cell.acceptedHandle())
+
         override fun droppedIsValid() = ctx.isSet(cell.droppedHandle())
+
         override fun errorsIsValid() = ctx.isSet(cell.errorsHandle())
 
         override fun view(key: String) = cell.view(key)
+
         override fun close() = Unit
     }
 
@@ -215,33 +308,63 @@ class IngressFamilyConformanceTest {
         private val cell =
             AsyncIngressCell<String, Long>(ctx, policy, merge, transport, pollInterval)
 
-        override fun openScope(key: String, generation: Long) = cell.open(key, generation)
+        override fun openScope(
+            key: String,
+            generation: Long,
+        ) = cell.open(key, generation)
+
         override fun admit(envelope: IngressEnvelope<String, Long>) = cell.admit(envelope)
+
         override fun suspendScope(key: String) = cell.suspend(key)
-        override fun reconnect(key: String, generation: Long) = cell.reconnect(key, generation)
+
+        override fun reconnect(
+            key: String,
+            generation: Long,
+        ) = cell.reconnect(key, generation)
+
         override fun closeScope(key: String) = cell.close(key)
-        override fun fail(key: String, error: IngressError) = cell.fail(key, error)
+
+        override fun fail(
+            key: String,
+            error: IngressError,
+        ) = cell.fail(key, error)
+
         override fun tick(now: Long) = cell.tick(now)
+
         override fun drain(key: String) = cell.drain(key)
 
         override fun value(key: String) = cell.value(key)
+
         override fun readiness(key: String) = cell.readiness(key)
+
         override fun authority(key: String) = cell.authority(key)
+
         override fun retry(key: String) = cell.retry(key)
+
         override fun acceptedLen() = cell.accepted().size
+
         override fun droppedLen() = cell.dropped().size
+
         override fun errorsLen() = cell.errors().size
+
         override fun schedule() = cell.schedule()
 
         override fun valueIsValid(key: String) = ctx.isSet(cell.readers(key).value)
+
         override fun readinessIsValid(key: String) = ctx.isSet(cell.readers(key).readiness)
+
         override fun authorityIsValid(key: String) = ctx.isSet(cell.readers(key).authority)
+
         override fun retryIsValid(key: String) = ctx.isSet(cell.readers(key).retry)
+
         override fun acceptedIsValid() = ctx.isSet(cell.acceptedHandle())
+
         override fun droppedIsValid() = ctx.isSet(cell.droppedHandle())
+
         override fun errorsIsValid() = ctx.isSet(cell.errorsHandle())
 
         override fun view(key: String) = cell.view(key)
+
         override fun close() = ctx.close()
     }
 
@@ -260,8 +383,7 @@ class IngressFamilyConformanceTest {
 
     // -- Fixture decoding --------------------------------------------------
 
-    private fun fixture(name: String): JsonObject =
-        Json.parseToJsonElement(ConformanceFixtures.read("ingress/$name")).jsonObject
+    private fun fixture(name: String): JsonObject = Json.parseToJsonElement(ConformanceFixtures.read("ingress/$name")).jsonObject
 
     private fun overflowOf(text: String) =
         when (text) {
@@ -373,24 +495,29 @@ class IngressFamilyConformanceTest {
         val receipts: List<Boolean>,
     )
 
-    private fun snapshot(model: IngressModel, keys: List<String>) =
-        ValiditySnapshot(
-            keys.associateWith {
-                listOf(
-                    model.valueIsValid(it),
-                    model.readinessIsValid(it),
-                    model.authorityIsValid(it),
-                    model.retryIsValid(it),
-                )
-            },
-            listOf(model.acceptedIsValid(), model.droppedIsValid(), model.errorsIsValid()),
-        )
+    private fun snapshot(
+        model: IngressModel,
+        keys: List<String>,
+    ) = ValiditySnapshot(
+        keys.associateWith {
+            listOf(
+                model.valueIsValid(it),
+                model.readinessIsValid(it),
+                model.authorityIsValid(it),
+                model.retryIsValid(it),
+            )
+        },
+        listOf(model.acceptedIsValid(), model.droppedIsValid(), model.errorsIsValid()),
+    )
 
     /**
      * Read every reader kind, so the caches are warm and the next step's validity
      * probe measures *that step's* invalidation and nothing else.
      */
-    private fun materialize(model: IngressModel, keys: List<String>) {
+    private fun materialize(
+        model: IngressModel,
+        keys: List<String>,
+    ) {
         for (key in keys) {
             model.value(key)
             model.readiness(key)
@@ -407,7 +534,10 @@ class IngressFamilyConformanceTest {
      * Replay one fixture against one flavor. Returns the number of steps executed, so
      * a caller can prove this binary actually opened the corpus.
      */
-    private fun replay(name: String, flavor: Flavor): Int {
+    private fun replay(
+        name: String,
+        flavor: Flavor,
+    ): Int {
         val json = fixture(name)
         assertEquals(
             "IngressCell",
@@ -424,7 +554,12 @@ class IngressFamilyConformanceTest {
         for (raw in steps) {
             val step = raw.jsonObject
             (step.getValue("op").jsonObject["key"])?.let { keys += it.jsonPrimitive.content }
-            step.getValue("expected").jsonObject["scopes"]?.jsonObject?.keys?.let { keys += it }
+            step
+                .getValue("expected")
+                .jsonObject["scopes"]
+                ?.jsonObject
+                ?.keys
+                ?.let { keys += it }
         }
         val keyList = keys.toList()
 
@@ -472,7 +607,9 @@ class IngressFamilyConformanceTest {
                         val drained = model.drain(op.getValue("key").jsonPrimitive.content)
                         step["returns"]?.let {
                             assertEquals(
-                                it.jsonObject.getValue("drained").jsonPrimitive.longOrNull,
+                                it.jsonObject
+                                    .getValue("drained")
+                                    .jsonPrimitive.longOrNull,
                                 drained,
                                 "$where: drained value",
                             )
@@ -521,7 +658,11 @@ class IngressFamilyConformanceTest {
         }
     }
 
-    private fun assertState(model: IngressModel, expected: JsonObject, where: String) {
+    private fun assertState(
+        model: IngressModel,
+        expected: JsonObject,
+        where: String,
+    ) {
         for ((key, rawWant) in expected.getValue("scopes").jsonObject) {
             val want = rawWant.jsonObject
             val view = model.view(key) ?: error("$where: scope $key absent")
@@ -633,15 +774,18 @@ class IngressFamilyConformanceTest {
         listOf("accepted", "dropped", "error").forEachIndexed { slot, channel ->
             val invalidated = before.receipts[slot] && !after.receipts[slot]
             assertEquals(
-                want.getValue("receipts").jsonObject.getValue(channel).jsonPrimitive.boolean,
+                want
+                    .getValue("receipts")
+                    .jsonObject
+                    .getValue(channel)
+                    .jsonPrimitive.boolean,
                 invalidated,
                 "$where: receipts.$channel invalidation",
             )
         }
     }
 
-    private fun expectedStepTotal(): Int =
-        fixtures.sumOf { fixture(it).getValue("steps").jsonArray.size }
+    private fun expectedStepTotal(): Int = fixtures.sumOf { fixture(it).getValue("steps").jsonArray.size }
 
     // -- The gates ---------------------------------------------------------
 
@@ -676,7 +820,8 @@ class IngressFamilyConformanceTest {
     fun unshippedFlavorsAreReallyAbsent() {
         val sources = StringBuilder()
         Files.walk(Path.of("src/main/kotlin")).use { stream ->
-            stream.filter { it.toString().endsWith(".kt") }
+            stream
+                .filter { it.toString().endsWith(".kt") }
                 .forEach { sources.append(Files.readString(it)).append('\n') }
         }
         val text = sources.toString()
@@ -743,14 +888,18 @@ class IngressFamilyConformanceTest {
         for (flavor in Flavor.entries) {
             model(flavor, IngressPolicy(), sum(), IngressTransportKind.EventChannel, 25).use {
                 it.admit(IngressEnvelope("alpha", 2, 0, 0, 1))
-                it.acceptedLen(); it.droppedLen(); it.errorsLen()
+                it.acceptedLen()
+                it.droppedLen()
+                it.errorsLen()
 
                 it.admit(IngressEnvelope("alpha", 1, 0, 0, 9))
                 assertTrue(it.acceptedIsValid(), "$flavor: a drop must not clear accepted")
                 assertFalse(it.droppedIsValid(), "$flavor: a drop must clear dropped")
                 assertTrue(it.errorsIsValid(), "$flavor: a drop must not clear error")
 
-                it.acceptedLen(); it.droppedLen(); it.errorsLen()
+                it.acceptedLen()
+                it.droppedLen()
+                it.errorsLen()
                 it.fail("alpha", IngressError.DecodeFailed)
                 assertTrue(it.acceptedIsValid(), "$flavor: an error must not clear accepted")
                 assertTrue(it.droppedIsValid(), "$flavor: an error must not clear dropped")

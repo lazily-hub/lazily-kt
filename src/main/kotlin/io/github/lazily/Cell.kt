@@ -85,7 +85,11 @@ sealed interface Cell<T : Any> : GraphNode
  * [set] / [merge].
  */
 @JvmInline
-value class Source<T : Any> @PublishedApi internal constructor(val id: Int) : Cell<T> {
+value class Source<T : Any>
+@PublishedApi
+internal constructor(
+    val id: Int,
+) : Cell<T> {
     override val nodeId: Int get() = id
 }
 
@@ -96,7 +100,11 @@ value class Source<T : Any> @PublishedApi internal constructor(val id: Int) : Ce
  * never writes.
  */
 @JvmInline
-value class Computed<T : Any> @PublishedApi internal constructor(val id: Int) : Cell<T> {
+value class Computed<T : Any>
+@PublishedApi
+internal constructor(
+    val id: Int,
+) : Cell<T> {
     override val nodeId: Int get() = id
 }
 
@@ -109,8 +117,10 @@ value class Computed<T : Any> @PublishedApi internal constructor(val id: Int) : 
  *
  * A no-op (no invalidation) when the new value `==` the old (the store-guard).
  */
-fun <T : Any> Source<T>.set(ctx: Context, value: T): Unit =
-    ctx.setCellAny(nodeId, value)
+fun <T : Any> Source<T>.set(
+    ctx: Context,
+    value: T,
+): Unit = ctx.setCellAny(nodeId, value)
 
 /**
  * Fold [op] into this source cell under [policy] (default [keepLatest], for which
@@ -121,7 +131,7 @@ fun <T : Any> Source<T>.merge(
     ctx: Context,
     op: T,
     policy: MergePolicy<T> = keepLatest(),
-): Unit {
+) {
     @Suppress("UNCHECKED_CAST")
     val current = ctx.getCellAny(nodeId) as T
     ctx.setCellAny(nodeId, policy.merge(current, op))

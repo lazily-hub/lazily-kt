@@ -14,7 +14,11 @@ enum class BreakerState { Closed, Open, HalfOpen }
 
 /** Circuit-breaker core: a sliding window of outcomes trips Closed->Open at the
  *  failure threshold; Open->HalfOpen at the deadline; a HalfOpen success closes. */
-class CircuitBreakerCore(window: Int, failureThreshold: Int, private val resetTimeout: Long) {
+class CircuitBreakerCore(
+    window: Int,
+    failureThreshold: Int,
+    private val resetTimeout: Long,
+) {
     private val window = maxOf(1, window)
     private val failureThreshold = maxOf(1, failureThreshold)
     var state: BreakerState = BreakerState.Closed
@@ -37,7 +41,10 @@ class CircuitBreakerCore(window: Int, failureThreshold: Int, private val resetTi
             BreakerState.HalfOpen -> true
         }
 
-    fun record(success: Boolean, now: Long) {
+    fun record(
+        success: Boolean,
+        now: Long,
+    ) {
         when (state) {
             BreakerState.HalfOpen ->
                 if (success) {
@@ -73,13 +80,21 @@ class CircuitBreakerCell(
     private fun refresh() = stateCell.set(ctx, core.state)
 
     fun allow(now: Long): Boolean = core.allow(now).also { refresh() }
-    fun record(success: Boolean, now: Long) = core.record(success, now).also { refresh() }
+
+    fun record(
+        success: Boolean,
+        now: Long,
+    ) = core.record(success, now).also { refresh() }
+
     fun state(): BreakerState = core.state
 }
 
 /** Exponential-backoff core: delay(attempt) = min(cap, base * 2^attempt),
  *  saturating to cap. */
-class RetryPolicyCore(private val base: Long, private val cap: Long) {
+class RetryPolicyCore(
+    private val base: Long,
+    private val cap: Long,
+) {
     private var attempt: Int = 0
 
     fun delay(attempt: Int): Long {
@@ -100,7 +115,11 @@ class RetryPolicyCore(private val base: Long, private val cap: Long) {
 }
 
 /** Reactive retry policy: projects the current delay onto a `Cell`. */
-class RetryPolicyCell(private val ctx: Context, base: Long, cap: Long) {
+class RetryPolicyCell(
+    private val ctx: Context,
+    base: Long,
+    cap: Long,
+) {
     private val core = RetryPolicyCore(base, cap)
     val delayCell: Source<Long> = ctx.source(0L)
 
@@ -109,17 +128,22 @@ class RetryPolicyCell(private val ctx: Context, base: Long, cap: Long) {
         delayCell.set(ctx, d)
         return d
     }
+
     fun reset() {
         core.reset()
         delayCell.set(ctx, 0L)
     }
+
     fun delay(ops: ComputeOps = ctx): Long = ops.get(delayCell)
 }
 
 /** Bounded isolation-pool core. */
-class BulkheadCore(private val capacity: Long) {
+class BulkheadCore(
+    private val capacity: Long,
+) {
     var inUse: Long = 0
         private set
+
     fun acquire(): Boolean {
         if (inUse < capacity) {
             inUse += 1
@@ -127,20 +151,26 @@ class BulkheadCore(private val capacity: Long) {
         }
         return false
     }
+
     fun release() {
         if (inUse > 0) inUse -= 1
     }
 }
 
 /** Reactive bulkhead: projects permitsInUse onto a `Cell`. */
-class BulkheadCell(private val ctx: Context, capacity: Long) {
+class BulkheadCell(
+    private val ctx: Context,
+    capacity: Long,
+) {
     private val core = BulkheadCore(capacity)
     val inUseCell: Source<Long> = ctx.source(0L)
 
     private fun refresh() = inUseCell.set(ctx, core.inUse)
 
     fun acquire(): Boolean = core.acquire().also { refresh() }
+
     fun release() = core.release().also { refresh() }
+
     fun permitsInUse(ops: ComputeOps = ctx): Long = ops.get(inUseCell)
 }
 
@@ -151,11 +181,15 @@ class TimeoutCore {
     var timedOut = false
         private set
 
-    fun arm(now: Long, timeout: Long) {
+    fun arm(
+        now: Long,
+        timeout: Long,
+    ) {
         deadline = now + timeout
         armed = true
         timedOut = false
     }
+
     fun tick(now: Long): Boolean {
         if (armed && !timedOut && now >= deadline) {
             timedOut = true
@@ -166,13 +200,20 @@ class TimeoutCore {
 }
 
 /** Reactive timeout: projects isTimedOut onto a `Cell`. */
-class TimeoutCell(private val ctx: Context) {
+class TimeoutCell(
+    private val ctx: Context,
+) {
     private val core = TimeoutCore()
     val timedOutCell: Source<Boolean> = ctx.source(false)
 
     private fun refresh() = timedOutCell.set(ctx, core.timedOut)
 
-    fun arm(now: Long, timeout: Long) = core.arm(now, timeout).also { refresh() }
+    fun arm(
+        now: Long,
+        timeout: Long,
+    ) = core.arm(now, timeout).also { refresh() }
+
     fun tick(now: Long): Boolean = core.tick(now).also { refresh() }
+
     fun isTimedOut(ops: ComputeOps = ctx): Boolean = ops.get(timedOutCell)
 }

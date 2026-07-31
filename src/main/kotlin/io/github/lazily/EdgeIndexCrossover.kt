@@ -83,10 +83,33 @@ private fun measureChurn(degree: Int): Double {
 }
 
 private val DEGREES: IntArray =
-    System.getProperty("lazily.crossoverDegrees")
-        ?.split(",")?.mapNotNull { it.trim().toIntOrNull() }?.toIntArray()
+    System
+        .getProperty("lazily.crossoverDegrees")
+        ?.split(",")
+        ?.mapNotNull { it.trim().toIntOrNull() }
+        ?.toIntArray()
         ?: intArrayOf(
-            3, 4, 6, 8, 12, 16, 20, 24, 32, 40, 48, 56, 64, 80, 96, 128, 160, 256, 512, 1024, 4096,
+            3,
+            4,
+            6,
+            8,
+            12,
+            16,
+            20,
+            24,
+            32,
+            40,
+            48,
+            56,
+            64,
+            80,
+            96,
+            128,
+            160,
+            256,
+            512,
+            1024,
+            4096,
         )
 
 fun main() {
@@ -96,7 +119,8 @@ fun main() {
     for (i in 0 until 48) w.add(i)
     for (op in 0 until WARMUP_OPS) {
         val v = op % 48
-        w.remove(v); w.add(v)
+        w.remove(v)
+        w.add(v)
         warm += w.size
     }
     check(warm > 0)

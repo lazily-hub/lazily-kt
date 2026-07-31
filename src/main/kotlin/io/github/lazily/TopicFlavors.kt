@@ -41,14 +41,20 @@ class ThreadSafeTopicCell<T : Any>(
                 ctx.computed {
                     lock.withLock {
                         val sub = subscriptions[id]
-                        if (sub == null || !sub.connected) emptyList()
-                        else retained.drop((sub.cursor - baseOffset).coerceAtLeast(0).toInt())
+                        if (sub == null || !sub.connected) {
+                            emptyList()
+                        } else {
+                            retained.drop((sub.cursor - baseOffset).coerceAtLeast(0).toInt())
+                        }
                     }
                 }
             lock.withLock { readers.getOrPut(id) { minted } }
         }
 
-    fun subscribe(id: String, durability: TopicDurability): TopicSubscribeOutcome {
+    fun subscribe(
+        id: String,
+        durability: TopicDurability,
+    ): TopicSubscribeOutcome {
         val outcome =
             lock.withLock {
                 val existing = subscriptions[id]
@@ -111,8 +117,7 @@ class ThreadSafeTopicCell<T : Any>(
         return offset
     }
 
-    fun readStream(id: String): List<T> =
-        readerHandle(id)?.let(ctx::get) ?: emptyList()
+    fun readStream(id: String): List<T> = readerHandle(id)?.let(ctx::get) ?: emptyList()
 
     fun read(id: String): T? = readStream(id).firstOrNull()
 
@@ -147,7 +152,9 @@ class ThreadSafeTopicCell<T : Any>(
         }
 
     fun baseOffset(): Long = lock.withLock { baseOffset }
+
     fun endOffset(): Long = lock.withLock { baseOffset + retained.size }
+
     fun elements(): List<T> = lock.withLock { retained.toList() }
 
     fun subscription(id: String): TopicSubscriptionSnapshot? =
@@ -157,8 +164,7 @@ class ThreadSafeTopicCell<T : Any>(
             }
         }
 
-    fun readerHandle(id: String): ThreadSafeComputed<List<T>>? =
-        lock.withLock { readers[id] }
+    fun readerHandle(id: String): ThreadSafeComputed<List<T>>? = lock.withLock { readers[id] }
 
     fun snapshot(): TopicSnapshot<T> =
         lock.withLock {
@@ -201,14 +207,20 @@ class AsyncTopicCell<T : Any>(
                 ctx.computed {
                     lock.withLock {
                         val sub = subscriptions[id]
-                        if (sub == null || !sub.connected) emptyList()
-                        else retained.drop((sub.cursor - baseOffset).coerceAtLeast(0).toInt())
+                        if (sub == null || !sub.connected) {
+                            emptyList()
+                        } else {
+                            retained.drop((sub.cursor - baseOffset).coerceAtLeast(0).toInt())
+                        }
                     }
                 }
             lock.withLock { readers.getOrPut(id) { minted } }
         }
 
-    fun subscribe(id: String, durability: TopicDurability): TopicSubscribeOutcome {
+    fun subscribe(
+        id: String,
+        durability: TopicDurability,
+    ): TopicSubscribeOutcome {
         val outcome =
             lock.withLock {
                 val existing = subscriptions[id]
@@ -271,16 +283,19 @@ class AsyncTopicCell<T : Any>(
         return offset
     }
 
-    fun readStream(id: String): List<T> =
-        readerHandle(id)?.let { requireNotNull(ctx.get(it)) } ?: emptyList()
+    fun readStream(id: String): List<T> = readerHandle(id)?.let { requireNotNull(ctx.get(it)) } ?: emptyList()
 
-    fun readStream(id: String, compute: AsyncComputeContext): List<T> =
-        readerHandle(id)?.let { requireNotNull(compute.get(it)) } ?: emptyList()
+    fun readStream(
+        id: String,
+        compute: AsyncComputeContext,
+    ): List<T> = readerHandle(id)?.let { requireNotNull(compute.get(it)) } ?: emptyList()
 
     fun read(id: String): T? = readStream(id).firstOrNull()
 
-    fun read(id: String, compute: AsyncComputeContext): T? =
-        readStream(id, compute).firstOrNull()
+    fun read(
+        id: String,
+        compute: AsyncComputeContext,
+    ): T? = readStream(id, compute).firstOrNull()
 
     fun advance(id: String): T? {
         var root: Int? = null
@@ -313,7 +328,9 @@ class AsyncTopicCell<T : Any>(
         }
 
     fun baseOffset(): Long = lock.withLock { baseOffset }
+
     fun endOffset(): Long = lock.withLock { baseOffset + retained.size }
+
     fun elements(): List<T> = lock.withLock { retained.toList() }
 
     fun subscription(id: String): TopicSubscriptionSnapshot? =
@@ -323,8 +340,7 @@ class AsyncTopicCell<T : Any>(
             }
         }
 
-    fun readerHandle(id: String): AsyncContext.AsyncComputed<List<T>>? =
-        lock.withLock { readers[id] }
+    fun readerHandle(id: String): AsyncContext.AsyncComputed<List<T>>? = lock.withLock { readers[id] }
 
     fun snapshot(): TopicSnapshot<T> =
         lock.withLock {

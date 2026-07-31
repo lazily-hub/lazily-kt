@@ -1,7 +1,5 @@
 package io.github.lazily
 
-import java.nio.file.Files
-import java.nio.file.Path
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
@@ -33,11 +31,17 @@ class TemporalConformanceTest {
     }
 
     private fun steps(fx: JsonObject) = fx["steps"]!!.jsonArray
+
     private fun now(step: JsonObject) = step["op"]!!.jsonObject["now"]!!.jsonPrimitive.long
+
     private fun edge(step: JsonObject) = step["returns"]!!.jsonPrimitive.boolean
+
     private fun expected(step: JsonObject) = step["expected"]!!.jsonObject
-    private fun invalidates(step: JsonObject, reader: String) =
-        expected(step)["invalidates"]!!.jsonObject[reader]!!.jsonPrimitive.boolean
+
+    private fun invalidates(
+        step: JsonObject,
+        reader: String,
+    ) = expected(step)["invalidates"]!!.jsonObject[reader]!!.jsonPrimitive.boolean
 
     @Test
     fun timerSingleShot() {
@@ -58,7 +62,18 @@ class TemporalConformanceTest {
             } else {
                 assertEquals(null, timer.value())
             }
-            assertEquals(exp["next_fire"].let { if (it == null || it.jsonPrimitive.longOrNull == null) null else it.jsonPrimitive.long }, timer.nextFire())
+            assertEquals(
+                exp["next_fire"].let {
+                    if (it == null ||
+                        it.jsonPrimitive.longOrNull == null
+                    ) {
+                        null
+                    } else {
+                        it.jsonPrimitive.long
+                    }
+                },
+                timer.nextFire(),
+            )
 
             val wasCached = ctx.isSet(observed)
             ctx.get(observed)

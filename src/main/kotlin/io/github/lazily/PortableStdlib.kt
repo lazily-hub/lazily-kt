@@ -3,7 +3,9 @@ package io.github.lazily
 import java.util.concurrent.CompletableFuture
 
 /** Wire-stable reasons shared by the portable logical-clock primitives. */
-enum class StdlibUnavailableReason(val wireName: String) {
+enum class StdlibUnavailableReason(
+    val wireName: String,
+) {
     DeadlineOverflow("deadline_overflow"),
     ClockRegression("clock_regression"),
     OperationUnavailable("operation_unavailable"),
@@ -16,14 +18,19 @@ class StdlibUnavailableException(
 ) : IllegalArgumentException(reason.wireName)
 
 /** Return [now] + [duration], failing rather than wrapping the logical clock. */
-fun checkedDeadline(now: ULong, duration: ULong): ULong {
+fun checkedDeadline(
+    now: ULong,
+    duration: ULong,
+): ULong {
     if (duration > ULong.MAX_VALUE - now) {
         throw StdlibUnavailableException(StdlibUnavailableReason.DeadlineOverflow)
     }
     return now + duration
 }
 
-enum class TimerOutcome(val wireName: String) {
+enum class TimerOutcome(
+    val wireName: String,
+) {
     Pending("pending"),
     Fired("fired"),
     Unavailable("unavailable"),
@@ -43,7 +50,10 @@ data class TimerObservation(
  * unavailable result without changing the timer, while the first firing tick is
  * latched for all later observations.
  */
-class Timer(now: ULong, duration: ULong) {
+class Timer(
+    now: ULong,
+    duration: ULong,
+) {
     val deadline: ULong = checkedDeadline(now, duration)
 
     private var lastNow: ULong = now
@@ -70,25 +80,30 @@ class Timer(now: ULong, duration: ULong) {
     }
 
     /** JDK-only future adapter; the core has no scheduler or async-runtime dependency. */
-    fun observeFuture(now: ULong): CompletableFuture<TimerObservation> =
-        CompletableFuture.completedFuture(observe(now))
+    fun observeFuture(now: ULong): CompletableFuture<TimerObservation> = CompletableFuture.completedFuture(observe(now))
 }
 
 sealed interface TimeoutOperation<out T> {
     data object Pending : TimeoutOperation<Nothing>
 
-    data class Completed<T>(val value: T) : TimeoutOperation<T>
+    data class Completed<T>(
+        val value: T,
+    ) : TimeoutOperation<T>
 
     data object Unavailable : TimeoutOperation<Nothing>
 }
 
-enum class TimeoutCancellation(val wireName: String) {
+enum class TimeoutCancellation(
+    val wireName: String,
+) {
     Pending("pending"),
     Cancelled("cancelled"),
     Unavailable("unavailable"),
 }
 
-enum class TimeoutOutcome(val wireName: String) {
+enum class TimeoutOutcome(
+    val wireName: String,
+) {
     Pending("pending"),
     Completed("completed"),
     TimedOut("timed_out"),
@@ -111,7 +126,10 @@ data class TimeoutObservation<T>(
  * precedence completion > unavailable operation > cancellation > pending.
  * Terminal observations are latched and likewise invoke neither adapter.
  */
-class Timeout<T>(now: ULong, duration: ULong) {
+class Timeout<T>(
+    now: ULong,
+    duration: ULong,
+) {
     val deadline: ULong = checkedDeadline(now, duration)
 
     private var lastNow: ULong = now
@@ -173,32 +191,37 @@ class Timeout<T>(now: ULong, duration: ULong) {
     ): TimeoutObservation<T> {
         terminal?.let { return it }
         return when (operation) {
-            is TimeoutOperation.Completed -> latch(
-                TimeoutObservation(TimeoutOutcome.Completed, value = operation.value),
-            )
-
-            TimeoutOperation.Unavailable -> latch(
-                TimeoutObservation(
-                    TimeoutOutcome.Unavailable,
-                    reason = StdlibUnavailableReason.OperationUnavailable,
-                ),
-            )
-
-            TimeoutOperation.Pending -> when (cancellation) {
-                TimeoutCancellation.Cancelled -> latch(
-                    TimeoutObservation(TimeoutOutcome.Cancelled),
+            is TimeoutOperation.Completed ->
+                latch(
+                    TimeoutObservation(TimeoutOutcome.Completed, value = operation.value),
                 )
 
-                TimeoutCancellation.Unavailable -> latch(
+            TimeoutOperation.Unavailable ->
+                latch(
                     TimeoutObservation(
                         TimeoutOutcome.Unavailable,
-                        reason = StdlibUnavailableReason.CancellationUnavailable,
+                        reason = StdlibUnavailableReason.OperationUnavailable,
                     ),
                 )
 
-                TimeoutCancellation.Pending ->
-                    TimeoutObservation(TimeoutOutcome.Pending, deadline = deadline)
-            }
+            TimeoutOperation.Pending ->
+                when (cancellation) {
+                    TimeoutCancellation.Cancelled ->
+                        latch(
+                            TimeoutObservation(TimeoutOutcome.Cancelled),
+                        )
+
+                    TimeoutCancellation.Unavailable ->
+                        latch(
+                            TimeoutObservation(
+                                TimeoutOutcome.Unavailable,
+                                reason = StdlibUnavailableReason.CancellationUnavailable,
+                            ),
+                        )
+
+                    TimeoutCancellation.Pending ->
+                        TimeoutObservation(TimeoutOutcome.Pending, deadline = deadline)
+                }
         }
     }
 
@@ -208,7 +231,9 @@ class Timeout<T>(now: ULong, duration: ULong) {
     }
 }
 
-enum class RevisionBarrierOutcome(val wireName: String) {
+enum class RevisionBarrierOutcome(
+    val wireName: String,
+) {
     Pending("pending"),
     Satisfied("satisfied"),
     TimedOut("timed_out"),
@@ -283,7 +308,10 @@ class RevisionBarrier(
     }
 
     @Synchronized
-    fun advance(revision: ULong, predicate: Boolean): RevisionBarrierObservation {
+    fun advance(
+        revision: ULong,
+        predicate: Boolean,
+    ): RevisionBarrierObservation {
         terminal?.let { return it }
         acceptRevision(revision)
         if (predicate && this.revision >= requiredRevision) {
@@ -293,12 +321,13 @@ class RevisionBarrier(
     }
 
     @Synchronized
-    fun dispose(): RevisionBarrierObservation =
-        terminal ?: latch(RevisionBarrierOutcome.Disposed)
+    fun dispose(): RevisionBarrierObservation = terminal ?: latch(RevisionBarrierOutcome.Disposed)
 
     /** Receipts can wake host waiters, but cannot change revision authority. */
     @Synchronized
-    fun receipt(@Suppress("UNUSED_PARAMETER") key: String): RevisionBarrierObservation = snapshot()
+    fun receipt(
+        @Suppress("UNUSED_PARAMETER") key: String,
+    ): RevisionBarrierObservation = snapshot()
 
     @Synchronized
     private fun beginObserve(
@@ -317,16 +346,15 @@ class RevisionBarrier(
     }
 
     @Synchronized
-    private fun finishCancellation(
-        cancellation: TimeoutCancellation,
-    ): RevisionBarrierObservation {
+    private fun finishCancellation(cancellation: TimeoutCancellation): RevisionBarrierObservation {
         terminal?.let { return it }
         return when (cancellation) {
             TimeoutCancellation.Cancelled -> latch(RevisionBarrierOutcome.Cancelled)
-            TimeoutCancellation.Unavailable -> latch(
-                RevisionBarrierOutcome.Unavailable,
-                StdlibUnavailableReason.CancellationUnavailable,
-            )
+            TimeoutCancellation.Unavailable ->
+                latch(
+                    RevisionBarrierOutcome.Unavailable,
+                    StdlibUnavailableReason.CancellationUnavailable,
+                )
 
             TimeoutCancellation.Pending -> snapshot()
         }
@@ -368,9 +396,7 @@ class RevisionBarrier(
         )
 }
 
-private fun <T> invokeFuture(
-    supplier: () -> CompletableFuture<T>,
-): CompletableFuture<T> =
+private fun <T> invokeFuture(supplier: () -> CompletableFuture<T>): CompletableFuture<T> =
     try {
         supplier()
     } catch (error: Throwable) {

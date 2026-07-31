@@ -22,12 +22,17 @@ private object RateShapeEmpty
 
 /** Debounce core: coalesce inputs (KeepLatest) and emit the latest value only
  *  after `quiet` ticks with no new input; every input resets the deadline. */
-class DebounceCore<T : Any>(private val quiet: Long) {
+class DebounceCore<T : Any>(
+    private val quiet: Long,
+) {
     private var pending: T? = null
     private var fireAt: Long = 0
     private var armed: Boolean = false
 
-    fun input(now: Long, v: T) {
+    fun input(
+        now: Long,
+        v: T,
+    ) {
         pending = v
         fireAt = now + quiet
         armed = true
@@ -45,11 +50,17 @@ class DebounceCore<T : Any>(private val quiet: Long) {
 }
 
 /** Reactive debounce over any `Reactive<T>` source. */
-class DebounceCell<T : Any>(private val ctx: Context, quiet: Long) {
+class DebounceCell<T : Any>(
+    private val ctx: Context,
+    quiet: Long,
+) {
     private val core = DebounceCore<T>(quiet)
     val outputCell: Source<Any> = ctx.source(RateShapeEmpty)
 
-    fun input(now: Long, v: T) = core.input(now, v)
+    fun input(
+        now: Long,
+        v: T,
+    ) = core.input(now, v)
 
     fun tick(now: Long): T? {
         val emitted = core.tick(now)
@@ -66,12 +77,18 @@ class DebounceCell<T : Any>(private val ctx: Context, quiet: Long) {
 enum class ThrottleEdge { Leading, Trailing }
 
 /** Throttle core: at most one emit per `window`. */
-class ThrottleCore<T : Any>(private val edge: ThrottleEdge, private val window: Long) {
+class ThrottleCore<T : Any>(
+    private val edge: ThrottleEdge,
+    private val window: Long,
+) {
     private var windowEnd: Long? = null
     private var windowStart: Long? = null
     private var pending: T? = null
 
-    fun input(now: Long, v: T): T? =
+    fun input(
+        now: Long,
+        v: T,
+    ): T? =
         when (edge) {
             ThrottleEdge.Leading -> {
                 val we = windowEnd
@@ -103,11 +120,18 @@ class ThrottleCore<T : Any>(private val edge: ThrottleEdge, private val window: 
 }
 
 /** Reactive throttle over any `Reactive<T>` source. */
-class ThrottleCell<T : Any>(private val ctx: Context, edge: ThrottleEdge, window: Long) {
+class ThrottleCell<T : Any>(
+    private val ctx: Context,
+    edge: ThrottleEdge,
+    window: Long,
+) {
     private val core = ThrottleCore<T>(edge, window)
     val outputCell: Source<Any> = ctx.source(RateShapeEmpty)
 
-    fun input(now: Long, v: T): T? {
+    fun input(
+        now: Long,
+        v: T,
+    ): T? {
         val emitted = core.input(now, v)
         if (emitted != null) outputCell.set(ctx, emitted)
         return emitted
@@ -127,12 +151,19 @@ class ThrottleCell<T : Any>(private val ctx: Context, edge: ThrottleEdge, window
 
 /** Sampling mode for [SampleCore]. */
 sealed class SampleMode {
-    data class Count(val n: Long) : SampleMode()
-    data class Time(val period: Long) : SampleMode()
+    data class Count(
+        val n: Long,
+    ) : SampleMode()
+
+    data class Time(
+        val period: Long,
+    ) : SampleMode()
 }
 
 /** Deterministic sampling core. */
-class SampleCore<T : Any>(private val mode: SampleMode) {
+class SampleCore<T : Any>(
+    private val mode: SampleMode,
+) {
     private var counter: Long = 0
     private var next: Long = if (mode is SampleMode.Time) maxOf(1L, mode.period) else 0
     private var held: T? = null
@@ -161,7 +192,10 @@ class SampleCore<T : Any>(private val mode: SampleMode) {
 }
 
 /** Reactive sampler over any `Reactive<T>` source. */
-class SampleCell<T : Any>(private val ctx: Context, mode: SampleMode) {
+class SampleCell<T : Any>(
+    private val ctx: Context,
+    mode: SampleMode,
+) {
     private val core = SampleCore<T>(mode)
     val outputCell: Source<Any> = ctx.source(RateShapeEmpty)
 
@@ -190,7 +224,9 @@ fun interface SampleRng {
 }
 
 /** A small deterministic SplitMix64 LCG — no external RNG dependency. */
-class Lcg(seed: Long) : SampleRng {
+class Lcg(
+    seed: Long,
+) : SampleRng {
     private var state: Long = seed
 
     override fun nextDouble(): Double {
@@ -204,8 +240,11 @@ class Lcg(seed: Long) : SampleRng {
 }
 
 /** Probabilistic (tail) sampling core — a draw in [0,1) passes iff draw < rate. */
-class ProbabilisticSampleCore(rate: Double) {
+class ProbabilisticSampleCore(
+    rate: Double,
+) {
     val rate: Double = rate.coerceIn(0.0, 1.0)
+
     fun decide(draw: Double): Boolean = draw < rate
 }
 
@@ -220,7 +259,10 @@ class ProbabilisticSampleCell<T : Any>(
 
     fun input(v: T): T? = inputWithDraw(v, rng.nextDouble())
 
-    fun inputWithDraw(v: T, draw: Double): T? {
+    fun inputWithDraw(
+        v: T,
+        draw: Double,
+    ): T? {
         if (core.decide(draw)) {
             outputCell.set(ctx, v)
             return v

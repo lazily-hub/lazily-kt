@@ -30,20 +30,16 @@ class MergePolicy<T : Any>(
 )
 
 /** Keep-latest band (`old ⊕ op = op`) — the policy behind a plain `Cell`. */
-fun <T : Any> keepLatest(): MergePolicy<T> =
-    MergePolicy("KeepLatest", { _, op -> op }, commutative = false, idempotent = true)
+fun <T : Any> keepLatest(): MergePolicy<T> = MergePolicy("KeepLatest", { _, op -> op }, commutative = false, idempotent = true)
 
 /** Additive commutative monoid (`old + op`). Not idempotent. */
-fun sum(): MergePolicy<Long> =
-    MergePolicy("Sum", { a, b -> a + b }, commutative = true, idempotent = false)
+fun sum(): MergePolicy<Long> = MergePolicy("Sum", { a, b -> a + b }, commutative = true, idempotent = false)
 
 /** Max semilattice (`max(old, op)`). Associative, commutative, idempotent. */
-fun max(): MergePolicy<Long> =
-    MergePolicy("Max", { a, b -> maxOf(a, b) }, commutative = true, idempotent = true)
+fun max(): MergePolicy<Long> = MergePolicy("Max", { a, b -> maxOf(a, b) }, commutative = true, idempotent = true)
 
 /** Grow-only set-union semilattice over [Set]. */
-fun <E> setUnion(): MergePolicy<Set<E>> =
-    MergePolicy("SetUnion", { old, op -> old + op }, commutative = true, idempotent = true)
+fun <E> setUnion(): MergePolicy<Set<E>> = MergePolicy("SetUnion", { old, op -> old + op }, commutative = true, idempotent = true)
 
 /**
  * Raw FIFO append over [List] (`old ++ op`). Order + multiplicity are meaning —
@@ -91,5 +87,7 @@ class MergeCell<T : Any>(
 }
 
 /** Create a [MergeCell] over this context. */
-inline fun <reified T : Any> Context.mergeCell(initial: T, policy: MergePolicy<T>): MergeCell<T> =
-    MergeCell(this, source(initial), policy)
+inline fun <reified T : Any> Context.mergeCell(
+    initial: T,
+    policy: MergePolicy<T>,
+): MergeCell<T> = MergeCell(this, source(initial), policy)

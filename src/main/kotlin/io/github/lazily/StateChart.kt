@@ -1,14 +1,13 @@
 package io.github.lazily
 
-import java.util.TreeSet
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.util.TreeSet
 
 /**
  * Full Harel/SCXML state charts — native Kotlin, conforming to
@@ -34,11 +33,17 @@ import kotlinx.serialization.json.jsonPrimitive
 /** Kind of a state node — mirrors `LazilyFormal.StateChart.Kind`. */
 internal sealed interface Kind {
     data object Atomic : Kind
+
     data object Compound : Kind
+
     data object Parallel : Kind
+
     data object Final : Kind
+
     /** `deep = true` → deep history; `deep = false` → shallow history. */
-    data class History(val deep: Boolean) : Kind
+    data class History(
+        val deep: Boolean,
+    ) : Kind
 }
 
 internal data class Transition(
@@ -61,9 +66,14 @@ internal data class StateDef(
 /** A history recording for a region exited at least once. */
 internal sealed interface Recording {
     /** Direct child of the region that was active (shallow). */
-    class Shallow(val child: String) : Recording
+    class Shallow(
+        val child: String,
+    ) : Recording
+
     /** Full active sub-configuration below the region (deep). */
-    class Deep(val set: TreeSet<String>) : Recording
+    class Deep(
+        val set: TreeSet<String>,
+    ) : Recording
 }
 
 private fun Kind.isLeaf(): Boolean = this is Kind.Atomic || this is Kind.Final
@@ -84,15 +94,17 @@ class ChartDef internal constructor(
     /** Parse a chart definition from the declarative JSON form. */
     companion object {
         fun fromJson(value: JsonElement): ChartDef {
-            val obj = value as? JsonObject
-                ?: error("chart must be a JSON object")
+            val obj =
+                value as? JsonObject
+                    ?: error("chart must be a JSON object")
             // Validates chart.initial is present; descent uses each compound's
             // own `initial` from the root, so the value itself is not stored.
             obj["initial"]?.jsonPrimitive?.contentOrNull
                 ?: error("chart.initial is required")
 
-            val statesObj = obj["states"] as? JsonObject
-                ?: error("chart.states is required")
+            val statesObj =
+                obj["states"] as? JsonObject
+                    ?: error("chart.states is required")
 
             val states = LinkedHashMap<String, StateDef>()
             val order = HashMap<String, Int>()
@@ -111,7 +123,10 @@ class ChartDef internal constructor(
          * and per-node depth identically. [order] maps each state id to the
          * position that fixes deterministic parallel-region descent.
          */
-        internal fun fromStates(states: Map<String, StateDef>, order: Map<String, Int>): ChartDef {
+        internal fun fromStates(
+            states: Map<String, StateDef>,
+            order: Map<String, Int>,
+        ): ChartDef {
             val children = LinkedHashMap<String, MutableList<String>>()
             var root: String? = null
             for ((id, def) in states) {
@@ -148,20 +163,28 @@ class ChartDef internal constructor(
     }
 
     /** Lowest common ancestor (inclusive) of [a] and [b]; falls back to root. */
-    internal fun lca(a: String, b: String): String {
+    internal fun lca(
+        a: String,
+        b: String,
+    ): String {
         val ancA = ancestorsInclusive(a).toHashSet()
         for (cid in ancestorsInclusive(b)) if (cid in ancA) return cid
         return root
     }
 
     /** `true` iff [desc] is a proper descendant of [anc]. */
-    internal fun isProperDescendant(desc: String, anc: String): Boolean =
-        desc != anc && ancestorsInclusive(desc).any { it == anc }
+    internal fun isProperDescendant(
+        desc: String,
+        anc: String,
+    ): Boolean = desc != anc && ancestorsInclusive(desc).any { it == anc }
 
     internal fun depth(id: String): Int = depths[id] ?: 0
 }
 
-private fun parseState(id: String, raw: JsonElement): StateDef {
+private fun parseState(
+    id: String,
+    raw: JsonElement,
+): StateDef {
     val obj = raw as? JsonObject ?: error("state $id must be an object")
     val parent = obj["parent"]?.jsonPrimitive?.contentOrNull
     val initial = obj["initial"]?.jsonPrimitive?.contentOrNull
@@ -171,17 +194,19 @@ private fun parseState(id: String, raw: JsonElement): StateDef {
         error("state $id uses `run` actions, which are not supported (rejecting explicitly per spec)")
     }
 
-    val kind: Kind = when {
-        obj["history"]?.jsonPrimitive?.contentOrNull != null -> when (obj.getValue("history").jsonPrimitive.content) {
-            "shallow" -> Kind.History(deep = false)
-            "deep" -> Kind.History(deep = true)
-            else -> error("state $id: unknown history kind")
+    val kind: Kind =
+        when {
+            obj["history"]?.jsonPrimitive?.contentOrNull != null ->
+                when (obj.getValue("history").jsonPrimitive.content) {
+                    "shallow" -> Kind.History(deep = false)
+                    "deep" -> Kind.History(deep = true)
+                    else -> error("state $id: unknown history kind")
+                }
+            obj["parallel"]?.jsonPrimitive?.booleanOrNull == true -> Kind.Parallel
+            obj["kind"]?.jsonPrimitive?.contentOrNull == "final" -> Kind.Final
+            obj.contains("initial") -> Kind.Compound
+            else -> Kind.Atomic
         }
-        obj["parallel"]?.jsonPrimitive?.booleanOrNull == true -> Kind.Parallel
-        obj["kind"]?.jsonPrimitive?.contentOrNull == "final" -> Kind.Final
-        obj.contains("initial") -> Kind.Compound
-        else -> Kind.Atomic
-    }
 
     val entry = parseActionList(obj["entry"])
     val exit = parseActionList(obj["exit"])
@@ -194,36 +219,42 @@ private fun parseState(id: String, raw: JsonElement): StateDef {
     return StateDef(parent, kind, initial, default, transitions, entry, exit)
 }
 
-private fun parseActionList(raw: JsonElement?): List<String> = when (raw) {
-    null -> emptyList()
-    else -> raw.jsonArray.map { v ->
-        v.jsonPrimitive.contentOrNull
-            ?: error("action must be a string (object-form actions are rejected explicitly per spec)")
+private fun parseActionList(raw: JsonElement?): List<String> =
+    when (raw) {
+        null -> emptyList()
+        else ->
+            raw.jsonArray.map { v ->
+                v.jsonPrimitive.contentOrNull
+                    ?: error("action must be a string (object-form actions are rejected explicitly per spec)")
+            }
     }
-}
 
-private fun parseTransition(raw: JsonElement): Transition = when (raw) {
-    is JsonPrimitive -> Transition(target = raw.content)
-    is JsonObject -> {
-        val target = raw["target"]?.jsonPrimitive?.contentOrNull
-            ?: error("transition requires `target`")
-        val guard = when (raw["guard"]) {
-            null -> null
-            is JsonPrimitive -> raw.getValue("guard").jsonPrimitive.content
-            is JsonObject -> error(
-                "context-expression `{expr: …}` guards are not supported (rejecting explicitly per spec)"
+private fun parseTransition(raw: JsonElement): Transition =
+    when (raw) {
+        is JsonPrimitive -> Transition(target = raw.content)
+        is JsonObject -> {
+            val target =
+                raw["target"]?.jsonPrimitive?.contentOrNull
+                    ?: error("transition requires `target`")
+            val guard =
+                when (raw["guard"]) {
+                    null -> null
+                    is JsonPrimitive -> raw.getValue("guard").jsonPrimitive.content
+                    is JsonObject ->
+                        error(
+                            "context-expression `{expr: …}` guards are not supported (rejecting explicitly per spec)",
+                        )
+                    else -> error("guard must be a string")
+                }
+            Transition(
+                target = target,
+                guard = guard,
+                action = parseActionList(raw["action"]),
+                internal = raw["internal"]?.jsonPrimitive?.booleanOrNull ?: false,
             )
-            else -> error("guard must be a string")
         }
-        Transition(
-            target = target,
-            guard = guard,
-            action = parseActionList(raw["action"]),
-            internal = raw["internal"]?.jsonPrimitive?.booleanOrNull ?: false,
-        )
+        else -> error("transition must be a string or object")
     }
-    else -> error("transition must be a string or object")
-}
 
 private fun computeDepth(
     states: Map<String, StateDef>,
@@ -281,11 +312,13 @@ class StateChart internal constructor(
     }
 
     /** Active atomic leaves, sorted (one per parallel region; one for single-region). */
-    fun activeLeaves(ops: ComputeOps): List<String> =
-        configuration(ops).filter { def.kind(it).isLeaf() }.sorted()
+    fun activeLeaves(ops: ComputeOps): List<String> = configuration(ops).filter { def.kind(it).isLeaf() }.sorted()
 
     /** Hierarchical "state-in" predicate: `true` iff [id] is in the active configuration. */
-    fun matches(ops: ComputeOps, id: String): Boolean = configuration(ops).contains(id)
+    fun matches(
+        ops: ComputeOps,
+        id: String,
+    ): Boolean = configuration(ops).contains(id)
 
     /**
      * Send an event (run-to-completion). Returns `true` if any transition was
@@ -293,7 +326,11 @@ class StateChart internal constructor(
      * [guards] resolves named guards for this send (absent/unknown name →
      * fail-closed `false`).
      */
-    fun send(ctx: Context, event: String, guards: Map<String, Boolean> = emptyMap()): Boolean {
+    fun send(
+        ctx: Context,
+        event: String,
+        guards: Map<String, Boolean> = emptyMap(),
+    ): Boolean {
         val config = configuration(ctx)
         val result = engineSend(def, history, config, event, guards)
         return if (result != null) {
@@ -328,7 +365,11 @@ internal fun engineSend(
     guards: Map<String, Boolean>,
 ): Pair<TreeSet<String>, List<String>>? {
     // 1. Enabled transitions: per active leaf, innermost passing match.
-    data class Cand(val source: String, val transition: Transition, val leaf: String)
+    data class Cand(
+        val source: String,
+        val transition: Transition,
+        val leaf: String,
+    )
     val candidates = ArrayList<Cand>()
     for (leaf in config.filter { def.kind(it).isLeaf() }) {
         for (anc in def.ancestorsInclusive(leaf)) {
@@ -343,10 +384,11 @@ internal fun engineSend(
 
     // 2. Conflict resolution: order by source depth desc, then document order;
     //    take greedily, skipping any whose exit set intersects the taken union.
-    val sorted = candidates.sortedWith(
-        compareByDescending<Cand> { def.depth(it.source) }
-            .thenBy { def.order[it.source] ?: Int.MAX_VALUE }
-    )
+    val sorted =
+        candidates.sortedWith(
+            compareByDescending<Cand> { def.depth(it.source) }
+                .thenBy { def.order[it.source] ?: Int.MAX_VALUE },
+        )
     val exitUnion = TreeSet<String>()
     val enterUnion = TreeSet<String>()
     val takenTransitions = ArrayList<Transition>()
@@ -387,8 +429,9 @@ private fun engineComputeExitEnter(
     config: Set<String>,
 ): Pair<TreeSet<String>, TreeSet<String>> {
     val target = transition.target
-    val internal = transition.internal &&
-        (target == source || def.isProperDescendant(target, source))
+    val internal =
+        transition.internal &&
+            (target == source || def.isProperDescendant(target, source))
     val lca = if (internal) source else def.lca(leaf, target)
 
     // Exit set: active proper-descendants of the lca.
@@ -428,8 +471,9 @@ private fun engineRestoreViaHistory(
         is Recording.Deep -> enter.addAll(rec.set)
         null -> {
             // First entry: descend via `default`, else the region's `initial`.
-            val start = def.states.getValue(hist).default
-                ?: def.states.getValue(region).initial
+            val start =
+                def.states.getValue(hist).default
+                    ?: def.states.getValue(region).initial
             if (start != null) {
                 enter.addAll(pathBelow(def, region, start))
                 val tmp = ArrayList<String>()
@@ -439,10 +483,14 @@ private fun engineRestoreViaHistory(
     }
 }
 
-private fun guardPasses(t: Transition, guards: Map<String, Boolean>): Boolean = when (t.guard) {
-    null -> true
-    else -> guards[t.guard] ?: false // fail-closed
-}
+private fun guardPasses(
+    t: Transition,
+    guards: Map<String, Boolean>,
+): Boolean =
+    when (t.guard) {
+        null -> true
+        else -> guards[t.guard] ?: false // fail-closed
+    }
 
 /** Enter [state] and its default descendants, recording entry actions top-down. */
 private fun enterSubtree(
@@ -455,20 +503,30 @@ private fun enterSubtree(
     actions.addAll(def.states.getValue(state).entry)
     when (def.kind(state)) {
         is Kind.Atomic, is Kind.Final, is Kind.History -> Unit
-        is Kind.Compound -> def.states.getValue(state).initial?.let { enterSubtree(def, it, enter, actions) }
+        is Kind.Compound ->
+            def.states
+                .getValue(state)
+                .initial
+                ?.let { enterSubtree(def, it, enter, actions) }
         is Kind.Parallel -> for (region in def.children[state] ?: emptyList()) enterSubtree(def, region, enter, actions)
     }
 }
 
 /** Path from just-below [lca] down to [target] (exclusive lca, inclusive target). */
-private fun pathBelow(def: ChartDef, lca: String, target: String): List<String> {
+private fun pathBelow(
+    def: ChartDef,
+    lca: String,
+    target: String,
+): List<String> {
     val chain = def.ancestorsInclusive(target) // [target, ..., root]
     val idx = chain.indexOfFirst { it == lca }.let { if (it < 0) chain.size else it }
     return chain.take(idx).reversed() // [child-of-lca, ..., target]
 }
 
-private fun historyChildOf(def: ChartDef, region: String): String? =
-    def.children[region]?.firstOrNull { def.kind(it) is Kind.History }
+private fun historyChildOf(
+    def: ChartDef,
+    region: String,
+): String? = def.children[region]?.firstOrNull { def.kind(it) is Kind.History }
 
 private fun recordRegion(
     def: ChartDef,
@@ -481,8 +539,9 @@ private fun recordRegion(
     if (kind !is Kind.History) return
     if (!kind.deep) {
         // Shallow: record the direct child of `region` that was active.
-        val child = (def.children[region] ?: emptyList())
-            .firstOrNull { it in config && def.kind(it) !is Kind.History }
+        val child =
+            (def.children[region] ?: emptyList())
+                .firstOrNull { it in config && def.kind(it) !is Kind.History }
         if (child != null) history[histChild] = Recording.Shallow(child)
     } else {
         // Deep: record every active state strictly below `region`.
@@ -510,6 +569,7 @@ class ThreadSafeStateChart(
 ) {
     private val configId: Int = ctx.cellAny(TreeSet<String>())
     private val history: MutableMap<String, Recording> = mutableMapOf()
+
     @Volatile
     private var lastActions: List<String> = emptyList()
     private val lock = Any()
@@ -543,18 +603,22 @@ class ThreadSafeStateChart(
      * taken, `false` if rejected (configuration unchanged, no actions fired).
      * [guards] resolves named guards (absent/unknown name → fail-closed `false`).
      */
-    fun send(event: String, guards: Map<String, Boolean> = emptyMap()): Boolean = synchronized(lock) {
-        val config = configuration()
-        val result = engineSend(def, history, config, event, guards)
-        if (result != null) {
-            lastActions = result.second
-            if (result.first != config) ctx.setCellAny(configId, result.first)
-            true
-        } else {
-            lastActions = emptyList()
-            false
+    fun send(
+        event: String,
+        guards: Map<String, Boolean> = emptyMap(),
+    ): Boolean =
+        synchronized(lock) {
+            val config = configuration()
+            val result = engineSend(def, history, config, event, guards)
+            if (result != null) {
+                lastActions = result.second
+                if (result.first != config) ctx.setCellAny(configId, result.first)
+                true
+            } else {
+                lastActions = emptyList()
+                false
+            }
         }
-    }
 }
 
 // -- Typed Kotlin builder -----------------------------------------------------
@@ -563,20 +627,31 @@ class ThreadSafeStateChart(
 // identical to the same chart parsed via ChartDef.fromJson.
 
 /** A single transition, built in Kotlin. Equivalent to a JSON transition object. */
-class TransitionBuilder private constructor(private var t: Transition) {
+class TransitionBuilder private constructor(
+    private var t: Transition,
+) {
     companion object {
         /** An external transition to [target] with no guard or actions. */
         fun to(target: String): TransitionBuilder = TransitionBuilder(Transition(target = target))
     }
 
     /** Attach a named boolean guard (resolved at send time; absent → false). */
-    fun guard(name: String): TransitionBuilder { t = t.copy(guard = name); return this }
+    fun guard(name: String): TransitionBuilder {
+        t = t.copy(guard = name)
+        return this
+    }
 
     /** Append a transition action name. */
-    fun action(name: String): TransitionBuilder { t = t.copy(action = t.action + name); return this }
+    fun action(name: String): TransitionBuilder {
+        t = t.copy(action = t.action + name)
+        return this
+    }
 
     /** Mark this transition internal (no exit/re-entry when target is source or a descendant). */
-    fun internal(): TransitionBuilder { t = t.copy(internal = true); return this }
+    fun internal(): TransitionBuilder {
+        t = t.copy(internal = true)
+        return this
+    }
 
     internal fun build(): Transition = t
 }
@@ -596,39 +671,68 @@ class StateBuilder private constructor(
     companion object {
         /** An atomic leaf state. */
         fun atomic(id: String) = StateBuilder(id, Kind.Atomic, null)
+
         /** A compound state with the given initial child. */
-        fun compound(id: String, initial: String) = StateBuilder(id, Kind.Compound, initial)
+        fun compound(
+            id: String,
+            initial: String,
+        ) = StateBuilder(id, Kind.Compound, initial)
+
         /** A parallel (orthogonal) state; all child regions are entered together. */
         fun parallel(id: String) = StateBuilder(id, Kind.Parallel, null)
+
         /** A final leaf state (accepted as a leaf; raises no completion event). */
         fun final(id: String) = StateBuilder(id, Kind.Final, null)
+
         /** A shallow-history pseudostate for its parent region. */
         fun historyShallow(id: String) = StateBuilder(id, Kind.History(deep = false), null)
+
         /** A deep-history pseudostate for its parent region. */
         fun historyDeep(id: String) = StateBuilder(id, Kind.History(deep = true), null)
     }
 
     /** Set the parent state id. Omit only for the single chart root. */
-    fun parent(parent: String): StateBuilder { this.parent = parent; return this }
+    fun parent(parent: String): StateBuilder {
+        this.parent = parent
+        return this
+    }
 
     /** Set the default target used on a history pseudostate's first entry. */
-    fun defaultChild(target: String): StateBuilder { this.default = target; return this }
+    fun defaultChild(target: String): StateBuilder {
+        this.default = target
+        return this
+    }
 
     /** Append an entry action name. */
-    fun entry(action: String): StateBuilder { entry.add(action); return this }
+    fun entry(action: String): StateBuilder {
+        entry.add(action)
+        return this
+    }
 
     /** Append an exit action name. */
-    fun exit(action: String): StateBuilder { exit.add(action); return this }
+    fun exit(action: String): StateBuilder {
+        exit.add(action)
+        return this
+    }
 
     /** Add an unguarded external transition on [event] to [target]. */
-    fun on(event: String, target: String): StateBuilder = onTransition(event, TransitionBuilder.to(target))
+    fun on(
+        event: String,
+        target: String,
+    ): StateBuilder = onTransition(event, TransitionBuilder.to(target))
 
     /** Add a guarded external transition on [event] to [target]. */
-    fun onGuarded(event: String, target: String, guard: String): StateBuilder =
-        onTransition(event, TransitionBuilder.to(target).guard(guard))
+    fun onGuarded(
+        event: String,
+        target: String,
+        guard: String,
+    ): StateBuilder = onTransition(event, TransitionBuilder.to(target).guard(guard))
 
     /** Add a fully-specified transition on [event]. */
-    fun onTransition(event: String, t: TransitionBuilder): StateBuilder {
+    fun onTransition(
+        event: String,
+        t: TransitionBuilder,
+    ): StateBuilder {
         transitions[event] = t.build()
         return this
     }

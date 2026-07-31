@@ -15,6 +15,7 @@ import kotlin.test.assertTrue
  */
 class ZeroCopyTransportConformanceTest {
     private val arenaCap = 1 shl 16
+
     private fun bytes(vararg v: Int) = ByteArray(v.size) { v[it].toByte() }
 
     /** `resolve_write`: bytes spilled to a backend resolve zero-copy to exactly what was written. */
@@ -124,10 +125,11 @@ class ZeroCopyTransportConformanceTest {
         val backend = InProcessBackend.withCapacity(arenaCap)
         val router = BlobRouter().register(backend)
         val big = ByteArray(48) { (it and 0xff).toByte() }
-        val delta = Delta.next(
-            baseEpoch = 1,
-            ops = listOf(DeltaOp.cellSet(node = 7L, payload = IpcValue.inline(big))),
-        )
+        val delta =
+            Delta.next(
+                baseEpoch = 1,
+                ops = listOf(DeltaOp.cellSet(node = 7L, payload = IpcValue.inline(big))),
+            )
         val (spilled, moved) = spillMessage(IpcMessage.ofDelta(delta), backend, threshold = 16)
         assertEquals(48, moved)
         val op = (spilled as IpcMessage.DeltaMessage).delta.ops.single() as DeltaOp.CellSet

@@ -1,7 +1,5 @@
 package io.github.lazily
 
-import java.nio.file.Files
-import java.nio.file.Path
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -25,20 +23,21 @@ class ReceiptTest {
 
     @Test
     fun `receipt message round trips through JSON`() {
-        val message = ReceiptMessage.ofCausalReceipts(
-            CausalReceipts(
-                listOf(
-                    CausalReceipt.observed("receipt-observed", "patch-123", "editor", 7),
-                    CausalReceipt.applied(
-                        "receipt-applied",
-                        "patch-123",
-                        "editor",
-                        7,
-                        payloadHash = "sha256:abc",
+        val message =
+            ReceiptMessage.ofCausalReceipts(
+                CausalReceipts(
+                    listOf(
+                        CausalReceipt.observed("receipt-observed", "patch-123", "editor", 7),
+                        CausalReceipt.applied(
+                            "receipt-applied",
+                            "patch-123",
+                            "editor",
+                            7,
+                            payloadHash = "sha256:abc",
+                        ),
                     ),
-                )
+                ),
             )
-        )
 
         val decoded = ReceiptMessage.decodeJson(message.encodeJson())
         assertEquals(message, decoded)
@@ -112,17 +111,22 @@ class ReceiptTest {
 
     @Test
     fun `shared causal receipt conformance fixture replays`() {
-        val fixture = Json.parseToJsonElement(
-            ConformanceFixtures.read("receipts/causal_receipts.json"),
-        ).jsonObject
+        val fixture =
+            Json
+                .parseToJsonElement(
+                    ConformanceFixtures.read("receipts/causal_receipts.json"),
+                ).jsonObject
         val message = ReceiptMessage.fromJson(fixture.getValue("wire"))
         val receipts = assertIs<ReceiptMessage.CausalReceiptsMessage>(message).batch.receipts
         val projection = ReceiptProjection()
 
-        fixture.getValue("assertions").jsonObject
+        fixture
+            .getValue("assertions")
+            .jsonObject
             .consuming("receipts/causal_receipts.json assertions") { a ->
-                val currentGeneration = a.long("current_generation")
-                    ?: error("current_generation is required")
+                val currentGeneration =
+                    a.long("current_generation")
+                        ?: error("current_generation is required")
                 receipts.forEach { projection.observe(currentGeneration, it) }
 
                 a.assertInt("receipt_count") { receipts.size }
@@ -160,10 +164,11 @@ class ReceiptTest {
                 // every other key here and still be wrong.
                 a.assertKeyWith("nonterminal_outcomes") { el ->
                     val want = el.jsonArray.map { it.jsonPrimitive.content }
-                    val got = receipts
-                        .filterNot { it.outcome.isTerminal }
-                        .map { it.outcome.wireName }
-                        .distinct()
+                    val got =
+                        receipts
+                            .filterNot { it.outcome.isTerminal }
+                            .map { it.outcome.wireName }
+                            .distinct()
                     assertEquals(want, got, "nonterminal_outcomes")
                     for (name in want) {
                         assertFalse(

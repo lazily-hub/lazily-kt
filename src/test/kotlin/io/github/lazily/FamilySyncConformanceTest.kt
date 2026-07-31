@@ -1,7 +1,5 @@
 package io.github.lazily
 
-import java.nio.file.Files
-import java.nio.file.Path
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
@@ -76,7 +74,11 @@ class FamilySyncConformanceTest {
             if (s["reingest"]?.jsonPrimitive?.boolean == true) {
                 val reapplied = target.ingest(frame)
                 assertEquals(
-                    s.getValue("expect").jsonObject.getValue("reingest_applied").jsonPrimitive.int,
+                    s
+                        .getValue("expect")
+                        .jsonObject
+                        .getValue("reingest_applied")
+                        .jsonPrimitive.int,
                     reapplied,
                     "[$name] re-ingest is idempotent",
                 )
@@ -85,7 +87,12 @@ class FamilySyncConformanceTest {
             val expect = s.getValue("expect").jsonObject
 
             val gotKeys = target.familyKeys(namespace).map { suffixOf(it) }.sorted()
-            val wantKeys = expect.getValue("target_keys").jsonArray.map { it.jsonPrimitive.content }.sorted()
+            val wantKeys =
+                expect
+                    .getValue("target_keys")
+                    .jsonArray
+                    .map { it.jsonPrimitive.content }
+                    .sorted()
             assertEquals(wantKeys, gotKeys, "[$name] materialized key set")
 
             assertEquals(
@@ -102,8 +109,10 @@ class FamilySyncConformanceTest {
                 )
             }
 
-            val countTrue = target.familyKeys(namespace)
-                .count { target.familyValueLww<Boolean>(namespace, suffixOf(it)) == true }
+            val countTrue =
+                target
+                    .familyKeys(namespace)
+                    .count { target.familyValueLww<Boolean>(namespace, suffixOf(it)) == true }
             assertEquals(
                 expect.getValue("target_count_true").jsonPrimitive.int,
                 countTrue,

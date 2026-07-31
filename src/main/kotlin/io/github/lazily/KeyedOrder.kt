@@ -9,7 +9,8 @@ package io.github.lazily
 enum class MapMutation {
     None,
     Inserted,
-    Removed;
+    Removed,
+    ;
 
     /** Whether anything changed. */
     val changed: Boolean get() = this != None
@@ -25,7 +26,8 @@ enum class MapMutation {
 enum class MapMove {
     Missing,
     Unchanged,
-    Reordered;
+    Reordered,
+    ;
 
     /** Whether the move applied at all (the `Boolean` the public API returns). */
     val applied: Boolean get() = this != Missing
@@ -80,7 +82,10 @@ class KeyedOrder<K : Any, H : Any> {
      * existing handle (cell-identity: a key's node is stable for its lifetime)
      * and reports [MapMutation.None] so the caller bumps nothing.
      */
-    fun insert(key: K, handle: H): Pair<H, MapMutation> {
+    fun insert(
+        key: K,
+        handle: H,
+    ): Pair<H, MapMutation> {
         val existing = entries[key]
         if (existing != null) return existing to MapMutation.None
         entries[key] = handle
@@ -107,7 +112,10 @@ class KeyedOrder<K : Any, H : Any> {
      * that is what separates a reorder from a remove + re-mint. Both ends are
      * clamped; an unclamped negative index is the defect lazily-js shipped.
      */
-    fun moveTo(key: K, index: Int): MapMove {
+    fun moveTo(
+        key: K,
+        index: Int,
+    ): MapMove {
         val from = order.indexOf(key)
         if (from < 0) return MapMove.Missing
         val to = index.coerceIn(0, order.size - 1)
@@ -126,14 +134,20 @@ class KeyedOrder<K : Any, H : Any> {
      * far side of its anchor — the defect found in lazily-zig, where
      * `moveBefore("a", "d")` on `[a,b,c,d]` produced `[b,c,d,a]`.
      */
-    fun moveBefore(key: K, anchor: K): MapMove {
+    fun moveBefore(
+        key: K,
+        anchor: K,
+    ): MapMove {
         val anchorIdx = position(anchor) ?: return MapMove.Missing
         val from = position(key) ?: return MapMove.Missing
         return moveTo(key, if (from < anchorIdx) anchorIdx - 1 else anchorIdx)
     }
 
     /** Move [key] to just after [anchor]. Same pre-removal reasoning. */
-    fun moveAfter(key: K, anchor: K): MapMove {
+    fun moveAfter(
+        key: K,
+        anchor: K,
+    ): MapMove {
         val anchorIdx = position(anchor) ?: return MapMove.Missing
         val from = position(key) ?: return MapMove.Missing
         return moveTo(key, if (from <= anchorIdx) anchorIdx else anchorIdx + 1)

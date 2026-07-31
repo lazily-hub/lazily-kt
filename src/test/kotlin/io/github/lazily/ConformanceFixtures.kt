@@ -27,13 +27,16 @@ import java.util.concurrent.ConcurrentSkipListSet
  */
 object ConformanceFixtures {
     /** Canonical conformance root — the lazily-spec sibling, never a bundled copy. */
-    val root: Path = Path.of(System.getenv("LAZILY_SPEC_DIR") ?: "../lazily-spec")
-        .resolve("conformance")
+    val root: Path =
+        Path
+            .of(System.getenv("LAZILY_SPEC_DIR") ?: "../lazily-spec")
+            .resolve("conformance")
 
     /** Where the positive "these fixtures actually ran" manifest is written. */
-    val manifestPath: Path = Path.of(
-        System.getenv("LAZILY_CONFORMANCE_MANIFEST") ?: "build/conformance-fixtures-loaded.txt",
-    )
+    val manifestPath: Path =
+        Path.of(
+            System.getenv("LAZILY_CONFORMANCE_MANIFEST") ?: "build/conformance-fixtures-loaded.txt",
+        )
 
     private val loaded = ConcurrentSkipListSet<String>()
 

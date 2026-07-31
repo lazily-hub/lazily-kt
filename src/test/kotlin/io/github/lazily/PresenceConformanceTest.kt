@@ -1,7 +1,5 @@
 package io.github.lazily
 
-import java.nio.file.Files
-import java.nio.file.Path
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
@@ -27,20 +25,37 @@ class PresenceConformanceTest {
     }
 
     private fun steps(fx: JsonObject) = fx["steps"]!!.jsonArray
-    private fun inval(step: JsonObject, reader: String) =
-        step["expected"]!!.jsonObject["invalidates"]!!.jsonObject[reader]!!.jsonPrimitive.boolean
+
+    private fun inval(
+        step: JsonObject,
+        reader: String,
+    ) = step["expected"]!!
+        .jsonObject["invalidates"]!!
+        .jsonObject[reader]!!
+        .jsonPrimitive.boolean
 
     private fun wantMap(step: JsonObject): Map<Long, String> =
-        step["expected"]!!.jsonObject["present"]!!.jsonObject
-            .entries.associate { (k, v) -> k.toLong() to v.jsonPrimitive.content }
+        step["expected"]!!
+            .jsonObject["present"]!!
+            .jsonObject
+            .entries
+            .associate { (k, v) -> k.toLong() to v.jsonPrimitive.content }
 
-    private inline fun <reified T : Any> observe(ctx: Context, cell: Source<T>): Computed<Any> {
+    private inline fun <reified T : Any> observe(
+        ctx: Context,
+        cell: Source<T>,
+    ): Computed<Any> {
         val obs = ctx.computed { get(cell) as Any }
         ctx.get(obs)
         return obs
     }
 
-    private fun checkInval(ctx: Context, obs: Computed<Any>, step: JsonObject, reader: String) {
+    private fun checkInval(
+        ctx: Context,
+        obs: Computed<Any>,
+        step: JsonObject,
+        reader: String,
+    ) {
         val wasCached = ctx.isSet(obs)
         ctx.get(obs)
         assertEquals(inval(step, reader), !wasCached, "$reader invalidation")

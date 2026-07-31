@@ -1,7 +1,5 @@
 package io.github.lazily
 
-import java.nio.file.Files
-import java.nio.file.Path
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
@@ -28,16 +26,30 @@ class CoordinationConformanceTest {
     }
 
     private fun steps(fx: JsonObject) = fx["steps"]!!.jsonArray
-    private fun inval(step: JsonObject, reader: String) =
-        step["expected"]!!.jsonObject["invalidates"]!!.jsonObject[reader]!!.jsonPrimitive.boolean
 
-    private inline fun <reified T : Any> observe(ctx: Context, cell: Source<T>): Computed<Any> {
+    private fun inval(
+        step: JsonObject,
+        reader: String,
+    ) = step["expected"]!!
+        .jsonObject["invalidates"]!!
+        .jsonObject[reader]!!
+        .jsonPrimitive.boolean
+
+    private inline fun <reified T : Any> observe(
+        ctx: Context,
+        cell: Source<T>,
+    ): Computed<Any> {
         val obs = ctx.computed { get(cell) as Any }
         ctx.get(obs)
         return obs
     }
 
-    private fun checkInval(ctx: Context, obs: Computed<Any>, step: JsonObject, reader: String) {
+    private fun checkInval(
+        ctx: Context,
+        obs: Computed<Any>,
+        step: JsonObject,
+        reader: String,
+    ) {
         val wasCached = ctx.isSet(obs)
         ctx.get(obs)
         assertEquals(inval(step, reader), !wasCached, "$reader invalidation")
@@ -54,14 +66,16 @@ class CoordinationConformanceTest {
             val op = step["op"]!!.jsonObject
             val now = op["now"]!!.jsonPrimitive.long
             when (op["type"]!!.jsonPrimitive.content) {
-                "acquire" -> assertEquals(
-                    step["returns"]!!.jsonPrimitive.longOrNull,
-                    lease.acquire(op["peer"]!!.jsonPrimitive.long, now, op["ttl"]!!.jsonPrimitive.long),
-                )
-                "renew" -> assertEquals(
-                    step["returns"]!!.jsonPrimitive.boolean,
-                    lease.renew(op["peer"]!!.jsonPrimitive.long, now, op["ttl"]!!.jsonPrimitive.long),
-                )
+                "acquire" ->
+                    assertEquals(
+                        step["returns"]!!.jsonPrimitive.longOrNull,
+                        lease.acquire(op["peer"]!!.jsonPrimitive.long, now, op["ttl"]!!.jsonPrimitive.long),
+                    )
+                "renew" ->
+                    assertEquals(
+                        step["returns"]!!.jsonPrimitive.boolean,
+                        lease.renew(op["peer"]!!.jsonPrimitive.long, now, op["ttl"]!!.jsonPrimitive.long),
+                    )
                 "tick" -> assertEquals(step["returns"]!!.jsonPrimitive.boolean, lease.tick(now))
             }
             val exp = step["expected"]!!.jsonObject
@@ -83,12 +97,13 @@ class CoordinationConformanceTest {
             val step = element.jsonObject
             val op = step["op"]!!.jsonObject
             val now = op["now"]!!.jsonPrimitive.long
-            val role = when (op["type"]!!.jsonPrimitive.content) {
-                "campaign" -> leader.campaign(now, op["ttl"]!!.jsonPrimitive.long)
-                "contend" -> leader.contend(op["peer"]!!.jsonPrimitive.long, now, op["ttl"]!!.jsonPrimitive.long)
-                "tick" -> leader.tick(now)
-                else -> error("bad op")
-            }
+            val role =
+                when (op["type"]!!.jsonPrimitive.content) {
+                    "campaign" -> leader.campaign(now, op["ttl"]!!.jsonPrimitive.long)
+                    "contend" -> leader.contend(op["peer"]!!.jsonPrimitive.long, now, op["ttl"]!!.jsonPrimitive.long)
+                    "tick" -> leader.tick(now)
+                    else -> error("bad op")
+                }
             val exp = step["expected"]!!.jsonObject
             assertEquals(exp["role"]!!.jsonPrimitive.content, role.name)
             assertEquals(exp["current_leader"]!!.jsonPrimitive.longOrNull, leader.currentLeader(now))
@@ -107,14 +122,16 @@ class CoordinationConformanceTest {
             val op = step["op"]!!.jsonObject
             val now = op["now"]?.jsonPrimitive?.longOrNull ?: 0
             when (op["type"]!!.jsonPrimitive.content) {
-                "acquire" -> assertEquals(
-                    step["returns"]!!.jsonPrimitive.longOrNull,
-                    lock.acquire(op["peer"]!!.jsonPrimitive.long, now, op["ttl"]!!.jsonPrimitive.long),
-                )
-                "validate" -> assertEquals(
-                    step["returns"]!!.jsonPrimitive.boolean,
-                    lock.validate(op["fence"]!!.jsonPrimitive.long),
-                )
+                "acquire" ->
+                    assertEquals(
+                        step["returns"]!!.jsonPrimitive.longOrNull,
+                        lock.acquire(op["peer"]!!.jsonPrimitive.long, now, op["ttl"]!!.jsonPrimitive.long),
+                    )
+                "validate" ->
+                    assertEquals(
+                        step["returns"]!!.jsonPrimitive.boolean,
+                        lock.validate(op["fence"]!!.jsonPrimitive.long),
+                    )
                 "tick" -> assertEquals(step["returns"]!!.jsonPrimitive.boolean, lock.tick(now))
             }
             val exp = step["expected"]!!.jsonObject
@@ -134,10 +151,11 @@ class CoordinationConformanceTest {
         for (element in steps(fx)) {
             val step = element.jsonObject
             when (step["op"]!!.jsonObject["type"]!!.jsonPrimitive.content) {
-                "acquire" -> assertEquals(
-                    step["returns"]!!.jsonPrimitive.booleanOrNull,
-                    sem.acquire(),
-                )
+                "acquire" ->
+                    assertEquals(
+                        step["returns"]!!.jsonPrimitive.booleanOrNull,
+                        sem.acquire(),
+                    )
                 "release" -> sem.release()
             }
             val exp = step["expected"]!!.jsonObject

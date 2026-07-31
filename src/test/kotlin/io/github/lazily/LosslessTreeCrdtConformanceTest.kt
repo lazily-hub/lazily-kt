@@ -1,7 +1,5 @@
 package io.github.lazily
 
-import java.nio.file.Files
-import java.nio.file.Path
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -37,13 +35,17 @@ class LosslessTreeCrdtConformanceTest {
 
         fun id(label: String): TreeNodeId = ids[label] ?: error("unknown node label `$label`")
 
-        fun afterOf(op: JsonObject): TreeNodeId? = when (val after = op["after"]) {
-            null, JsonNull -> null
-            is JsonPrimitive -> id(after.content)
-            else -> error("bad `after`: $after")
-        }
+        fun afterOf(op: JsonObject): TreeNodeId? =
+            when (val after = op["after"]) {
+                null, JsonNull -> null
+                is JsonPrimitive -> id(after.content)
+                else -> error("bad `after`: $after")
+            }
 
-        fun buildChildren(spec: JsonObject, parent: TreeNodeId) {
+        fun buildChildren(
+            spec: JsonObject,
+            parent: TreeNodeId,
+        ) {
             val children = spec["children"]?.jsonArray ?: return
             var prev: TreeNodeId? = null
             for (childEl in children) {
@@ -57,7 +59,10 @@ class LosslessTreeCrdtConformanceTest {
         }
     }
 
-    private fun applyStep(world: World, step: JsonObject) {
+    private fun applyStep(
+        world: World,
+        step: JsonObject,
+    ) {
         val fork = step["fork"]?.jsonPrimitive?.content
         val clone = step["clone"]?.jsonPrimitive?.content
         val sync = step["sync"]?.jsonObject
@@ -91,7 +96,11 @@ class LosslessTreeCrdtConformanceTest {
         }
     }
 
-    private fun applyOp(world: World, on: String, op: JsonObject) {
+    private fun applyOp(
+        world: World,
+        on: String,
+        op: JsonObject,
+    ) {
         val replica = world.replicas.getValue(on)
         when (val kind = op.getValue("op").jsonPrimitive.content) {
             "create" -> {
@@ -130,7 +139,11 @@ class LosslessTreeCrdtConformanceTest {
         }
     }
 
-    private fun assertExpect(world: World, expect: JsonObject, scenario: String) {
+    private fun assertExpect(
+        world: World,
+        expect: JsonObject,
+        scenario: String,
+    ) {
         expect["render"]?.jsonPrimitive?.content?.let {
             assertEquals(it, world.replicas.getValue("a").render(), "$scenario: render on `a`")
         }
@@ -182,13 +195,14 @@ class LosslessTreeCrdtConformanceTest {
     @Test fun `conformance concurrent conflict preserves text`() = runFixture("concurrent_conflict_preserves_text.json")
 }
 
-private fun leafKind(s: String): LeafKind = when (s) {
-    "token" -> LeafKind.Token
-    "trivia" -> LeafKind.Trivia
-    "raw" -> LeafKind.Raw
-    "error" -> LeafKind.Error
-    else -> error("unknown leaf kind: $s")
-}
+private fun leafKind(s: String): LeafKind =
+    when (s) {
+        "token" -> LeafKind.Token
+        "trivia" -> LeafKind.Trivia
+        "raw" -> LeafKind.Raw
+        "error" -> LeafKind.Error
+        else -> error("unknown leaf kind: $s")
+    }
 
 private fun nodeSeed(spec: JsonObject): NodeSeed {
     val element = spec["element"]?.jsonPrimitive?.content

@@ -65,10 +65,16 @@ enum class IngressTransportKind {
  * making "we polled a transport that pushes" unrepresentable rather than merely
  * discouraged — and never zero.
  */
-data class IngressSchedule(val kind: IngressTransportKind, val pollInterval: Long?) {
+data class IngressSchedule(
+    val kind: IngressTransportKind,
+    val pollInterval: Long?,
+) {
     companion object {
         /** Derive the schedule for [kind]; a poll bound exists only without event delivery. */
-        fun forKind(kind: IngressTransportKind, pollInterval: Long): IngressSchedule =
+        fun forKind(
+            kind: IngressTransportKind,
+            pollInterval: Long,
+        ): IngressSchedule =
             IngressSchedule(
                 kind,
                 when (kind) {
@@ -139,19 +145,30 @@ enum class IngressError {
 /** The outcome of admitting one envelope. */
 sealed class IngressAdmission {
     /** Delivered in order, and the window holds exactly this one op. */
-    data class Accepted(val deliveredThrough: Long) : IngressAdmission()
+    data class Accepted(
+        val deliveredThrough: Long,
+    ) : IngressAdmission()
 
     /** Delivered in order and coalesced with at least one other op. */
-    data class Conflated(val deliveredThrough: Long) : IngressAdmission()
+    data class Conflated(
+        val deliveredThrough: Long,
+    ) : IngressAdmission()
 
     /** Held pending an earlier sequence. Nothing is visible yet. */
-    data class Buffered(val gapFrom: Long) : IngressAdmission()
+    data class Buffered(
+        val gapFrom: Long,
+    ) : IngressAdmission()
 
     /** A newer producer incarnation took over: expectations reset, envelope delivered. */
-    data class GenerationHandoff(val from: Long, val to: Long) : IngressAdmission()
+    data class GenerationHandoff(
+        val from: Long,
+        val to: Long,
+    ) : IngressAdmission()
 
     /** Refused, with the reason receipted. */
-    data class Dropped(val reason: IngressDropReason) : IngressAdmission()
+    data class Dropped(
+        val reason: IngressDropReason,
+    ) : IngressAdmission()
 
     /** Refused by [Overflow.Block]; the producer must retry after a drain. */
     data object Blocked : IngressAdmission()
@@ -211,10 +228,17 @@ data class IngressAuthority(
 )
 
 /** The derived retry decision for a scope that has errored. */
-data class IngressRetry(val attempt: Int, val backoff: Long, val resumeFrom: Long)
+data class IngressRetry(
+    val attempt: Int,
+    val backoff: Long,
+    val resumeFrom: Long,
+)
 
 /** What a reconnect needs from the transport to close its gap. */
-data class ReplayRequest(val generation: Long, val fromSequence: Long)
+data class ReplayRequest(
+    val generation: Long,
+    val fromSequence: Long,
+)
 
 /** Bounds and taxes, all flavor-neutral. */
 data class IngressPolicy(
@@ -247,8 +271,9 @@ enum class IngressConfigError {
  * Thrown when an ingress is constructed with a policy the merge algebra cannot
  * bound — the same construction-time validation [RelayCell] performs.
  */
-class IngressConfigException(val error: IngressConfigError) :
-    IllegalArgumentException(error.name)
+class IngressConfigException(
+    val error: IngressConfigError,
+) : IllegalArgumentException(error.name)
 
 /**
  * Which receipt channel a receipt belongs to. The three are separate reader kinds
@@ -260,14 +285,20 @@ enum class IngressReceiptChannel { Accepted, Dropped, Error }
 /** The decision a receipt records. */
 sealed class IngressReceiptOutcome {
     /** Delivered, with the resulting watermark. */
-    data class Accepted(val deliveredThrough: Long, val conflated: Boolean) :
-        IngressReceiptOutcome()
+    data class Accepted(
+        val deliveredThrough: Long,
+        val conflated: Boolean,
+    ) : IngressReceiptOutcome()
 
     /** Refused by a decision. */
-    data class Dropped(val reason: IngressDropReason) : IngressReceiptOutcome()
+    data class Dropped(
+        val reason: IngressDropReason,
+    ) : IngressReceiptOutcome()
 
     /** Could not be decided. */
-    data class Error(val error: IngressError) : IngressReceiptOutcome()
+    data class Error(
+        val error: IngressError,
+    ) : IngressReceiptOutcome()
 }
 
 /** One durable record of an admission decision. */
@@ -282,11 +313,12 @@ data class IngressReceipt<K : Any>(
 ) {
     /** The channel this receipt is read from. */
     val channel: IngressReceiptChannel
-        get() = when (outcome) {
-            is IngressReceiptOutcome.Accepted -> IngressReceiptChannel.Accepted
-            is IngressReceiptOutcome.Dropped -> IngressReceiptChannel.Dropped
-            is IngressReceiptOutcome.Error -> IngressReceiptChannel.Error
-        }
+        get() =
+            when (outcome) {
+                is IngressReceiptOutcome.Accepted -> IngressReceiptChannel.Accepted
+                is IngressReceiptOutcome.Dropped -> IngressReceiptChannel.Dropped
+                is IngressReceiptOutcome.Error -> IngressReceiptChannel.Error
+            }
 }
 
 /**
@@ -352,7 +384,10 @@ private class ChangeBuilder<K : Any> {
     private var dropped = false
     private var errors = false
 
-    fun mark(key: K, change: IngressScopeChange) {
+    fun mark(
+        key: K,
+        change: IngressScopeChange,
+    ) {
         if (!change.isEmpty) scopes.add(key to change)
     }
 
@@ -394,23 +429,27 @@ data class IngressScopeView(
      * not [IngressReadiness.Stale], because there is no stamp to be old.
      */
     val readiness: IngressReadiness
-        get() = when (lifecycle) {
-            IngressLifecycle.Closed -> IngressReadiness.Closed
-            IngressLifecycle.Suspended -> IngressReadiness.Suspended
-            IngressLifecycle.Opening -> IngressReadiness.Warming
-            IngressLifecycle.Live ->
-                when {
-                    deliveredThrough == null -> IngressReadiness.Warming
-                    isFresh -> IngressReadiness.Ready
-                    else -> IngressReadiness.Stale
-                }
-        }
+        get() =
+            when (lifecycle) {
+                IngressLifecycle.Closed -> IngressReadiness.Closed
+                IngressLifecycle.Suspended -> IngressReadiness.Suspended
+                IngressLifecycle.Opening -> IngressReadiness.Warming
+                IngressLifecycle.Live ->
+                    when {
+                        deliveredThrough == null -> IngressReadiness.Warming
+                        isFresh -> IngressReadiness.Ready
+                        else -> IngressReadiness.Stale
+                    }
+            }
 
     /** Derived authority. A closed scope claims none. */
     val authority: IngressAuthority?
         get() =
-            if (lifecycle == IngressLifecycle.Closed) null
-            else IngressAuthority(generation, deliveredThrough, stampedAt)
+            if (lifecycle == IngressLifecycle.Closed) {
+                null
+            } else {
+                IngressAuthority(generation, deliveredThrough, stampedAt)
+            }
 
     /** The first sequence not yet delivered in order. */
     val resumeFrom: Long get() = deliveredThrough?.plus(1) ?: 0L
@@ -448,7 +487,9 @@ data class IngressScopeView(
  * this one-field holder instead. Equality is structural, so the kernel's `==`
  * guard behaves exactly as it does on the Rust `Option`.
  */
-data class IngressReading<V : Any>(val value: V?)
+data class IngressReading<V : Any>(
+    val value: V?,
+)
 
 /**
  * A decoded source of envelopes.
@@ -469,7 +510,10 @@ interface IngressTransport<K : Any, T : Any> {
      * history answers `false`, which is what makes "this gap will never close"
      * observable rather than silent.
      */
-    fun requestReplay(key: K, request: ReplayRequest): Boolean
+    fun requestReplay(
+        key: K,
+        request: ReplayRequest,
+    ): Boolean
 }
 
 /**
@@ -478,8 +522,9 @@ interface IngressTransport<K : Any, T : Any> {
  * exercises all three delivery modes — including the `BoundedPolling` case that
  * cannot serve a replay.
  */
-class InProcIngress<K : Any, T : Any>(private val kind: IngressTransportKind) :
-    IngressTransport<K, T> {
+class InProcIngress<K : Any, T : Any>(
+    private val kind: IngressTransportKind,
+) : IngressTransport<K, T> {
     private val inbound = ArrayDeque<IngressEnvelope<K, T>>()
     private val replayLog = ArrayList<Pair<K, ReplayRequest>>()
 
@@ -499,7 +544,10 @@ class InProcIngress<K : Any, T : Any>(private val kind: IngressTransportKind) :
         return batch
     }
 
-    override fun requestReplay(key: K, request: ReplayRequest): Boolean {
+    override fun requestReplay(
+        key: K,
+        request: ReplayRequest,
+    ): Boolean {
         // A bounded poll has no addressable history: it can only wait for the next
         // page, so it cannot honour a replay.
         if (kind == IngressTransportKind.BoundedPolling) return false
@@ -540,7 +588,9 @@ class IngressCore<K : Any, T : Any>(
         val hasWindow: Boolean,
     )
 
-    private inner class Scope(var generation: Long) {
+    private inner class Scope(
+        var generation: Long,
+    ) {
         var lifecycle: IngressLifecycle = IngressLifecycle.Opening
         var deliveredThrough: Long? = null
         var stampedAt: Long = 0
@@ -573,8 +623,7 @@ class IngressCore<K : Any, T : Any>(
          */
         fun stamp(): Stamp = Stamp(lifecycle, generation, deliveredThrough, window != null)
 
-        fun liveOrOpening(): IngressLifecycle =
-            if (deliveredThrough != null) IngressLifecycle.Live else IngressLifecycle.Opening
+        fun liveOrOpening(): IngressLifecycle = if (deliveredThrough != null) IngressLifecycle.Live else IngressLifecycle.Opening
     }
 
     /**
@@ -583,9 +632,16 @@ class IngressCore<K : Any, T : Any>(
      * the receipt log.
      */
     private sealed interface Decision {
-        data class Refuse(val reason: IngressDropReason) : Decision
+        data class Refuse(
+            val reason: IngressDropReason,
+        ) : Decision
+
         data object Block : Decision
-        data class Buffered(val gapFrom: Long) : Decision
+
+        data class Buffered(
+            val gapFrom: Long,
+        ) : Decision
+
         data class Delivered(
             val deliveredThrough: Long,
             val conflated: Boolean,
@@ -620,8 +676,7 @@ class IngressCore<K : Any, T : Any>(
     fun peek(key: K): T? = scopes[key]?.window
 
     /** Receipts on one channel, oldest first. */
-    fun receipts(channel: IngressReceiptChannel): List<IngressReceipt<K>> =
-        receipts.filter { it.channel == channel }
+    fun receipts(channel: IngressReceiptChannel): List<IngressReceipt<K>> = receipts.filter { it.channel == channel }
 
     /** Logical now, as of the last [tick]. */
     fun observedNow(): Long = observedNow
@@ -633,7 +688,10 @@ class IngressCore<K : Any, T : Any>(
      * from the gap; reopening a *closed* scope resets it, because a closed scope's
      * producer is gone and its sequence space is not resumable.
      */
-    fun open(key: K, generation: Long): IngressChange<K> {
+    fun open(
+        key: K,
+        generation: Long,
+    ): IngressChange<K> {
         val change = ChangeBuilder<K>()
         val existing = scopes[key]
         if (existing == null) {
@@ -695,7 +753,10 @@ class IngressCore<K : Any, T : Any>(
      * the buffered reorder window and the coalesced value are discarded rather than
      * replayed against a fence they no longer belong to.
      */
-    fun reconnect(key: K, generation: Long): Pair<IngressChange<K>, ReplayRequest> {
+    fun reconnect(
+        key: K,
+        generation: Long,
+    ): Pair<IngressChange<K>, ReplayRequest> {
         val change = ChangeBuilder<K>()
         val created = !scopes.containsKey(key)
         val scope = scopes.getOrPut(key) { Scope(generation) }
@@ -766,7 +827,10 @@ class IngressCore<K : Any, T : Any>(
     }
 
     /** Record a transport/decode failure against a scope, deepening its backoff. */
-    fun fail(key: K, error: IngressError): IngressChange<K> {
+    fun fail(
+        key: K,
+        error: IngressError,
+    ): IngressChange<K> {
         val change = ChangeBuilder<K>()
         val created = !scopes.containsKey(key)
         val scope = scopes.getOrPut(key) { Scope(0) }
@@ -873,10 +937,12 @@ class IngressCore<K : Any, T : Any>(
                         scopeChange.union(
                             IngressScopeChange(
                                 value = before.hasWindow != after.hasWindow,
-                                readiness = before.lifecycle != after.lifecycle ||
+                                readiness =
+                                before.lifecycle != after.lifecycle ||
                                     (before.deliveredThrough == null) !=
                                     (after.deliveredThrough == null),
-                                authority = before.generation != after.generation ||
+                                authority =
+                                before.generation != after.generation ||
                                     before.deliveredThrough != after.deliveredThrough,
                                 retry = false,
                             ),
@@ -919,7 +985,10 @@ class IngressCore<K : Any, T : Any>(
      * The admission algebra proper: pure over one scope, mutating only that scope,
      * minting nothing.
      */
-    private fun decide(scope: Scope, envelope: IngressEnvelope<K, T>): Decision {
+    private fun decide(
+        scope: Scope,
+        envelope: IngressEnvelope<K, T>,
+    ): Decision {
         if (scope.lifecycle == IngressLifecycle.Closed) {
             return Decision.Refuse(IngressDropReason.ScopeClosed)
         }
@@ -1002,7 +1071,11 @@ class IngressCore<K : Any, T : Any>(
      * Merge one payload into a scope's hot head. Returns whether it coalesced with
      * an existing window.
      */
-    private fun mergeInto(scope: Scope, payload: T, stampedAt: Long): Boolean {
+    private fun mergeInto(
+        scope: Scope,
+        payload: T,
+        stampedAt: Long,
+    ): Boolean {
         val current = scope.window
         val conflated: Boolean
         if (current == null) {

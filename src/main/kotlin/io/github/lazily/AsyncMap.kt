@@ -27,6 +27,7 @@ class AsyncSourceMap<K : Any, V : Any> : ReactiveMap<K, V> {
     override val entryKind: EntryKind get() = EntryKind.Source
 
     private val lock = ReentrantLock()
+
     /**
      * Present set + key order + the move algebra, shared with every other
      * flavor. Graph-agnostic; the reactivity below is this map's own.
@@ -34,7 +35,11 @@ class AsyncSourceMap<K : Any, V : Any> : ReactiveMap<K, V> {
     private val keyed = KeyedOrder<K, AsyncContext.AsyncSource<V>>()
 
     /** Return the async value cell for [key], minting it with [default] on first access. */
-    fun entry(ctx: AsyncContext, key: K, default: (K) -> V): AsyncContext.AsyncSource<V> {
+    fun entry(
+        ctx: AsyncContext,
+        key: K,
+        default: (K) -> V,
+    ): AsyncContext.AsyncSource<V> {
         lock.withLock { keyed.get(key)?.let { return it } }
         val handle = ctx.source(default(key))
         val (stored, mutation) = lock.withLock { keyed.insert(key, handle) }
@@ -45,12 +50,20 @@ class AsyncSourceMap<K : Any, V : Any> : ReactiveMap<K, V> {
     }
 
     /** Eagerly pre-mint an async value cell for every key in [keys] via [default]. */
-    fun materializeAll(ctx: AsyncContext, keys: Iterable<K>, default: (K) -> V) {
+    fun materializeAll(
+        ctx: AsyncContext,
+        keys: Iterable<K>,
+        default: (K) -> V,
+    ) {
         for (key in keys) entry(ctx, key, default)
     }
 
     /** Set the value at [key], inserting a new entry (via [default]) if it does not exist yet. */
-    fun set(ctx: AsyncContext, key: K, value: V) {
+    fun set(
+        ctx: AsyncContext,
+        key: K,
+        value: V,
+    ) {
         val existing = lock.withLock { keyed.get(key) }
         if (existing != null) {
             ctx.set(existing, value)
@@ -63,14 +76,20 @@ class AsyncSourceMap<K : Any, V : Any> : ReactiveMap<K, V> {
     fun handle(key: K): AsyncContext.AsyncSource<V>? = lock.withLock { keyed.get(key) }
 
     /** Observe [key]'s value (input cells are always resolved); throws if [key] is absent. */
-    fun observe(ctx: AsyncContext, key: K): V {
+    fun observe(
+        ctx: AsyncContext,
+        key: K,
+    ): V {
         val handle = handle(key) ?: error("AsyncSourceMap has no entry for key $key")
         return ctx.get(handle)
     }
 
     /** Read the value at [key] if present; `null` if absent. */
-    fun get(ctx: AsyncContext, key: K, cc: AsyncComputeContext? = null): V? =
-        handle(key)?.let { if (cc != null) cc.get(it) else ctx.get(it) }
+    fun get(
+        ctx: AsyncContext,
+        key: K,
+        cc: AsyncComputeContext? = null,
+    ): V? = handle(key)?.let { if (cc != null) cc.get(it) else ctx.get(it) }
 
     override fun isPresent(key: K): Boolean = lock.withLock { keyed.contains(key) }
 
@@ -105,7 +124,10 @@ class AsyncSourceMap<K : Any, V : Any> : ReactiveMap<K, V> {
         bumpOrder(ctx)
     }
 
-    private fun applyMove(ctx: AsyncContext, outcome: MapMove): Boolean {
+    private fun applyMove(
+        ctx: AsyncContext,
+        outcome: MapMove,
+    ): Boolean {
         if (!outcome.applied) return false
         if (outcome.changed) bumpOrder(ctx)
         return true
@@ -122,27 +144,40 @@ class AsyncSourceMap<K : Any, V : Any> : ReactiveMap<K, V> {
      * caller to **order** changes (add/remove **and** move/reorder), not to
      * per-entry value changes.
      */
-    fun keys(ctx: AsyncContext, cc: AsyncComputeContext? = null): List<K> {
+    fun keys(
+        ctx: AsyncContext,
+        cc: AsyncComputeContext? = null,
+    ): List<K> {
         val target = orderId(ctx)
         if (cc != null) cc.get(target) else ctx.get(target)
         return presentKeys()
     }
 
     /** Reactive entry count. Subscribes the caller to membership changes only. */
-    fun len(ctx: AsyncContext, cc: AsyncComputeContext? = null): Int {
+    fun len(
+        ctx: AsyncContext,
+        cc: AsyncComputeContext? = null,
+    ): Int {
         val target = membershipId(ctx)
         if (cc != null) cc.get(target) else ctx.get(target)
         return presentCount
     }
 
     /** Reactive emptiness check. */
-    fun isEmpty(ctx: AsyncContext, cc: AsyncComputeContext? = null): Boolean = len(ctx, cc) == 0
+    fun isEmpty(
+        ctx: AsyncContext,
+        cc: AsyncComputeContext? = null,
+    ): Boolean = len(ctx, cc) == 0
 
     /**
      * Reactive membership test for [key]. Subscribes the caller to membership
      * changes (add/remove of any key), not to value changes.
      */
-    fun containsKey(ctx: AsyncContext, key: K, cc: AsyncComputeContext? = null): Boolean {
+    fun containsKey(
+        ctx: AsyncContext,
+        key: K,
+        cc: AsyncComputeContext? = null,
+    ): Boolean {
         val target = membershipId(ctx)
         if (cc != null) cc.get(target) else ctx.get(target)
         return isPresent(key)
@@ -160,22 +195,34 @@ class AsyncSourceMap<K : Any, V : Any> : ReactiveMap<K, V> {
      * re-mint, which re-allocates and bumps membership twice. Only the order
      * signal is bumped. [index] is clamped to `[0, len)`.
      */
-    fun moveTo(ctx: AsyncContext, key: K, index: Int): Boolean =
-        applyMove(ctx, lock.withLock { keyed.moveTo(key, index) })
+    fun moveTo(
+        ctx: AsyncContext,
+        key: K,
+        index: Int,
+    ): Boolean = applyMove(ctx, lock.withLock { keyed.moveTo(key, index) })
 
     /** Atomically move [key] to just before [anchor] (`#lzcellmove`). */
-    fun moveBefore(ctx: AsyncContext, key: K, anchor: K): Boolean =
-        applyMove(ctx, lock.withLock { keyed.moveBefore(key, anchor) })
+    fun moveBefore(
+        ctx: AsyncContext,
+        key: K,
+        anchor: K,
+    ): Boolean = applyMove(ctx, lock.withLock { keyed.moveBefore(key, anchor) })
 
     /** Atomically move [key] to just after [anchor] (`#lzcellmove`). */
-    fun moveAfter(ctx: AsyncContext, key: K, anchor: K): Boolean =
-        applyMove(ctx, lock.withLock { keyed.moveAfter(key, anchor) })
+    fun moveAfter(
+        ctx: AsyncContext,
+        key: K,
+        anchor: K,
+    ): Boolean = applyMove(ctx, lock.withLock { keyed.moveAfter(key, anchor) })
 
     /**
      * Remove [key]'s entry and bump reactive membership. Returns whether the key
      * was present.
      */
-    fun remove(ctx: AsyncContext, key: K): Boolean {
+    fun remove(
+        ctx: AsyncContext,
+        key: K,
+    ): Boolean {
         val (_, mutation) = lock.withLock { keyed.remove(key) }
         if (!mutation.changed) return false
         bumpMembership(ctx)
@@ -194,13 +241,18 @@ class AsyncComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
     override val entryKind: EntryKind get() = EntryKind.Computed
 
     private val lock = ReentrantLock()
+
     /**
      * Present set + key order + the move algebra, shared with every other
      * flavor. Graph-agnostic; the reactivity below is this map's own.
      */
     private val keyed = KeyedOrder<K, AsyncContext.AsyncComputed<V>>()
 
-    private fun mint(ctx: AsyncContext, key: K, factory: (K) -> V): AsyncContext.AsyncComputed<V> {
+    private fun mint(
+        ctx: AsyncContext,
+        key: K,
+        factory: (K) -> V,
+    ): AsyncContext.AsyncComputed<V> {
         lock.withLock { keyed.get(key)?.let { return it } }
         val handle = ctx.computedAsync { factory(key) }
         val (stored, mutation) = lock.withLock { keyed.insert(key, handle) }
@@ -215,11 +267,18 @@ class AsyncComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
      * [factory]) and return its handle. Drive it to a value with [observeAsync] or
      * [AsyncContext.getAsync].
      */
-    fun getOrInsertWith(ctx: AsyncContext, key: K, factory: (K) -> V): AsyncContext.AsyncComputed<V> =
-        mint(ctx, key, factory)
+    fun getOrInsertWith(
+        ctx: AsyncContext,
+        key: K,
+        factory: (K) -> V,
+    ): AsyncContext.AsyncComputed<V> = mint(ctx, key, factory)
 
     /** Eager materialization: pre-mint a derived slot for every key in [keys] via [factory]. */
-    fun materializeAll(ctx: AsyncContext, keys: Iterable<K>, factory: (K) -> V) {
+    fun materializeAll(
+        ctx: AsyncContext,
+        keys: Iterable<K>,
+        factory: (K) -> V,
+    ) {
         for (key in keys) mint(ctx, key, factory)
     }
 
@@ -230,11 +289,16 @@ class AsyncComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
      * Non-blocking read: the resolved value for [key], or `null` if absent or still
      * pending. Once resolved this equals the canonical value (eventual transparency).
      */
-    fun observe(ctx: AsyncContext, key: K): V? = handle(key)?.let { ctx.get(it) }
+    fun observe(
+        ctx: AsyncContext,
+        key: K,
+    ): V? = handle(key)?.let { ctx.get(it) }
 
     /** Await [key]'s value, driving a pending derived slot to resolution; throws if absent. */
-    suspend fun observeAsync(ctx: AsyncContext, key: K): V =
-        ctx.getAsync(handle(key) ?: error("AsyncComputedMap has no entry for key $key"))
+    suspend fun observeAsync(
+        ctx: AsyncContext,
+        key: K,
+    ): V = ctx.getAsync(handle(key) ?: error("AsyncComputedMap has no entry for key $key"))
 
     override fun isPresent(key: K): Boolean = lock.withLock { keyed.contains(key) }
 
@@ -269,7 +333,10 @@ class AsyncComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
         bumpOrder(ctx)
     }
 
-    private fun applyMove(ctx: AsyncContext, outcome: MapMove): Boolean {
+    private fun applyMove(
+        ctx: AsyncContext,
+        outcome: MapMove,
+    ): Boolean {
         if (!outcome.applied) return false
         if (outcome.changed) bumpOrder(ctx)
         return true
@@ -286,27 +353,40 @@ class AsyncComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
      * caller to **order** changes (add/remove **and** move/reorder), not to
      * per-entry value changes.
      */
-    fun keys(ctx: AsyncContext, cc: AsyncComputeContext? = null): List<K> {
+    fun keys(
+        ctx: AsyncContext,
+        cc: AsyncComputeContext? = null,
+    ): List<K> {
         val target = orderId(ctx)
         if (cc != null) cc.get(target) else ctx.get(target)
         return presentKeys()
     }
 
     /** Reactive entry count. Subscribes the caller to membership changes only. */
-    fun len(ctx: AsyncContext, cc: AsyncComputeContext? = null): Int {
+    fun len(
+        ctx: AsyncContext,
+        cc: AsyncComputeContext? = null,
+    ): Int {
         val target = membershipId(ctx)
         if (cc != null) cc.get(target) else ctx.get(target)
         return presentCount
     }
 
     /** Reactive emptiness check. */
-    fun isEmpty(ctx: AsyncContext, cc: AsyncComputeContext? = null): Boolean = len(ctx, cc) == 0
+    fun isEmpty(
+        ctx: AsyncContext,
+        cc: AsyncComputeContext? = null,
+    ): Boolean = len(ctx, cc) == 0
 
     /**
      * Reactive membership test for [key]. Subscribes the caller to membership
      * changes (add/remove of any key), not to value changes.
      */
-    fun containsKey(ctx: AsyncContext, key: K, cc: AsyncComputeContext? = null): Boolean {
+    fun containsKey(
+        ctx: AsyncContext,
+        key: K,
+        cc: AsyncComputeContext? = null,
+    ): Boolean {
         val target = membershipId(ctx)
         if (cc != null) cc.get(target) else ctx.get(target)
         return isPresent(key)
@@ -324,22 +404,34 @@ class AsyncComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
      * re-mint, which re-allocates and bumps membership twice. Only the order
      * signal is bumped. [index] is clamped to `[0, len)`.
      */
-    fun moveTo(ctx: AsyncContext, key: K, index: Int): Boolean =
-        applyMove(ctx, lock.withLock { keyed.moveTo(key, index) })
+    fun moveTo(
+        ctx: AsyncContext,
+        key: K,
+        index: Int,
+    ): Boolean = applyMove(ctx, lock.withLock { keyed.moveTo(key, index) })
 
     /** Atomically move [key] to just before [anchor] (`#lzcellmove`). */
-    fun moveBefore(ctx: AsyncContext, key: K, anchor: K): Boolean =
-        applyMove(ctx, lock.withLock { keyed.moveBefore(key, anchor) })
+    fun moveBefore(
+        ctx: AsyncContext,
+        key: K,
+        anchor: K,
+    ): Boolean = applyMove(ctx, lock.withLock { keyed.moveBefore(key, anchor) })
 
     /** Atomically move [key] to just after [anchor] (`#lzcellmove`). */
-    fun moveAfter(ctx: AsyncContext, key: K, anchor: K): Boolean =
-        applyMove(ctx, lock.withLock { keyed.moveAfter(key, anchor) })
+    fun moveAfter(
+        ctx: AsyncContext,
+        key: K,
+        anchor: K,
+    ): Boolean = applyMove(ctx, lock.withLock { keyed.moveAfter(key, anchor) })
 
     /**
      * Remove [key]'s entry and bump reactive membership. Returns whether the key
      * was present.
      */
-    fun remove(ctx: AsyncContext, key: K): Boolean {
+    fun remove(
+        ctx: AsyncContext,
+        key: K,
+    ): Boolean {
         val (_, mutation) = lock.withLock { keyed.remove(key) }
         if (!mutation.changed) return false
         bumpMembership(ctx)
