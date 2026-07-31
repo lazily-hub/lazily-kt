@@ -62,6 +62,20 @@ jobs:
       - name: Guard — conformance fixtures actually replayed (#lzspecconf)
         run: ./scripts/check-conformance-coverage.sh
 
+      # The gate that keeps every step above honest (#lzcheckcireachguard). It
+      # compares `make check`'s prerequisite closure against the run: bodies in
+      # this file and fails on any target CI does not reach. Comments inside run:
+      # bodies are stripped first — a naive grep for "make check" reported all
+      # nine bindings as covered and every one of those hits was a comment.
+      - name: CI-reachability guard (#lzcheckcireachguard)
+        run: |
+          out=$(./scripts/check-ci-reach.sh 2>&1) || { echo "$out"; echo "::error::a make check gate is unreachable from CI"; exit 1; }
+          echo "$out"
+          echo "$out" | grep -q "check-ci-reach: OK" || {
+            echo "::error::the CI-reachability guard exited 0 without reaching its verdict"
+            exit 1
+          }
+
   lean:
     name: Lean formal models (#lzleanformal)
     runs-on: ubuntu-latest
@@ -87,6 +101,16 @@ jobs:
           test: false
           lint: false
 
+      # `make test-lean-formal` is literally `cd <spec>/formal/lean && lake build`,
+      # and the reachability guard can only see commands that appear in a run:
+      # body — the lake build inside lean-action above is invisible to it. This
+      # step is not decoration: lean-action puts $HOME/.elan/bin on GITHUB_PATH,
+      # so it runs the same command make runs, against the same checkout, and it
+      # is what fails if the action ever stops building this package.
+      - name: Lean formal model builds under `make test-lean-formal`
+        working-directory: lazily-spec/formal/lean
+        run: lake build
+
       - name: Build lazily-formal reactive + state-chart model
         uses: leanprover/lean-action@v1
         with:
@@ -95,3 +119,10 @@ jobs:
           build: true
           test: false
           lint: false
+
+      # Same contract for `make test-lazily-formal`. The two targets build
+      # different packages, so both are asserted rather than letting one stand in
+      # for the other.
+      - name: lazily-formal model builds under `make test-lazily-formal`
+        working-directory: lazily-formal
+        run: lake build
