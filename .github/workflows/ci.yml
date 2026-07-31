@@ -50,6 +50,13 @@ jobs:
       - name: Test
         run: ./gradlew test --no-daemon
 
+      # Cross-binding wire compatibility, run by `make check` and by no
+      # binding's CI until now (#lzinteroppeerci). Nine bindings must agree on a
+      # byte layout; a gate that only executes on a laptop is how they stop
+      # agreeing without anyone noticing.
+      - name: Interop peer self-check (#lzinteroppeerci)
+        run: ./gradlew interopPeerCheck --no-daemon
+
       # An absence guard cannot catch shadowing — a replay refactored away leaves
       # the fixture dir present and CI green. Assert the fixtures actually ran.
       - name: Guard — conformance fixtures actually replayed (#lzspecconf)
