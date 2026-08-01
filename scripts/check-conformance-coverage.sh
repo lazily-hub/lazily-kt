@@ -119,6 +119,13 @@ SCENARIO_LEDGER="${2:-${LAZILY_CONFORMANCE_SCENARIO_LEDGER:-build/conformance-sc
 # names against the corpus does it without a number that rots.
 REQUIRED_AREAS=(
   agent-doc
+  # `codec` was ABSENT here while CodecConformanceTest.kt replayed
+  # frame_roundtrip_json.json every run: the replay existed, and nothing required
+  # it, so deleting that runner would have left this guard green and the
+  # coverage matrix still claiming the reference codec. Found by lazily-spec's
+  # coverage-claim guard (#coveragejsonscores); the same hole cost lazily-cpp
+  # two undetected codec defects.
+  codec
   collections
   coordination
   crdt-tree
