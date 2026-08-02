@@ -73,12 +73,17 @@ class RateShapeConformanceTest {
         val ctx = Context()
         val quiet = fx["initial"]!!.jsonObject["quiet"]!!.jsonPrimitive.long
         val cell = DebounceCell<String>(ctx, quiet)
+        // `tick` used to be the bare `else`, so ANY unrecognised op.type replayed as
+        // a tick — the fixture named one thing and the runner did another while the
+        // scenario still booked as replayed (`#lzscenariobodyskip`).
         run(ctx, fx, cell.outputCell, { cell.output() }) { step ->
-            if (opType(step) == "input") {
-                cell.input(opNow(step), opVal(step))
-                null
-            } else {
-                cell.tick(opNow(step))
+            when (val opType = opType(step)) {
+                "input" -> {
+                    cell.input(opNow(step), opVal(step))
+                    null
+                }
+                "tick" -> cell.tick(opNow(step))
+                else -> error("debounce.json: unknown op type '$opType'")
             }
         }
     }
@@ -91,11 +96,12 @@ class RateShapeConformanceTest {
         val ctx = Context()
         val window = fx["initial"]!!.jsonObject["window"]!!.jsonPrimitive.long
         val cell = ThrottleCell<String>(ctx, edge, window)
+        // `tick` used to be the bare `else` (`#lzscenariobodyskip`).
         run(ctx, fx, cell.outputCell, { cell.output() }) { step ->
-            if (opType(step) == "input") {
-                cell.input(opNow(step), opVal(step))
-            } else {
-                cell.tick(opNow(step))
+            when (val opType = opType(step)) {
+                "input" -> cell.input(opNow(step), opVal(step))
+                "tick" -> cell.tick(opNow(step))
+                else -> error("$name: unknown op type '$opType'")
             }
         }
     }
@@ -110,7 +116,13 @@ class RateShapeConformanceTest {
         val ctx = Context()
         val n = fx["initial"]!!.jsonObject["n"]!!.jsonPrimitive.long
         val cell = SampleCell<String>(ctx, SampleMode.Count(n))
-        run(ctx, fx, cell.outputCell, { cell.output() }) { step -> cell.input(opVal(step)) }
+        // The driver replays `input` unconditionally, so read the discriminator and
+        // refuse anything the fixture did not name (`#lzscenariobodyskip`).
+        run(ctx, fx, cell.outputCell, { cell.output() }) { step ->
+            val opType = opType(step)
+            if (opType != "input") error("sample_count.json: unknown op type '$opType'")
+            cell.input(opVal(step))
+        }
     }
 
     @Test
@@ -119,12 +131,15 @@ class RateShapeConformanceTest {
         val ctx = Context()
         val period = fx["initial"]!!.jsonObject["period"]!!.jsonPrimitive.long
         val cell = SampleCell<String>(ctx, SampleMode.Time(period))
+        // `tick` used to be the bare `else` (`#lzscenariobodyskip`).
         run(ctx, fx, cell.outputCell, { cell.output() }) { step ->
-            if (opType(step) == "input") {
-                cell.input(opVal(step))
-                null
-            } else {
-                cell.tick(opNow(step))
+            when (val opType = opType(step)) {
+                "input" -> {
+                    cell.input(opVal(step))
+                    null
+                }
+                "tick" -> cell.tick(opNow(step))
+                else -> error("sample_time.json: unknown op type '$opType'")
             }
         }
     }
@@ -135,7 +150,10 @@ class RateShapeConformanceTest {
         val ctx = Context()
         val rate = fx["initial"]!!.jsonObject["rate"]!!.jsonPrimitive.double
         val cell = ProbabilisticSampleCell<String>(ctx, rate, Lcg(0))
+        // The driver replays `input` unconditionally (`#lzscenariobodyskip`).
         run(ctx, fx, cell.outputCell, { cell.output() }) { step ->
+            val opType = opType(step)
+            if (opType != "input") error("probabilistic_sample.json: unknown op type '$opType'")
             val draw = step["op"]!!.jsonObject["draw"]!!.jsonPrimitive.double
             cell.inputWithDraw(opVal(step), draw)
         }

@@ -77,6 +77,11 @@ class CoordinationConformanceTest {
                         lease.renew(op["peer"]!!.jsonPrimitive.long, now, op["ttl"]!!.jsonPrimitive.long),
                     )
                 "tick" -> assertEquals(step["returns"]!!.jsonPrimitive.boolean, lease.tick(now))
+                // Fail closed on an unrecognised op (`#lzscenariobodyskip`). Without
+                // this arm an unknown `op.type` drove NOTHING and the step's
+                // `expected` block was then checked against the untouched cell — the
+                // scenario books as replayed while naming behaviour never exercised.
+                else -> error("lease.json: unknown op type '${op["type"]!!.jsonPrimitive.content}'")
             }
             val exp = step["expected"]!!.jsonObject
             assertEquals(exp["holder"]!!.jsonPrimitive.longOrNull, lease.holder(now))
@@ -133,6 +138,8 @@ class CoordinationConformanceTest {
                         lock.validate(op["fence"]!!.jsonPrimitive.long),
                     )
                 "tick" -> assertEquals(step["returns"]!!.jsonPrimitive.boolean, lock.tick(now))
+                // Fail closed on an unrecognised op (`#lzscenariobodyskip`).
+                else -> error("lock.json: unknown op type '${op["type"]!!.jsonPrimitive.content}'")
             }
             val exp = step["expected"]!!.jsonObject
             assertEquals(exp["is_locked"]!!.jsonPrimitive.boolean, lock.isLocked(now))
@@ -157,6 +164,12 @@ class CoordinationConformanceTest {
                         sem.acquire(),
                     )
                 "release" -> sem.release()
+                // Fail closed on an unrecognised op (`#lzscenariobodyskip`).
+                else ->
+                    error(
+                        "semaphore.json: unknown op type " +
+                            "'${step["op"]!!.jsonObject["type"]!!.jsonPrimitive.content}'",
+                    )
             }
             val exp = step["expected"]!!.jsonObject
             assertEquals(exp["permits_available"]!!.jsonPrimitive.long, sem.permitsAvailable())
@@ -173,6 +186,11 @@ class CoordinationConformanceTest {
         val obs = observe(ctx, q.isOpenCell)
         for (element in steps(fx)) {
             val step = element.jsonObject
+            // The runner drives `arrive` unconditionally, so read the discriminator
+            // and refuse anything the fixture did not name (`#lzscenariobodyskip`) —
+            // ignoring `op.type` outright replays every op as a vote.
+            val opType = step["op"]!!.jsonObject["type"]!!.jsonPrimitive.content
+            if (opType != "vote") error("quorum.json: unknown op type '$opType'")
             val got = q.arrive(step["op"]!!.jsonObject["peer"]!!.jsonPrimitive.long)
             assertEquals(step["returns"]!!.jsonPrimitive.boolean, got)
             val exp = step["expected"]!!.jsonObject

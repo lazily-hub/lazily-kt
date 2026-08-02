@@ -87,6 +87,11 @@ class ServiceConformanceTest {
         for (element in steps(fx)) {
             val step = element.jsonObject
             val op = step["op"]!!.jsonObject
+            // The runner drives `set` unconditionally, so read the discriminator and
+            // refuse anything the fixture did not name (`#lzscenariobodyskip`) —
+            // ignoring `op.type` outright replays every op as a `set`.
+            val opType = op["type"]!!.jsonPrimitive.content
+            if (opType != "set") error("readiness.json: unknown op type '$opType'")
             r.set(op["name"]!!.jsonPrimitive.content, op["ready"]!!.jsonPrimitive.boolean)
             assertEquals(step["expected"]!!.jsonObject["ready"]!!.jsonPrimitive.boolean, r.ready())
             checkInval(ctx, obs, step, "ready")
@@ -116,6 +121,11 @@ class ServiceConformanceTest {
                         step["returns"]!!.jsonPrimitive.contentOrNull,
                         d.resolve(op["service"]!!.jsonPrimitive.content),
                     )
+                // Fail closed on an unrecognised op (`#lzscenariobodyskip`). Without
+                // this arm an unknown `op.type` drove NOTHING and the step's
+                // `expected` block was checked against the untouched cell — the
+                // scenario books as replayed while naming behaviour never exercised.
+                else -> error("discovery.json: unknown op type '${op["type"]!!.jsonPrimitive.content}'")
             }
             assertEquals(wantMap(step, "discovery"), d.discovery())
             checkInval(ctx, obs, step, "discovery")
@@ -139,6 +149,8 @@ class ServiceConformanceTest {
                     )
                 "deregister" -> reg.deregister(op["service"]!!.jsonPrimitive.content)
                 "replay" -> reg.replay()
+                // Fail closed on an unrecognised op (`#lzscenariobodyskip`).
+                else -> error("service_registry.json: unknown op type '${op["type"]!!.jsonPrimitive.content}'")
             }
             assertEquals(wantMap(step, "projection"), reg.projection())
             checkInval(ctx, obs, step, "projection")

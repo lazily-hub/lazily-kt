@@ -78,6 +78,11 @@ class ResilienceConformanceTest {
                         step["returns"]!!.jsonPrimitive.boolean,
                         cb.allow(op["now"]!!.jsonPrimitive.long),
                     )
+                // Fail closed on an unrecognised op (`#lzscenariobodyskip`). Without
+                // this arm an unknown `op.type` drove NOTHING and the step's
+                // `expected` block was checked against the untouched breaker — the
+                // scenario books as replayed while naming behaviour never exercised.
+                else -> error("circuit_breaker.json: unknown op type '${op["type"]!!.jsonPrimitive.content}'")
             }
             assertEquals(step["expected"]!!.jsonObject["state"]!!.jsonPrimitive.content, cb.state().name)
             checkInval(ctx, obs, step, "state")
@@ -110,6 +115,12 @@ class ResilienceConformanceTest {
             when (step["op"]!!.jsonObject["type"]!!.jsonPrimitive.content) {
                 "acquire" -> assertEquals(step["returns"]!!.jsonPrimitive.booleanOrNull, b.acquire())
                 "release" -> b.release()
+                // Fail closed on an unrecognised op (`#lzscenariobodyskip`).
+                else ->
+                    error(
+                        "bulkhead.json: unknown op type " +
+                            "'${step["op"]!!.jsonObject["type"]!!.jsonPrimitive.content}'",
+                    )
             }
             assertEquals(step["expected"]!!.jsonObject["in_use"]!!.jsonPrimitive.long, b.permitsInUse())
             checkInval(ctx, obs, step, "in_use")
@@ -132,7 +143,12 @@ class ResilienceConformanceTest {
                         t.arm(now, op["timeout"]!!.jsonPrimitive.long)
                         false
                     }
-                    else -> t.tick(now)
+                    "tick" -> t.tick(now)
+                    // `tick` used to be the `else` arm, so ANY unrecognised op.type
+                    // silently replayed as a tick — the fixture named one thing and
+                    // the runner did another, and the scenario still booked as
+                    // replayed (`#lzscenariobodyskip`).
+                    else -> error("timeout.json: unknown op type '${op["type"]!!.jsonPrimitive.content}'")
                 }
             assertEquals(step["returns"]!!.jsonPrimitive.boolean, e, "edge")
             assertEquals(step["expected"]!!.jsonObject["is_timed_out"]!!.jsonPrimitive.boolean, t.isTimedOut())

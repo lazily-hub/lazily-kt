@@ -437,6 +437,11 @@ class ReliableSyncConformanceTest {
                     when (op["op"]!!.jsonPrimitive.content) {
                         "add" -> s.add(op["tag"]!!.jsonPrimitive.content)
                         "remove" -> s.removeObserved(op["observed_tags"]!!.jsonArray.map { it.jsonPrimitive.content })
+                        // Fail closed on an unrecognised op (`#lzscenariobodyskip`).
+                        // An unknown `op` used to fall through, leaving the replica
+                        // untouched — the `present`/`order_independent` claims then
+                        // held vacuously and the scenario still booked as replayed.
+                        else -> error("liveness_orset_lww.json: unknown op '${op["op"]!!.jsonPrimitive.content}'")
                     }
                 }
             }
@@ -461,6 +466,10 @@ class ReliableSyncConformanceTest {
                     when (op["op"]!!.jsonPrimitive.content) {
                         "add" -> set.add(op["tag"]!!.jsonPrimitive.content)
                         "remove" -> set.removeObserved(op["observed_tags"]!!.jsonArray.map { it.jsonPrimitive.content })
+                        // Fail closed on an unrecognised op (`#lzscenariobodyskip`) —
+                        // a fallthrough here re-delivers nothing, so the idempotence
+                        // count is 0 for a reason the fixture never named.
+                        else -> error("liveness_orset_lww.json: unknown redeliver op '${op["op"]!!.jsonPrimitive.content}'")
                     }
                     if (set.present() != before) reapplied++
                 }

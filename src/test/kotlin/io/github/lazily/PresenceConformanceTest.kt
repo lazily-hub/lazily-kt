@@ -76,6 +76,11 @@ class PresenceConformanceTest {
                 "heartbeat" -> cell.heartbeat(op["peer"]!!.jsonPrimitive.long, op["value"]!!.jsonPrimitive.content, now)
                 "evict" -> cell.evict(op["peer"]!!.jsonPrimitive.long, now)
                 "tick" -> cell.tick(now)
+                // Fail closed on an unrecognised op (`#lzscenariobodyskip`). Without
+                // this arm an unknown `op.type` drove NOTHING and the step's
+                // `expected` block was checked against the untouched cell — the
+                // scenario books as replayed while naming behaviour never exercised.
+                else -> error("presence.json: unknown op type '${op["type"]!!.jsonPrimitive.content}'")
             }
             assertEquals(wantMap(step), cell.present())
             checkInval(ctx, obs, step, "present")
@@ -96,6 +101,8 @@ class PresenceConformanceTest {
             when (op["type"]!!.jsonPrimitive.content) {
                 "set" -> cell.set(op["peer"]!!.jsonPrimitive.long, op["value"]!!.jsonPrimitive.content, now)
                 "tick" -> cell.tick(now)
+                // Fail closed on an unrecognised op (`#lzscenariobodyskip`).
+                else -> error("awareness.json: unknown op type '${op["type"]!!.jsonPrimitive.content}'")
             }
             assertEquals(wantMap(step), cell.present())
             checkInval(ctx, obs, step, "present")
@@ -115,6 +122,8 @@ class PresenceConformanceTest {
             when (op["type"]!!.jsonPrimitive.content) {
                 "set" -> cell.set(op["value"]!!.jsonPrimitive.content, now, op["ttl"]!!.jsonPrimitive.long)
                 "tick" -> cell.tick(now)
+                // Fail closed on an unrecognised op (`#lzscenariobodyskip`).
+                else -> error("ephemeral.json: unknown op type '${op["type"]!!.jsonPrimitive.content}'")
             }
             assertEquals(step["expected"]!!.jsonObject["value"]!!.jsonPrimitive.contentOrNull, cell.value())
             checkInval(ctx, obs, step, "value")

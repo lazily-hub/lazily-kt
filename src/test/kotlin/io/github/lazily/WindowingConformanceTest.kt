@@ -67,6 +67,10 @@ class WindowingConformanceTest {
         val obs = observe(ctx, w.outputCell)
         for (element in steps(fx)) {
             val step = element.jsonObject
+            // The runner drives `push` unconditionally, so read the discriminator and
+            // refuse anything the fixture did not name (`#lzscenariobodyskip`).
+            val opType = step["op"]!!.jsonObject["type"]!!.jsonPrimitive.content
+            if (opType != "push") error("tumbling_count.json: unknown op type '$opType'")
             val e = w.push(step["op"]!!.jsonObject["value"]!!.jsonPrimitive.long)
             assertEquals(ret(step), e, "emit")
             check(ctx, obs, step, w.output())
@@ -84,12 +88,17 @@ class WindowingConformanceTest {
             val step = element.jsonObject
             val op = step["op"]!!.jsonObject
             val now = op["now"]!!.jsonPrimitive.long
+            // `tick` used to be the bare `else`, so ANY unrecognised op.type
+            // replayed as a tick — the fixture named one thing and the runner did
+            // another while the scenario booked as replayed (`#lzscenariobodyskip`).
             val e =
-                if (op["type"]!!.jsonPrimitive.content == "push") {
-                    w.push(now, op["value"]!!.jsonPrimitive.long)
-                    null
-                } else {
-                    w.tick(now)
+                when (val opType = op["type"]!!.jsonPrimitive.content) {
+                    "push" -> {
+                        w.push(now, op["value"]!!.jsonPrimitive.long)
+                        null
+                    }
+                    "tick" -> w.tick(now)
+                    else -> error("tumbling_time.json: unknown op type '$opType'")
                 }
             assertEquals(ret(step), e, "emit")
             check(ctx, obs, step, w.output())
@@ -105,6 +114,10 @@ class WindowingConformanceTest {
         val obs = observe(ctx, w.outputCell)
         for (element in steps(fx)) {
             val step = element.jsonObject
+            // The runner drives `push` unconditionally, so read the discriminator and
+            // refuse anything the fixture did not name (`#lzscenariobodyskip`).
+            val opType = step["op"]!!.jsonObject["type"]!!.jsonPrimitive.content
+            if (opType != "push") error("sliding_count.json: unknown op type '$opType'")
             val e = w.push(step["op"]!!.jsonObject["value"]!!.jsonPrimitive.long)
             assertEquals(ret(step), e, "emit")
             check(ctx, obs, step, w.output())
@@ -122,11 +135,12 @@ class WindowingConformanceTest {
             val step = element.jsonObject
             val op = step["op"]!!.jsonObject
             val now = op["now"]!!.jsonPrimitive.long
+            // `flush` used to be the bare `else` (`#lzscenariobodyskip`).
             val e =
-                if (op["type"]!!.jsonPrimitive.content == "push") {
-                    w.push(now, op["value"]!!.jsonPrimitive.long)
-                } else {
-                    w.flush(now)
+                when (val opType = op["type"]!!.jsonPrimitive.content) {
+                    "push" -> w.push(now, op["value"]!!.jsonPrimitive.long)
+                    "flush" -> w.flush(now)
+                    else -> error("session.json: unknown op type '$opType'")
                 }
             assertEquals(ret(step), e, "emit")
             check(ctx, obs, step, w.output())
