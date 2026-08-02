@@ -22,7 +22,12 @@
 #
 # A missing manifest is missing EVIDENCE and fails. It does not mean "no fixtures
 # were read"; it means the suite ran without the recorder attached, and passing in
-# that state is the vacuous green this guard exists to prevent.
+# that state is the vacuous green this guard exists to prevent. A missing CORPUS
+# is the same claim one level up: it is a skip on a local checkout without the
+# sibling, and a hard failure under CI (#lzvacuousrun). And because every rung
+# here is a negative check over a population, the run must also prove the
+# population was non-empty before it may print OK — see the positive-evidence
+# block near the bottom.
 #
 # A second runtime ledger, written the same way, carries per-SCENARIO replay
 # accounting (#lzscenariocoverage). "Was the file opened" and "was every scenario
@@ -33,8 +38,26 @@
 set -euo pipefail
 
 SPEC_DIR="${LAZILY_SPEC_CONFORMANCE_DIR:-${LAZILY_SPEC_DIR:-../lazily-spec}/conformance}"
+
+# A missing corpus is a legitimate LOCAL state (no sibling checkout) and an
+# illegitimate CI state (#lzvacuousrun). Every rung below reasons about fixtures
+# the corpus lists and the run OPENED, so an absent corpus makes all of them
+# vacuously true: zero fixtures means zero uncovered fixtures, zero stale
+# excuses, and zero unreplayed scenarios. Exiting 0 there reports conformance OK
+# having examined nothing, which is exactly the false claim this guard exists to
+# prevent. Under CI that is missing EVIDENCE — a wrong checkout — not evidence of
+# absence, so it is a hard failure. Locally it stays a skip, because a
+# contributor without the sibling is not making a claim about coverage at all.
 if [ ! -d "$SPEC_DIR" ]; then
+  if [ -n "${CI:-}" ]; then
+    echo "ERROR: canonical corpus not found at $SPEC_DIR, and CI is set." >&2
+    echo "       Under CI this is missing EVIDENCE, not evidence of absence: the" >&2
+    echo "       checkout is wrong, not the corpus. Exiting 0 here would report" >&2
+    echo "       conformance OK having examined zero fixtures (#lzvacuousrun)." >&2
+    exit 1
+  fi
   echo "SKIP: canonical corpus not found at $SPEC_DIR (clone the lazily-spec sibling)" >&2
+  echo "      Local checkout only — this is a hard failure under CI." >&2
   exit 0
 fi
 
@@ -176,6 +199,11 @@ fi
 total=0
 covered=0
 excused_count=0
+# Areas witnessed by a fixture that is BOTH listed by the corpus and recorded as
+# opened. Accumulated here rather than derived from the manifest's own strings so
+# the positive-evidence block at the bottom cannot be satisfied by paths that name
+# nothing on disk.
+COVERED_AREA_LIST=""
 while IFS= read -r fixture; do
   total=$((total + 1))
   # Here-string, NOT a pipe. With `set -o pipefail`, `printf ... | grep -q` reports
@@ -185,6 +213,10 @@ while IFS= read -r fixture; do
   # missing.
   if grep -qxF "$fixture" <<< "$OPENED"; then
     covered=$((covered + 1))
+    case "$fixture" in
+      */*) COVERED_AREA_LIST+="${fixture%%/*}"$'\n' ;;
+      *) COVERED_AREA_LIST+='(root)'$'\n' ;;
+    esac
     continue
   fi
   excused=0
@@ -279,6 +311,14 @@ TAB=$'\t'
 # independent of the runner — the whole point is that the corpus, not the
 # binding, says what there was to replay.
 scenario_ids() {
+  # A manifest or ledger entry naming a file this corpus does not hold is
+  # already reported by the self-guards above, so resolve it to "no scenarios"
+  # rather than letting jq die on the open. Under `set -e` that death aborts the
+  # whole script with status 2 part-way through the diagnosis: the summary gate
+  # never runs, every problem queued behind it is lost, and — the reason it
+  # matters here — the positive-evidence block at the bottom becomes unreachable
+  # in exactly the empty/half-cloned-corpus case it exists to catch.
+  [ -f "$SPEC_DIR/$1" ] || return 0
   jq -r '
     if (type == "object") and ((.scenarios | type) == "array")
     then (.scenarios | to_entries[] | ((.value.id // .value.name // ("#" + (.key | tostring))) | tostring))
@@ -379,6 +419,105 @@ for entry in "${KNOWN_UNREPLAYED_SCENARIOS[@]:-}"; do
     missing=$((missing + 1))
   fi
 done
+
+# ===========================================================================
+# Positive evidence — the examined population itself (#lzvacuousrun)
+# ===========================================================================
+#
+# Every rung above is a NEGATIVE check: it walks a population and reports the
+# problems it finds. All of them are vacuously satisfied by an empty population.
+# Zero fixtures in the corpus means zero uncovered fixtures; zero fixtures in the
+# manifest means zero stale excuses and zero unreplayed scenarios. The loops
+# cannot tell "nothing is wrong" from "nothing was examined", and neither can the
+# OK line they license.
+#
+# This block is deliberately NOT a reinstated MIN_FIXTURES floor. That floor was
+# removed for good reason (see the header): it was a number that rots, and 131
+# replays against a floor of 117 meant fourteen replays could stop running with
+# CI green. Per-fixture accounting replaced it and is strictly stronger — for
+# everything except magnitude. So the magnitude assertion here is stated in the
+# same AREA vocabulary this guard already uses, and mostly without numbers:
+#
+#   1. The REQUIRED_AREAS list must be non-empty. An area tripwire with no areas
+#      passes over any corpus at all, so the guard that protects the enumeration
+#      needs its own emptiness check.
+#   2. The corpus enumeration and the opened set must both be non-empty.
+#   3. Every REQUIRED_AREA must contribute at least one OPENED fixture. The loop
+#      near the top asserts the area exists in the CORPUS; this asserts the RUN
+#      actually read something from it. That turns the area list from a
+#      corpus-shape tripwire into positive evidence about the examined
+#      population, and it is the assertion that cannot rot into a stale number:
+#      it is derived from the area names, which are also what the corpus check
+#      already uses.
+#   4. One calibrated floor on the count of distinct opened areas, so a corpus
+#      that loses areas outright (a partial checkout that also drops them from
+#      REQUIRED_AREAS) still cannot slip through at a fraction of its real size.
+#
+# Do not lower MIN_OPENED_AREAS to fix a red run — a drop here means the corpus
+# or the recorder shrank, which is the finding, not the obstacle.
+
+if [ "${#REQUIRED_AREAS[@]}" -eq 0 ]; then
+  echo "ERROR: REQUIRED_AREAS is empty — the corpus-shape tripwire asserts nothing." >&2
+  echo "       An area guard with no areas is green over any corpus, including none." >&2
+  missing=$((missing + 1))
+fi
+if [ "$total" -eq 0 ]; then
+  echo "ERROR: the corpus at $SPEC_DIR enumerated ZERO fixtures." >&2
+  echo "       Every per-fixture check above is vacuously green over an empty" >&2
+  echo "       population (#lzvacuousrun)." >&2
+  missing=$((missing + 1))
+fi
+if [ "$covered" -eq 0 ]; then
+  echo "ERROR: the suite OPENED zero canonical fixtures." >&2
+  echo "       The manifest exists but records nothing this corpus recognises, so" >&2
+  echo "       coverage, allowlist-rot and scenario accounting all compared nothing." >&2
+  missing=$((missing + 1))
+fi
+
+# Distinct top-level areas witnessed by a fixture the corpus lists AND the run
+# opened. Root-level fixtures (snapshot_*/delta_*/arena_blob) form their own
+# pseudo-area `(root)`, so a run that read only those does not pass for a corpus
+# area's worth of depth.
+OPENED_AREAS="$(sort -u <<< "$COVERED_AREA_LIST" | grep . || true)"
+opened_area_count=0
+[ -n "$OPENED_AREAS" ] && opened_area_count="$(grep -c . <<< "$OPENED_AREAS")"
+
+for area in "${REQUIRED_AREAS[@]}"; do
+  if ! grep -qxF "$area" <<< "$OPENED_AREAS"; then
+    echo "ERROR: area '$area' is required, but the suite OPENED no fixture in it." >&2
+    echo "       The corpus check above only proves the area EXISTS. This proves the" >&2
+    echo "       run examined it — without that, an area can go entirely dark while" >&2
+    echo "       every negative check stays green over the fixtures it never saw." >&2
+    missing=$((missing + 1))
+  fi
+done
+if ! grep -qxF '(root)' <<< "$OPENED_AREAS"; then
+  echo "ERROR: the suite OPENED no root-level IPC fixture (snapshot_*/delta_*/arena_blob)." >&2
+  missing=$((missing + 1))
+fi
+
+# Calibrated 2026-08-02 against the real corpus: 25 distinct areas opened (the 24
+# REQUIRED_AREAS plus `(root)`). The floor sits a little below that so a genuine
+# upstream area rename is a one-line corpus edit rather than a forced number
+# change, while still being far above the zero an empty or half-cloned checkout
+# produces.
+MIN_OPENED_AREAS="${MIN_OPENED_AREAS:-22}"
+if [ "$opened_area_count" -lt "$MIN_OPENED_AREAS" ]; then
+  echo "ERROR: the suite OPENED fixtures in only $opened_area_count corpus area(s)," >&2
+  echo "       expected >= $MIN_OPENED_AREAS. The corpus is a partial checkout, or the" >&2
+  echo "       recorder detached part-way through the run. Do not lower" >&2
+  echo "       MIN_OPENED_AREAS to fix this — the shrink is the finding." >&2
+  missing=$((missing + 1))
+fi
+
+# The scenario rung walks the scenarios of OPENED fixtures, so it is vacuous in
+# exactly the same way one level down: no opened scenario-bearing fixture means
+# no scenario to find unreplayed.
+if [ "$sc_fixtures" -eq 0 ] || [ "$sc_total" -eq 0 ]; then
+  echo "ERROR: ZERO scenarios were enumerated across the opened fixtures." >&2
+  echo "       The per-scenario rung is vacuously green over an empty population." >&2
+  missing=$((missing + 1))
+fi
 
 # The positional fallback is REPORTED, never silently accepted: it marks a
 # fixture whose scenarios carry no identifier, which makes every id in it
