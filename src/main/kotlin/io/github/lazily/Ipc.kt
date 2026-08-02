@@ -183,11 +183,32 @@ data class ShmBlobRef(
                 generation = obj.longField("generation"),
                 epoch = obj.longField("epoch"),
                 checksum = obj.longField("checksum"),
+                // `backend` is the one deliberately lenient field on this
+                // descriptor, and the leniency covers exactly two cases:
+                //
+                //  ABSENT -> Shm. `toJson` omits the field when the backend is the
+                //  default, so every conforming peer emits descriptors without it.
+                //
+                //  PRESENT, unknown string -> Shm, via BlobBackendKind.fromWire.
+                //  Forward-compat with a peer shipping a backend this build
+                //  predates: the rest of the frame is well-formed and must still
+                //  decode. The consequence of the fallback is bounded — BlobRouter
+                //  routes the descriptor to the Shm backend, whose generation and
+                //  checksum guards turn it into a null resolve, never a wrong-blob
+                //  read (resolve_wrong_backend / resolve_corrupt_checksum).
+                //  lazily-rs takes the same position on the same field.
+                //
+                // A `backend` present but NOT a JSON string is neither case: it is
+                // a shape violation, the class of error every sibling field on this
+                // descriptor rejects through longField. It is rejected rather than
+                // silently read as Shm.
                 backend =
-                (obj["backend"] as? JsonPrimitive)
-                    ?.contentOrNull
-                    ?.let { BlobBackendKind.fromWire(it) }
-                    ?: BlobBackendKind.Shm,
+                obj["backend"]?.let { raw ->
+                    val name =
+                        (raw as? JsonPrimitive)?.takeIf { it.isString }?.content
+                            ?: error("ShmBlobRef.backend must be a string, got $raw")
+                    BlobBackendKind.fromWire(name)
+                } ?: BlobBackendKind.Shm,
             )
         }
     }

@@ -194,6 +194,24 @@ private fun parseState(
         error("state $id uses `run` actions, which are not supported (rejecting explicitly per spec)")
     }
 
+    // `kind` is a CLOSED discriminator on this schema: `"final"` is its only
+    // defined value. History, parallel and compound states are signalled through
+    // their own keys (`history`, `parallel`, `initial`) and never through `kind`.
+    //
+    // Absent `kind` is the normal case and is inferred structurally below — that
+    // fallback is deliberate and is what makes a leaf state a plain `{}`.
+    //
+    // A `kind` that is PRESENT but unrecognised is not forward-compat, it is a
+    // chart this decoder does not understand, so it is rejected. Reading it as
+    // `== "final"` and falling through to Compound/Atomic would silently run a
+    // *different* chart than the author wrote, with no diagnostic at any layer.
+    val declaredKind = obj["kind"]
+    if (declaredKind != null &&
+        (declaredKind as? JsonPrimitive)?.takeIf { it.isString }?.content != "final"
+    ) {
+        error("state $id: unknown state kind $declaredKind (the only defined value is \"final\")")
+    }
+
     val kind: Kind =
         when {
             obj["history"]?.jsonPrimitive?.contentOrNull != null ->
@@ -203,7 +221,7 @@ private fun parseState(
                     else -> error("state $id: unknown history kind")
                 }
             obj["parallel"]?.jsonPrimitive?.booleanOrNull == true -> Kind.Parallel
-            obj["kind"]?.jsonPrimitive?.contentOrNull == "final" -> Kind.Final
+            declaredKind != null -> Kind.Final
             obj.contains("initial") -> Kind.Compound
             else -> Kind.Atomic
         }
@@ -250,7 +268,22 @@ private fun parseTransition(raw: JsonElement): Transition =
                 target = target,
                 guard = guard,
                 action = parseActionList(raw["action"]),
-                internal = raw["internal"]?.jsonPrimitive?.booleanOrNull ?: false,
+                // Absent `internal` defaults to false — an external transition is
+                // the SCXML default and every fixture relies on it. A PRESENT
+                // `internal` that is not a JSON boolean (`"true"`, 1, an object)
+                // is a shape violation, not a default: silently reading it as
+                // false flips exit/re-entry semantics for that transition, which
+                // shows up as a wrong `actions` list rather than as a decode
+                // error. Rejected, like every other malformed field here.
+                //
+                // The `!isString` guard is load-bearing: `booleanOrNull` parses the
+                // *quoted* string `"true"` as `true`, so without it a JSON string
+                // would be coerced into a boolean the schema never allowed.
+                internal =
+                raw["internal"]?.let { flag ->
+                    (flag as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull
+                        ?: error("transition `internal` must be a boolean, got $flag")
+                } ?: false,
             )
         }
         else -> error("transition must be a string or object")
