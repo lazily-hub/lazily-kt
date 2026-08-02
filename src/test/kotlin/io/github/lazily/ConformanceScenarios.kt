@@ -1,6 +1,7 @@
 package io.github.lazily
 
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -33,18 +34,23 @@ import java.util.concurrent.ConcurrentSkipListSet
  * "scenarios this binding covers" is the thing being guarded against: it is a
  * claim, and a claim rots.
  *
- * Recording happens at the point of replay. Prefer [of], which records each id
- * as it *yields* the scenario, so a runner physically cannot iterate without
- * being counted:
+ * Recording happens on the first read of a scenario's PAYLOAD — never at the
+ * yield (`#lzscenariobodyskip`). Yielding is not replaying: a sequence cannot
+ * tell a loop body that ran from one that `continue`d, so the yield-time
+ * recording this replaced booked exactly the skip rung 4 exists to catch.
+ * Prefer [of]; the booking rides on the scenario it hands over, so a runner
+ * physically cannot replay one without being counted, and cannot be counted for
+ * one it walked past:
  *
  * ```
  * for (sc in ConformanceScenarios.of("crdt-tree/algebra.json", fx)) replay(sc)
  * ```
  *
  * Where a runner reaches for one scenario by name instead of iterating, use
- * [pick], which records the same way. [record] is the last resort for a runner
- * that must iterate by hand; call it at the top of the loop body, **after** any
- * `continue`, so a skipped scenario does not record itself.
+ * [pick] — its LOOKUP does not book either, because matching on a name walks
+ * past every scenario ahead of the match. [record] is the last resort for a
+ * runner that must iterate by hand; call it at the top of the loop body,
+ * **after** any `continue`, so a skipped scenario does not record itself.
  *
  * Verification lives in `scripts/check-conformance-coverage.sh`, alongside the
  * `KNOWN_UNCOVERED` fixture allowlist, so there is one place to read what this
@@ -101,9 +107,72 @@ object ConformanceScenarios {
     }
 
     /**
-     * Iterate [fx]'s `scenarios`, recording each id against [fixture] as it is
-     * yielded. Lazy on purpose: the record happens when the loop actually takes
-     * the scenario, not when the sequence is built.
+     * Keys that IDENTIFY or narrate a scenario rather than drive one
+     * (`#lzscenariobodyskip`).
+     *
+     * Reading only these is looking at the LABEL, not replaying: a dispatch chain
+     * that reads `name`, matches no arm and falls through has replayed nothing,
+     * and a by-name lookup walks past every scenario ahead of its match. Booking
+     * on those reads is what let a skipped body book itself. No scenario in the
+     * corpus carries only these, so every one is reachable through some payload
+     * key.
+     */
+    val LABEL_KEYS: Set<String> =
+        setOf("comment", "description", "id", "label", "name", "note", "notes", "reason", "why")
+
+    /**
+     * A scenario's own map, booking the replay on the first read of its PAYLOAD.
+     *
+     * `JsonObject` delegates every `Map` member to the map it is constructed
+     * with, so wrapping the map — rather than the element — keeps every runner's
+     * `scenario["steps"]`, `scenario.getValue("expect")` and `scenario.jsonObject`
+     * working unchanged while the booking rides on the read.
+     *
+     * `containsKey` deliberately does NOT book: membership is how a dispatch
+     * chain probes a shape it may not handle, and probing is not replaying.
+     */
+    private class BookingScenario(
+        private val content: Map<String, JsonElement>,
+        private val book: () -> Unit,
+    ) : Map<String, JsonElement> {
+        override val size: Int get() = content.size
+
+        override fun isEmpty(): Boolean = content.isEmpty()
+
+        override fun containsKey(key: String): Boolean = content.containsKey(key)
+
+        override fun containsValue(value: JsonElement): Boolean = content.containsValue(value)
+
+        override fun get(key: String): JsonElement? {
+            if (key !in LABEL_KEYS) book()
+            return content[key]
+        }
+
+        override val keys: Set<String> get() = content.keys.also { book() }
+
+        override val values: Collection<JsonElement> get() = content.values.also { book() }
+
+        override val entries: Set<Map.Entry<String, JsonElement>>
+            get() = content.entries.also { book() }
+    }
+
+    private fun view(
+        fixture: String,
+        scenario: JsonObject,
+        index: Int,
+    ): JsonObject = JsonObject(BookingScenario(scenario) { record(fixture, scenario, index) })
+
+    /**
+     * Iterate [fx]'s `scenarios`, each booked when its PAYLOAD is first read.
+     *
+     * Yielding is not replaying (`#lzscenariobodyskip`). This used to record at
+     * the yield, which cannot tell a loop body that ran from one that `continue`d
+     * — a sequence sees the same thing either way — so a skipped scenario booked
+     * itself and rung 4 stayed silent about the very defect it exists for.
+     * lazily-py proved that against the contract's own probe; this is the port of
+     * its fix. Booking now rides on the scenario handed to the loop, so a
+     * `continue` past the payload leaves it unbooked and a `break` leaves the rest
+     * unbooked too.
      */
     fun of(
         fixture: String,
@@ -119,18 +188,20 @@ object ConformanceScenarios {
             fx["scenarios"] as? JsonArray
                 ?: error("$fixture: fixture carries no `scenarios` array")
         return scenarios.asSequence().mapIndexed { i, el ->
-            val sc = el.jsonObject
-            record(fixture, sc, i)
-            IndexedValue(i, sc)
+            IndexedValue(i, view(fixture, el.jsonObject, i))
         }
     }
 
     /**
-     * Return the single scenario of [fx] whose resolved id is [id], recording it.
+     * Return the single scenario of [fx] whose resolved id is [id].
      *
      * For runners that reach for one scenario by name rather than iterating —
      * the shape where a skipped scenario is easiest to not notice, because
      * nothing enumerates the ones you did not name.
+     *
+     * The LOOKUP does not book (`#lzscenariobodyskip`): matching on the id walks
+     * past every scenario ahead of it, and selecting a scenario is not replaying
+     * it. The returned view books when the caller reads its payload.
      */
     fun pick(
         fixture: String,
@@ -143,8 +214,7 @@ object ConformanceScenarios {
         scenarios.forEachIndexed { i, el ->
             val sc = el.jsonObject
             if (idOf(sc, i).value == id) {
-                record(fixture, sc, i)
-                return sc
+                return view(fixture, sc, i)
             }
         }
         error(
