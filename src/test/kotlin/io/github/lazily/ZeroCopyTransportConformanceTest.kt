@@ -3,6 +3,7 @@ package io.github.lazily
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -148,7 +149,10 @@ class ZeroCopyTransportConformanceTest {
         val arrow = shm.copy(backend = BlobBackendKind.Arrow)
         assertEquals("arrow", arrow.toJson()["backend"].toString().trim('"'))
         assertEquals(arrow, ShmBlobRef.fromJson(arrow.toJson()))
-        // Unknown backend strings fall back to the default (forward-compat).
-        assertEquals(BlobBackendKind.Shm, BlobBackendKind.fromWire("quantum"))
+        // The enum is closed: an unknown token is refused, naming it, never
+        // normalized to the default (#lzblobbackendstrict).
+        val unknown =
+            assertFailsWith<IllegalArgumentException> { BlobBackendKind.fromWire("quantum") }
+        assertTrue(unknown.message!!.contains("quantum"), unknown.message!!)
     }
 }

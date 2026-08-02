@@ -3,6 +3,7 @@ package io.github.lazily
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
@@ -48,22 +49,6 @@ class WireDispatchFailClosedTest {
         assertTrue(ref.backend.isDefault)
     }
 
-    /**
-     * PINNED LENIENCY. A `backend` string this build does not know decodes as
-     * [BlobBackendKind.Shm] rather than failing the frame — forward-compat with a peer
-     * that ships a newer backend. The consequence is a bounded null resolve, not a
-     * wrong-blob read, because the generation/checksum guards still run.
-     */
-    @Test
-    fun unknownBackendStringDecodesAsShmAndDoesNotFailTheFrame() {
-        val ref = ShmBlobRef.fromJson(blobRefJson { put("backend", "quantum") })
-        assertEquals(BlobBackendKind.Shm, ref.backend)
-        // the rest of the descriptor still decoded — leniency is scoped to this one field
-        assertEquals(3L, ref.len)
-        assertEquals(1L, ref.generation)
-        assertEquals(42L, ref.checksum)
-    }
-
     /** A known non-default backend string still round-trips exactly. */
     @Test
     fun knownBackendStringDecodesExactly() {
@@ -71,9 +56,45 @@ class WireDispatchFailClosedTest {
             BlobBackendKind.Arrow,
             ShmBlobRef.fromJson(blobRefJson { put("backend", "arrow") }).backend,
         )
+        assertEquals(
+            BlobBackendKind.InProcess,
+            ShmBlobRef.fromJson(blobRefJson { put("backend", "in_process") }).backend,
+        )
+        // The redundant-but-legal explicit spelling of the default.
+        assertEquals(
+            BlobBackendKind.Shm,
+            ShmBlobRef.fromJson(blobRefJson { put("backend", "shm") }).backend,
+        )
     }
 
     // -- ShmBlobRef.backend: FAIL CLOSED ------------------------------------
+
+    /**
+     * FAIL CLOSED. A PRESENT `backend` outside the enum is REFUSED, naming the
+     * token (`#lzblobbackendstrict`).
+     *
+     * This site used to normalize an unknown token to [BlobBackendKind.Shm] and
+     * called it forward-compat. The forward-compatibility channel for this field is
+     * its ABSENCE — asserted just above — and that is the only one: a new backend
+     * enters by adding an enum value, so an unrecognised token is a corrupt or
+     * non-conforming producer, never a newer peer. Normalizing routes a non-shm
+     * descriptor into the shm table, which is exactly what `resolve_wrong_backend`
+     * says never happens; the checksum then usually catches it, which turns a
+     * structural guarantee into a probabilistic one.
+     */
+    @Test
+    fun unknownBackendTokenIsRejectedAndNamesTheToken() {
+        for (bogus in listOf("quantum", "rdma", "SHM", "Arrow", "in-process", "")) {
+            val e =
+                assertFailsWith<IllegalArgumentException>("backend=$bogus must be rejected") {
+                    ShmBlobRef.fromJson(blobRefJson { put("backend", bogus) })
+                }
+            assertTrue(
+                e.message!!.contains("unknown blob backend") && e.message!!.contains(bogus),
+                "message must name the offending token, got: ${e.message}",
+            )
+        }
+    }
 
     /**
      * FAIL CLOSED. A `backend` that is present but not a JSON string is a shape
@@ -100,6 +121,24 @@ class WireDispatchFailClosedTest {
                     """{"offset":0,"len":3,"generation":1,"epoch":0,"checksum":42,"backend":true}""",
                 ).jsonObject,
             )
+        }
+    }
+
+    /**
+     * FAIL CLOSED, msgpack half. The binary codec unpacks into the same value tree
+     * the `json` codec parses, so a `backend` that is an integer or a bool on the
+     * MessagePack wire must reach the same refusal rather than being coerced into a
+     * token. Asserted separately because "both codecs share a tree" is a property
+     * of the current implementation, not of the wire contract.
+     */
+    @Test
+    fun nonStringBackendIsRejectedOverMsgpackToo() {
+        for (bogus in listOf(JsonPrimitive(7), JsonPrimitive(true), buildJsonObject { put("name", "arrow") })) {
+            assertFailsWith<IllegalStateException>("msgpack backend=$bogus must be rejected") {
+                ShmBlobRef.fromJson(
+                    MsgpackCodec.unpack(MsgpackCodec.pack(blobRefJson { put("backend", bogus) })),
+                )
+            }
         }
     }
 

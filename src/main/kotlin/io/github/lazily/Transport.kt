@@ -22,9 +22,9 @@ package io.github.lazily
 /**
  * Wire discriminator: which pluggable backend holds a blob. Mirrors
  * `BackendKind` in `ZeroCopyTransport` and `BlobBackendKind` in lazily-rs. The
- * wire string is lowercase (`"shm"` / `"arrow"` / `"in_process"`); unknown
- * strings fall back to [Shm] so a legacy or forward-compatible descriptor never
- * hard-fails resolution.
+ * wire string is lowercase (`"shm"` / `"arrow"` / `"in_process"`) and the enum is
+ * CLOSED: a token outside it is refused, never normalized (`#lzblobbackendstrict`
+ * — see [fromWire]).
  */
 enum class BlobBackendKind(
     val wire: String,
@@ -46,12 +46,35 @@ enum class BlobBackendKind(
         /** The default backend discriminator. Mirrors `BackendKind` default / lazily-rs `Shm`. */
         val Default: BlobBackendKind = Shm
 
-        /** Parse a backend discriminator from its wire string; unknown → [Shm] (default). */
+        /**
+         * Parse a backend discriminator from its wire string. A token outside the
+         * enum is REFUSED, naming it (`#lzblobbackendstrict`).
+         *
+         * The forward-compatibility channel for this field is its ABSENCE, and
+         * that is the only one: every descriptor minted before `backend` existed
+         * omits the key, which is why the field is optional and why an absent
+         * `backend` decodes as [Shm] (`ShmBlobRef.fromJson`). A PRESENT token is a
+         * different fact. A new backend enters the protocol by adding an enum
+         * value — a spec change carrying a fixture, not a wire event — so an
+         * unrecognised token is a corrupt frame or a non-conforming producer, not
+         * a newer peer.
+         *
+         * This used to fall back to [Shm], and the defence was that the
+         * generation/checksum guards turn the mis-route into a null resolve rather
+         * than a wrong-blob read. That defence inverts the `resolve_wrong_backend`
+         * theorem it appeals to: *a descriptor of one kind never resolves against a
+         * different backend's table — receivers route by kind*. Reading an unknown
+         * kind as `shm` IS routing a non-shm descriptor into the shm table. The
+         * guarantee is meant to be structural, discharged by routing; normalization
+         * downgrades it to a probabilistic one discharged by a 64-bit checksum,
+         * against a backend this build genuinely resolves.
+         */
         fun fromWire(s: String): BlobBackendKind =
             when (s) {
+                "shm" -> Shm
                 "arrow" -> Arrow
                 "in_process" -> InProcess
-                else -> Shm
+                else -> throw IllegalArgumentException("unknown blob backend: $s")
             }
     }
 }
