@@ -127,7 +127,7 @@ class CrdtTreeAndOutboxStoreTest {
             ConformanceScenarios.pick(
                 "crdt-tree/algebra.json",
                 fx,
-                "merge algebra is order and duplication independent",
+                "merge_is_order_and_duplication_independent",
             )
         val seed = mergeScenario["seed"]!!.jsonObject
         val base = TextCrdt(seed["peer"]!!.jsonPrimitive.long, seed["text"]!!.jsonPrimitive.content)
@@ -164,7 +164,7 @@ class CrdtTreeAndOutboxStoreTest {
             ConformanceScenarios.pick(
                 "crdt-tree/algebra.json",
                 fx,
-                "empty frontier snapshot preserves lineage",
+                "empty_frontier_snapshot_preserves_lineage",
             )
         val snapshotSeed = snapshotScenario["seed"]!!.jsonObject
         val canonical =
@@ -203,7 +203,7 @@ class CrdtTreeAndOutboxStoreTest {
             ConformanceScenarios.pick(
                 "crdt-tree/algebra.json",
                 fx,
-                "own frontier emits an empty delta",
+                "own_frontier_emits_empty_delta",
             )
         val steadySeed = steadyScenario["seed"]!!.jsonObject
         val steady = TextCrdt(steadySeed["peer"]!!.jsonPrimitive.long, steadySeed["text"]!!.jsonPrimitive.content)
