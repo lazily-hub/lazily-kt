@@ -50,14 +50,13 @@ fi
 # EXPECTED_SKIPS answers "having read it, did we assert on it". EXPECTED_SKIPS is
 # already rot-proof via exact set equality in the test; do not merge the two.
 KNOWN_UNCOVERED=(
-  # msgpack is a protocol.md MUST that lazily-kt does not implement
-  # (#lzmsgpackparity). The gap was already declared, but only in
-  # InteropPeer.kt's `carve_outs` — a place no parity surface reads. It
-  # belongs here, beside every other declared gap: the `json` half of the
-  # codec obligation IS replayed (CodecConformanceTest.kt), so this entry
-  # names exactly what is missing rather than the whole obligation. Closing
-  # it means encoding/decoding IpcMessage as a named-field MessagePack map.
-  "codec/frame_roundtrip_msgpack.json"
+  # codec/frame_roundtrip_msgpack.json was excused here while lazily-kt spoke
+  # only the `json` half of the frame-codec obligation. It is now REPLAYED
+  # (#lzmsgpackseven, MsgpackCodec.kt + CodecConformanceTest.kt), so the entry
+  # is gone rather than kept as a stale excuse — this script fails an excuse
+  # for a fixture the same run opened, which is exactly what should happen to
+  # a gap that has been closed.
+  #
   # No lazily-kt runner drives the reliable-sync outbox-coalescing or
   # lease-eviction scenarios yet. Excused in every other binding for the same
   # reason.

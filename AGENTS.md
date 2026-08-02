@@ -142,6 +142,25 @@ and `Reactive.trackedSharedRead_registers_edge` formal pins.
   and the multi-writer `CrdtSync` plane: `WireStamp`/`CrdtOp`/`CrdtSync` +
   `IpcMessage.CrdtSyncMessage`), kotlinx-serialization-free hand-rolled JSON
   that is byte-compatible with lazily-rs.
+- `MsgpackCodec.kt` — the `msgpack` frame codec (`#lzmsgpackseven`), the
+  cross-language binary default protocol.md § Frame codecs makes MUST-level. A
+  dependency-free packer/unpacker over the subset an `IpcMessage` needs (nil /
+  bool / int / str / array / map) plus `IpcMessage.encodeMsgpack()` /
+  `IpcMessage.decodeMsgpack()`. It serializes the `json` codec's OWN value tree
+  rather than transcribing the shape a second time, so the externally-tagged
+  envelope (`{"Snapshot": …}`, never an integer discriminator), the named-field
+  maps keyed by the `json` field names (never positional arrays), and both
+  `NodeKey` rules (`NodeSnapshot`/`NodeAdd` omit an absent key, `CrdtOp` always
+  writes it — `null` when unset) are identical by construction. Byte payloads
+  are arrays of integers, and msgpack `bin` is REJECTED on decode — the
+  reference encoder (`rmp_serde` on `Vec<u8>`) neither emits nor accepts it, so
+  tolerating it would be a private dialect wearing the `msgpack` token. Not
+  byte-canonical: map key order is encoder-defined, so conformance is
+  `decode(encode(m)) == m`. Replayed by `CodecConformanceTest.kt` against
+  `conformance/codec/frame_roundtrip_msgpack.json`, which also decodes the
+  produced bytes schema-lessly and pins the sorted encoded field names — the
+  only way to see the named-field rule, since a positional encoder round-trips
+  every value correctly and is still non-conforming.
 - `ReliableSync.kt` — reliable sync (`#lzsync`, counterpart of
   `lazily-rs::reliable_sync`): the pure-protocol `ResyncCoordinator` (gap → resync
   decision table), at-least-once `DurableOutbox`, and

@@ -75,11 +75,16 @@ private class InteropPeer {
                     "stdlib_revision_barrier_v1",
                 ),
             )
-            put("codecs", strings("json"))
+            // Both MUST-level frame codecs are implemented and replayed through
+            // the canonical corpus: `json` by Ipc.kt's toJson/fromJson tree and
+            // `msgpack` by MsgpackCodec.kt (#lzmsgpackseven), which serializes
+            // that same tree as the externally-tagged, named-field map wire the
+            // token names. Neither is a carve-out any more.
+            put("codecs", strings("json", "msgpack"))
             put("channels", JsonArray(emptyList()))
             put("channel_variants", JsonObject(emptyMap()))
             put("platform_profile", "portable")
-            put("carve_outs", strings("msgpack", "transport_links"))
+            put("carve_outs", strings("transport_links"))
         }
     }
 
