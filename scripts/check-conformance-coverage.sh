@@ -102,8 +102,9 @@ KNOWN_UNCOVERED=(
 # replayed (io.github.lazily.ConformanceScenarios) — and the check below compares
 # it against the ids the fixtures carry on disk, in both directions.
 #
-# Ids resolve `id` -> `name` -> positional `#<n>`, identically in every binding.
-# The positional fallback exists because collections/mergecell_algebra.json
+# Ids resolve `id`, else `name`, identically in every binding. There is no
+# positional fallback (#lzspecscenarioids) -- it used to exist because
+# collections/mergecell_algebra.json
 # carries no scenario identifier at all; it is REPORTED below rather than
 # silently accepted, so the corpus gap stays visible and fixable upstream. Adding
 # the missing identifiers is a shared-corpus change and does not belong here.
@@ -307,9 +308,11 @@ LEDGER_KEYS="$(cut -f1,2 <<< "$LEDGER")"
 TAB=$'\t'
 
 # Resolve a fixture's scenario ids straight from the corpus on disk: `id`, else
-# `name`, else the 0-based positional index spelled `#<n>`. This must stay
-# independent of the runner — the whole point is that the corpus, not the
-# binding, says what there was to replay.
+# `name`. There is no positional fallback (#lzspecscenarioids): an id derived
+# from a POSITION silently rebinds to a different scenario when the corpus array
+# is reordered, so an unidentified scenario is reported rather than given an
+# invented id. This must stay independent of the runner — the whole point is that
+# the corpus, not the binding, says what there was to replay.
 scenario_ids() {
   # A manifest or ledger entry naming a file this corpus does not hold is
   # already reported by the self-guards above, so resolve it to "no scenarios"
@@ -320,8 +323,13 @@ scenario_ids() {
   # in exactly the empty/half-cloned-corpus case it exists to catch.
   [ -f "$SPEC_DIR/$1" ] || return 0
   jq -r '
+    def identifier: if type == "string" and (gsub("\\s"; "") != "") then . else null end;
     if (type == "object") and ((.scenarios | type) == "array")
-    then (.scenarios | to_entries[] | ((.value.id // .value.name // ("#" + (.key | tostring))) | tostring))
+    then (
+      .scenarios
+      | to_entries[]
+      | ((.value.id? | identifier) // (.value.name? | identifier) // "!UNIDENTIFIED!\(.key)")
+    )
     else empty end
   ' "$SPEC_DIR/$1"
 }
@@ -338,6 +346,19 @@ while IFS= read -r fixture; do
   while IFS= read -r id; do
     [ -n "$id" ] || continue
     sc_total=$((sc_total + 1))
+    # An unidentified scenario is a corpus defect, not an id to invent
+    # (#lzspecscenarioids). Booking it by POSITION would silently rebind that
+    # ledger entry to a different scenario on any corpus reorder.
+    case "$id" in
+      '!UNIDENTIFIED!'*)
+        echo "ERROR: '$fixture' scenario at index ${id#!UNIDENTIFIED!} carries neither" >&2
+        echo "       \`id\` nor \`name\`. The ledger would record it by POSITION, which" >&2
+        echo "       silently rebinds on a corpus reorder. Give it a stable id upstream" >&2
+        echo "       in lazily-spec (#lzspecscenarioids)." >&2
+        missing=$((missing + 1))
+        continue
+        ;;
+    esac
     if grep -qxF "$fixture$TAB$id" <<< "$LEDGER_KEYS"; then
       sc_replayed=$((sc_replayed + 1))
       continue
@@ -380,7 +401,7 @@ while IFS= read -r line; do
   if ! grep -qxF "$lid" <<< "$(scenario_ids "$lf")"; then
     echo "ERROR: scenario ledger records '$lf' scenario '$lid', which the fixture does" >&2
     echo "       not carry. The runner's id resolution has drifted from the shared" >&2
-    echo "       'id -> name -> #<n>' order; the ledger cannot be compared to the corpus." >&2
+    echo "       'id -> name' order; the ledger cannot be compared to the corpus." >&2
     missing=$((missing + 1))
   fi
 done <<< "$LEDGER"
@@ -517,17 +538,6 @@ if [ "$sc_fixtures" -eq 0 ] || [ "$sc_total" -eq 0 ]; then
   echo "ERROR: ZERO scenarios were enumerated across the opened fixtures." >&2
   echo "       The per-scenario rung is vacuously green over an empty population." >&2
   missing=$((missing + 1))
-fi
-
-# The positional fallback is REPORTED, never silently accepted: it marks a
-# fixture whose scenarios carry no identifier, which makes every id in it
-# order-dependent. Fixing that is a shared-corpus change and belongs upstream, so
-# what this guard owes is visibility.
-positional_lines="$(awk -F'\t' '$3 == "positional" { print "         " $1 " [" $2 "]" }' <<< "$LEDGER")"
-if [ -n "$positional_lines" ]; then
-  echo "NOTE: $(wc -l <<< "$positional_lines") scenario(s) resolved by POSITIONAL index —" \
-       "the fixture carries neither \`id\` nor \`name\`, so these ids are order-dependent:"
-  echo "$positional_lines"
 fi
 
 if [ "$missing" -gt 0 ]; then

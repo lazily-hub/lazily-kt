@@ -65,8 +65,8 @@ object ConformanceScenarios {
                 ?: "build/conformance-scenarios-replayed.txt",
         )
 
-    /** How a scenario's id was resolved — reported so a positional fallback is visible. */
-    enum class IdSource { ID, NAME, POSITIONAL }
+    /** How a scenario's id was resolved — carried so the guard reads the same identity. */
+    enum class IdSource { ID, NAME }
 
     data class ScenarioId(
         val value: String,
@@ -81,15 +81,21 @@ object ConformanceScenarios {
 
     /**
      * Resolve a scenario's id in the order every binding shares: `id`, else
-     * `name`, else the 0-based positional index spelled `#<n>`.
+     * `name`. There is no third option.
      *
-     * The corpus is not uniform — 28 fixtures identify a scenario by `name`, the
-     * three `stdlib` ones by `id`, and `collections/mergecell_algebra.json`
-     * carries no identifier at all (its scenarios differ only by `policy`). The
-     * positional fallback exists so this guard is not blocked on a shared-corpus
-     * edit; it is [IdSource.POSITIONAL]-tagged and reported by the guard rather
-     * than silently accepted, because that visibility is what makes the corpus
-     * gap fixable upstream later.
+     * The positional `#<n>` fallback is GONE (`#lzspecscenarioids`). It let the
+     * ledger record a scenario BY POSITION, where inserting one ahead of it
+     * silently rebinds that entry — and any excuse naming it — to a different
+     * scenario, with nothing turning red: the guard compares "index 1 was
+     * replayed" against whatever now sits at index 1 and agrees with itself.
+     *
+     * It was load-bearing for exactly one fixture,
+     * `collections/mergecell_algebra.json`, whose scenarios differed only by
+     * `policy`. They carry ids now, and lazily-spec's `scenario-identity-check`
+     * keeps every scenario identified — so this is a hole with no users, which is
+     * one waiting to become load-bearing again. A blank identifier is refused for
+     * the same reason: it would file every blank-id scenario under one ledger
+     * entry, which reads as "replayed" the moment any one of them runs.
      */
     fun idOf(
         scenario: JsonObject,
@@ -103,7 +109,12 @@ object ConformanceScenarios {
             ?.contentOrNull
             ?.takeIf { it.isNotBlank() }
             ?.let { return ScenarioId(it, IdSource.NAME) }
-        return ScenarioId("#$index", IdSource.POSITIONAL)
+        error(
+            "scenario at index $index carries neither `id` nor `name`. The replay ledger " +
+                "would have to record it by POSITION, where inserting a scenario ahead of it " +
+                "silently rebinds that entry to a different scenario. Give it a stable id " +
+                "upstream in lazily-spec (#lzspecscenarioids).",
+        )
     }
 
     /**
@@ -179,7 +190,7 @@ object ConformanceScenarios {
         fx: JsonObject,
     ): Sequence<JsonObject> = indexed(fixture, fx).map { it.value }
 
-    /** [of], keeping the positional index for runners that label by it. */
+    /** [of], keeping the array index for runners that label by it. */
     fun indexed(
         fixture: String,
         fx: JsonObject,
