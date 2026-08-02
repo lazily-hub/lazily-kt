@@ -5,10 +5,10 @@ Two benchmark surfaces for the lazily-kt hot paths, mirroring the lazily-rs
 
 - a **reactive-core micro-bench** ([`Benchmarks.kt`](src/main/kotlin/io/github/lazily/Benchmarks.kt),
   `make benchmark` / `./gradlew benchmark`) mirroring the lazily-rs
-  [`benches/context.rs`](../lazily-rs/benches/context.rs) scenarios, and
+  [`benches/context.rs`](https://github.com/lazily-hub/lazily-rs/blob/main/benches/context.rs) scenarios, and
 - a **spreadsheet-scale bench** ([`ScaleBench.kt`](src/main/kotlin/io/github/lazily/ScaleBench.kt),
   `make benchmark-scale`) replicating the lazily-rs
-  [`scale`](../lazily-rs/benches/scale.rs) group on a graph of up to 1,000,000
+  [`scale`](https://github.com/lazily-hub/lazily-rs/blob/main/benches/scale.rs) group on a graph of up to 1,000,000
   cells (a full Google Sheets workbook).
 
 ## A note on measurement
@@ -176,9 +176,9 @@ compare/increment — no monitor-enter cost. One op per sample:
 
 ## Related
 
-- [`lazily-rs` `benches/`](../lazily-rs/benches/) — the canonical Criterion-backed
+- [`lazily-rs` `benches/`](https://github.com/lazily-hub/lazily-rs/tree/main/benches) — the canonical Criterion-backed
   benches this mirrors (`context.rs`, `scale.rs`).
-- [`lazily-py` `benchmarks.py`](../lazily-py/src/lazily/benchmarks.py) — the
+- [`lazily-py` `benchmarks.py`](https://github.com/lazily-hub/lazily-py/blob/main/src/lazily/benchmarks.py) — the
   wall-clock harness shape (`Benchmark` / `BenchmarkResult` / `timeOp`).
-- [`lazily-zig` `src/benches/`](../lazily-zig/src/benches/) — counter- and
+- [`lazily-zig` `src/benches/`](https://github.com/lazily-hub/lazily-zig/tree/main/src/benches) — counter- and
   wall-clock-based sibling benches.
