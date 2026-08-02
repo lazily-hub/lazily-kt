@@ -31,6 +31,23 @@ private fun JsonObject.required(name: String): JsonElement = this[name] ?: error
 
 private fun JsonObject.longField(name: String): Long = required(name).jsonPrimitive.long
 
+/**
+ * Read an optional [NodeKey], treating BOTH an omitted field and an explicit
+ * JSON `null` as absent (`#lzkeynullstrict`).
+ *
+ * protocol.md § NodeKey makes omit-when-absent an obligation on the ENCODER, and
+ * says nothing that lets a decoder refuse the null form — a peer that simply did
+ * not apply `skip_serializing_if` emits it. lazily-kt did not refuse it either;
+ * it did something worse. `JsonNull` IS a [JsonPrimitive] in kotlinx.serialization
+ * and its `content` is the string `"null"`, so `as? JsonPrimitive` matched and the
+ * node came back carrying a real, wire-stable key literally named `null` — a
+ * silently wrong entry address that then round-tripped as `"key": "null"`.
+ * [CrdtOp] one type over already tested `is JsonNull` explicitly, because a
+ * `CrdtOp` ALWAYS writes `key: null` when unset.
+ */
+private fun optionalNodeKey(element: JsonElement?): NodeKey? =
+    if (element == null || element is JsonNull) null else NodeKey.fromJson(element)
+
 private fun JsonObject.stringField(name: String): String = required(name).jsonPrimitive.content
 
 // #lzktindexedloop: indexed loop over the primitive ByteArray (a `for-in` would
@@ -319,7 +336,7 @@ data class NodeSnapshot(
                 node = obj.longField("node"),
                 typeTag = obj.stringField("type_tag"),
                 state = NodeState.fromJson(obj.required("state")),
-                key = (obj["key"] as? JsonPrimitive)?.let { NodeKey.fromJson(it) },
+                key = optionalNodeKey(obj["key"]),
             )
         }
     }
@@ -618,7 +635,7 @@ sealed interface DeltaOp {
                         node = body.longField("node"),
                         typeTag = body.stringField("type_tag"),
                         state = NodeState.fromJson(body.required("state")),
-                        key = (body["key"] as? JsonPrimitive)?.let { NodeKey.fromJson(it) },
+                        key = optionalNodeKey(body["key"]),
                     )
                 "NodeRemove" -> NodeRemove(body.longField("node"))
                 "EdgeAdd" ->
