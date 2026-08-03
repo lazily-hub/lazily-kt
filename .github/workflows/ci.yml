@@ -68,6 +68,9 @@ jobs:
       - name: Guard — conformance fixtures actually replayed (#lzspecconf)
         run: ./scripts/check-conformance-coverage.sh
 
+      - name: Assertion observation ordering (#lzassertordering)
+        run: python3 ../lazily-spec/scripts/check-assertion-ordering.py --binding kt --root .
+
       # The gate that keeps every step above honest (#lzcheckcireachguard). It
       # compares `make check`'s prerequisite closure against the run: bodies in
       # this file and fails on any target CI does not reach. Comments inside run:

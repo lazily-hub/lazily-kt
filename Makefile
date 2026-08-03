@@ -12,11 +12,15 @@ LEAN_FORMAL_DIR ?= ../lazily-formal
 	test-interop-peer \
 	benchmark \
 	benchmark-scale \
-	test-lean-formal \
-	test-lazily-formal \
-	ci-reach
+test-lean-formal \
+test-lazily-formal \
+assertion-ordering-check \
+ci-reach
 
-check: fmt test test-interop-peer test-lean-formal test-lazily-formal ci-reach
+check: fmt test test-interop-peer test-lean-formal test-lazily-formal assertion-ordering-check ci-reach
+
+assertion-ordering-check:
+	python3 ../lazily-spec/scripts/check-assertion-ordering.py --binding kt --root .
 
 # The formatting GATE (#lazilyformattinggate). spotless + ktlint, both versions
 # pinned exactly in build.gradle.kts — see the comment there for why pinning the
