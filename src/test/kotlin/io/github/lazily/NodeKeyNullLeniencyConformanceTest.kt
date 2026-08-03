@@ -45,6 +45,12 @@ import kotlin.test.assertEquals
  * is [wireKeyForm], which classifies the `key` slot straight off the raw wire —
  * the `wire_json` text, the `wire_msgpack_hex` bytes — BEFORE any decode, and is
  * compared against each scenario's declared `key_form`.
+ *
+ * That control reads msgpack through [MsgpackCodec.unpack], which is this
+ * binding's own schema-less decoder — so a defect there would corrupt the control
+ * and the thing controlled together, invisibly. [rawCarrierKeyForm] is the second
+ * witness that closes it: same classification, taken off the raw bytes with no
+ * decoder in the path at all.
  */
 class NodeKeyNullLeniencyConformanceTest {
     private val json = Json
@@ -169,6 +175,75 @@ class NodeKeyNullLeniencyConformanceTest {
     }
 
     /**
+     * The sole index of [needle] in [haystack], or `-1`.
+     *
+     * Fails closed on a second occurrence: two `key` field names make a
+     * byte-level witness ambiguous about which slot it read, and an ambiguous
+     * control is not one.
+     */
+    private fun soleIndexOf(haystack: String, needle: String, where: String): Int {
+        val first = haystack.indexOf(needle)
+        if (first < 0) return -1
+        check(haystack.indexOf(needle, first + 1) < 0) {
+            "$where: the raw carrier holds more than one `key` field name, so a byte-level " +
+                "witness cannot say which slot it read"
+        }
+        return first
+    }
+
+    /**
+     * A SECOND witness for the same classification, taken straight off the raw
+     * carrier without going through any decoder at all.
+     *
+     * [wireKeyForm] reads the msgpack half through [MsgpackCodec.unpack] — this
+     * binding's OWN schema-less decoder. That makes the control only as
+     * trustworthy as the code path it uses: a defect there corrupts the control
+     * and the thing controlled at the same time, and the control cannot see it.
+     * So this witness avoids the decoder entirely and reads bytes.
+     *
+     * In msgpack a three-character field name is the fixstr `a3 6b 65 79`, and
+     * the tag byte immediately after it is the value's: [MSGPACK_NIL_TAG] is nil
+     * — the `null` form — and any other tag opens a real key. In json it is the
+     * literal `"key"` and the token after the colon. No field name in the carrier
+     * at all is the `omitted` form, in both.
+     *
+     * Fails closed on an unknown codec, and on a fixstr match that does not land
+     * on a byte boundary of the hex.
+     */
+    private fun rawCarrierKeyForm(scenario: JsonObject): String {
+        val where = scenario.getValue("id").jsonPrimitive.content
+        return when (val codec = scenario.getValue("codec").jsonPrimitive.content) {
+            "json" -> {
+                val text = scenario.getValue("wire_json").jsonPrimitive.content
+                val at = soleIndexOf(text, JSON_KEY_FIELD, where)
+                if (at < 0) {
+                    "omitted"
+                } else {
+                    val value =
+                        text
+                            .substring(at + JSON_KEY_FIELD.length)
+                            .trimStart()
+                            .removePrefix(":")
+                            .trimStart()
+                    if (value.startsWith("null")) "null" else "present"
+                }
+            }
+            "msgpack" -> {
+                val hex = scenario.getValue("wire_msgpack_hex").jsonPrimitive.content.lowercase()
+                val at = soleIndexOf(hex, MSGPACK_KEY_FIXSTR, where)
+                if (at < 0) {
+                    "omitted"
+                } else {
+                    check(at % 2 == 0) { "$where: `$MSGPACK_KEY_FIXSTR` matched off a byte boundary of the hex" }
+                    val tag = hex.substring(at + MSGPACK_KEY_FIXSTR.length, at + MSGPACK_KEY_FIXSTR.length + 2)
+                    if (tag == MSGPACK_NIL_TAG) "null" else "present"
+                }
+            }
+            else -> error("unknown codec: $codec")
+        }
+    }
+
+    /**
      * Re-encode under the scenario's own codec and read the field set back off
      * the WIRE tree, not off the typed object — a typed object cannot
      * distinguish "field absent" from "field present and null", which is the
@@ -245,6 +320,20 @@ class NodeKeyNullLeniencyConformanceTest {
             // same bytes — reddens here, and here is the only place it can
             // (`#lznullformblind`).
             val onWire = wireKeyForm(scenario)
+            // The second witness, which reaches the same answer without going
+            // through `MsgpackCodec.unpack` — this binding's own schema-less
+            // decoder, and therefore a code path a control built on it cannot
+            // audit. Cross-checked BEFORE `key_form` so a defect in that decoder
+            // is reported as the two witnesses disagreeing rather than as a
+            // silently wrong classification both of them share.
+            val onCarrier = rawCarrierKeyForm(scenario)
+            assertEquals(
+                onCarrier,
+                onWire,
+                "$where: the byte-level witness and the schema-less decode of the same frame " +
+                    "disagree about the `key` slot — one of the two reads is wrong, and a control " +
+                    "that shares a code path with the thing it controls cannot tell you which",
+            )
             formsReplayed += onWire
             sc.assertString("key_form") { onWire }
 
@@ -409,5 +498,14 @@ class NodeKeyNullLeniencyConformanceTest {
     private companion object {
         /** The wire forms of an optional `key` this runner can name. */
         val KNOWN_KEY_FORMS = setOf("omitted", "null", "present")
+
+        /** The `key` field name as json spells it, for the decoder-free witness. */
+        const val JSON_KEY_FIELD = "\"key\""
+
+        /** The `key` field name as msgpack spells it: fixstr(3) `a3`, then `key`. */
+        const val MSGPACK_KEY_FIXSTR = "a36b6579"
+
+        /** msgpack `nil` — the tag that makes a present `key` slot the explicit-null form. */
+        const val MSGPACK_NIL_TAG = "c0"
     }
 }

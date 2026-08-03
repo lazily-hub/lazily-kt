@@ -173,16 +173,19 @@ class CodecConformanceTest {
          * AFTER the replay, and this is the count of work that happened.
          */
         replayed: Int,
-        /** Codecs the loop really drove, so `assertions.codec` is a claim about the run. */
-        codecsDriven: Set<String>,
         noteDischargedBy: List<String>,
     ) {
         assertEquals(codec, fixture.getValue("codec").jsonPrimitive.content, "$path: fixture codec field")
         val meta = AssertionKeys("$path assertions", fixture.getValue("assertions").jsonObject)
-        // Against the codec entry points the loop really dispatched into, not
-        // against the runner-side literal it used to name: an empty set here
-        // means nothing was encoded or decoded, and `single()` says so.
-        meta.assertString("codec") { codecsDriven.single() }
+        // `codec`, `self_describing`, `byte_canonical`, `required_of_binding` and
+        // `role` stay fixture-vs-literal ON PURPOSE, and that is a real limit on
+        // the rule rather than an instance of the vacuity below. They are CORPUS
+        // DECLARATIONS a binding pins by agreement, not observations a run can
+        // produce: `byte_canonical` in particular states what two conforming
+        // bindings may do with the same message, which no single run has a
+        // comparable value for. `scenario_count` is the opposite — a count of
+        // work — and so it is asserted against the replay.
+        meta.assertString("codec") { codec }
         meta.assertBoolean("self_describing") { true }
         meta.assertBoolean("byte_canonical") { byteCanonical }
         meta.assertString("required_of_binding") { "MUST" }
@@ -228,7 +231,6 @@ class CodecConformanceTest {
         val fixture = loadFixture(path)
 
         var replayed = 0
-        val codecsDriven = linkedSetOf<String>()
         for (scenario in ConformanceScenarios.of(path, fixture)) {
             val where = scenario.getValue("id").jsonPrimitive.content
             val source = IpcMessage.fromJson(scenario.getValue("wire"))
@@ -242,7 +244,6 @@ class CodecConformanceTest {
             // literal is never re-asserted, so a codec that silently drops a
             // field cannot be masked by reading the input back.
             val roundTripped = IpcMessage.decodeJson(source.encodeJson())
-            codecsDriven += "json"
 
             val keys = AssertionKeys("$path $where", scenario.getValue("expect").jsonObject)
             keys.assertBoolean("round_trip_equals_source") { roundTripped == source }
@@ -261,7 +262,6 @@ class CodecConformanceTest {
             byteCanonical = true,
             role = "reference",
             replayed = replayed,
-            codecsDriven = codecsDriven,
             // The paragraph's obligation is that `role` and `byte_canonical`
             // stay DISTINCT senses of "canonical" — "both are pinned here so a
             // runner cannot conflate them", in its own words. Both are asserted
@@ -283,7 +283,6 @@ class CodecConformanceTest {
         val fixture = loadFixture(path)
 
         var replayed = 0
-        val codecsDriven = linkedSetOf<String>()
         for (scenario in ConformanceScenarios.of(path, fixture)) {
             val where = scenario.getValue("id").jsonPrimitive.content
             val source = IpcMessage.fromJson(scenario.getValue("wire"))
@@ -332,7 +331,6 @@ class CodecConformanceTest {
             // never re-asserted, so a codec that silently drops a field cannot
             // be masked by reading the input back.
             val roundTripped = IpcMessage.decodeMsgpack(bytes)
-            codecsDriven += "msgpack"
             keys.assertBoolean("round_trip_equals_source") { roundTripped == source }
             assertValues(keys, roundTripped)
             keys.requireAllSatisfied()
@@ -349,7 +347,6 @@ class CodecConformanceTest {
             byteCanonical = false,
             role = "cross_language_binary_default",
             replayed = replayed,
-            codecsDriven = codecsDriven,
             // The paragraph states two things and names the key for the second:
             // `byte_canonical: false` is why this fixture pins decoded values
             // instead of golden bytes, and the named-field map rule "is what
