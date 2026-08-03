@@ -216,6 +216,12 @@ class NodeIdExactRangeConformanceTest {
         // The fixture-level block, asserted AFTER the replay so each key is a
         // claim about what the run observed.
         val meta = AssertionKeys("$path assertions", fixture.getValue("assertions").jsonObject)
+        // `required_of_binding` stays fixture-vs-literal ON PURPOSE, with
+        // `byte_canonical`, `self_describing`, `codec` and `role` in
+        // [CodecConformanceTest]. They are corpus DECLARATIONS a binding pins by
+        // agreement, not observations a single run can produce a comparable value
+        // for, so leaving them is a real limit on the rule rather than an instance
+        // of the vacuity the keys below were fixed for (`#lznullformblind`).
         meta.assertString("required_of_binding") { "MUST" }
         meta.assertInt("scenario_count") { accepted + refused }
         meta.assertKeyWith("codecs") { want ->

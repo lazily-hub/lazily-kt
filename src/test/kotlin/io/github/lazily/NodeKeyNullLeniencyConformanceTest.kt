@@ -69,13 +69,33 @@ class NodeKeyNullLeniencyConformanceTest {
         return ByteArray(hex.length / 2) { i -> hex.substring(i * 2, i * 2 + 2).toInt(16).toByte() }
     }
 
-    private fun decode(scenario: JsonObject): IpcMessage =
+    /**
+     * The vocabularies the replay really dispatched into.
+     *
+     * Recorded INSIDE the dispatch arms, never tallied from the scenario's own
+     * `codec` / `field` labels afterwards. A tally of labels agrees with the
+     * fixture whatever the runner did with them — it is green over a runner that
+     * reads the token and enters no branch at all, which is the same vacuity the
+     * literal comparisons these sets replaced had (`#lznullformblind`).
+     */
+    private class Replayed {
+        val codecs = linkedSetOf<String>()
+        val fields = linkedSetOf<String>()
+        val keyForms = linkedSetOf<String>()
+    }
+
+    private fun decode(scenario: JsonObject, seen: Replayed): IpcMessage =
         when (val codec = scenario.getValue("codec").jsonPrimitive.content) {
-            "json" -> IpcMessage.decodeJson(scenario.getValue("wire_json").jsonPrimitive.content)
-            "msgpack" ->
+            "json" -> {
+                seen.codecs += "json"
+                IpcMessage.decodeJson(scenario.getValue("wire_json").jsonPrimitive.content)
+            }
+            "msgpack" -> {
+                seen.codecs += "msgpack"
                 IpcMessage.decodeMsgpack(
                     hexToBytes(scenario.getValue("wire_msgpack_hex").jsonPrimitive.content),
                 )
+            }
             else -> error("unknown codec: $codec")
         }
 
@@ -99,16 +119,20 @@ class NodeKeyNullLeniencyConformanceTest {
      * fixture is about survives the read in both codecs. Fails closed on a codec
      * this runner does not implement (`#lzscenariobodyskip`).
      */
-    private fun rawWire(scenario: JsonObject): JsonObject =
+    private fun rawWire(scenario: JsonObject, seen: Replayed): JsonObject =
         when (val codec = scenario.getValue("codec").jsonPrimitive.content) {
-            "json" ->
+            "json" -> {
+                seen.codecs += "json"
                 json
                     .parseToJsonElement(scenario.getValue("wire_json").jsonPrimitive.content)
                     .jsonObject
-            "msgpack" ->
+            }
+            "msgpack" -> {
+                seen.codecs += "msgpack"
                 MsgpackCodec
                     .unpack(hexToBytes(scenario.getValue("wire_msgpack_hex").jsonPrimitive.content))
                     .jsonObject
+            }
             else -> error("unknown codec: $codec")
         }
 
@@ -119,10 +143,14 @@ class NodeKeyNullLeniencyConformanceTest {
      * Shared by the RAW-WIRE control and the RE-ENCODED inspection so both read
      * the same slot of the same shape. Fails closed on an unknown field.
      */
-    private fun nodeKeySite(scenario: JsonObject, wire: JsonObject): JsonObject =
+    private fun nodeKeySite(scenario: JsonObject, wire: JsonObject, seen: Replayed): JsonObject =
         when (val field = scenario.getValue("field").jsonPrimitive.content) {
-            "snapshot" -> wire.getValue("Snapshot").jsonObject.getValue("nodes").jsonArray[0].jsonObject
-            "node_add" ->
+            "snapshot" -> {
+                seen.fields += "snapshot"
+                wire.getValue("Snapshot").jsonObject.getValue("nodes").jsonArray[0].jsonObject
+            }
+            "node_add" -> {
+                seen.fields += "node_add"
                 wire
                     .getValue("Delta")
                     .jsonObject
@@ -131,6 +159,7 @@ class NodeKeyNullLeniencyConformanceTest {
                     .jsonObject
                     .getValue("NodeAdd")
                     .jsonObject
+            }
             else -> error("unknown field: $field")
         }
 
@@ -159,8 +188,8 @@ class NodeKeyNullLeniencyConformanceTest {
      * Fails closed on a form it cannot name: a slot holding something that is
      * neither absent, nor nil, nor a readable key is not silently bucketed.
      */
-    private fun wireKeyForm(scenario: JsonObject): String {
-        val site = nodeKeySite(scenario, rawWire(scenario))
+    private fun wireKeyForm(scenario: JsonObject, seen: Replayed): String {
+        val site = nodeKeySite(scenario, rawWire(scenario, seen), seen)
         val slot = site["key"]
         val form =
             when {
@@ -171,6 +200,7 @@ class NodeKeyNullLeniencyConformanceTest {
                 else -> "present"
             }
         check(form in KNOWN_KEY_FORMS) { "unclassifiable `key` slot on the raw wire: $slot" }
+        seen.keyForms += form
         return form
     }
 
@@ -249,7 +279,7 @@ class NodeKeyNullLeniencyConformanceTest {
      * distinguish "field absent" from "field present and null", which is the
      * whole distinction under test.
      */
-    private fun reencodedNode(scenario: JsonObject, message: IpcMessage): JsonObject {
+    private fun reencodedNode(scenario: JsonObject, message: IpcMessage, seen: Replayed): JsonObject {
         val wire =
             if (scenario.getValue("codec").jsonPrimitive.content == "msgpack") {
                 // Through the msgpack codec specifically. Both codecs derive from
@@ -260,7 +290,7 @@ class NodeKeyNullLeniencyConformanceTest {
             } else {
                 message.toJson()
             }
-        return nodeKeySite(scenario, wire)
+        return nodeKeySite(scenario, wire, seen)
     }
 
     private fun decodedKey(scenario: JsonObject, message: IpcMessage): String? =
@@ -291,13 +321,11 @@ class NodeKeyNullLeniencyConformanceTest {
         var replayed = 0
         var keysDecoded = 0
 
-        // The three vocabularies the run really dispatched on. `key_forms` is
-        // filled from the RAW WIRE, never from the fixture's own labels, so the
-        // set assertion at the end is a claim about bytes that reached the
-        // decoder rather than about the file on disk (`#lznullformblind`).
-        val codecsReplayed = linkedSetOf<String>()
-        val fieldsReplayed = linkedSetOf<String>()
-        val formsReplayed = linkedSetOf<String>()
+        // The three vocabularies, filled INSIDE the dispatch arms rather than
+        // from the scenario's own labels — and `key_forms` from the RAW WIRE, so
+        // the set assertions at the end are claims about branches really entered
+        // and bytes really read, not about the file on disk (`#lznullformblind`).
+        val seen = Replayed()
 
         for (scenario in ConformanceScenarios.of(path, fixture)) {
             val where = scenario.getValue("id").jsonPrimitive.content
@@ -310,16 +338,13 @@ class NodeKeyNullLeniencyConformanceTest {
             val sc = AssertionKeys("$path $where scenario", scenario)
             replayed += 1
 
-            codecsReplayed += scenario.getValue("codec").jsonPrimitive.content
-            fieldsReplayed += scenario.getValue("field").jsonPrimitive.content
-
             // THE RAW-WIRE CONTROL. Classified off the scenario's own bytes
             // before the typed decoder runs, then compared with the form the
             // scenario DECLARES. A scenario tagged `null` whose frame omits the
             // entry — or a corpus edit that quietly made the two families the
             // same bytes — reddens here, and here is the only place it can
             // (`#lznullformblind`).
-            val onWire = wireKeyForm(scenario)
+            val onWire = wireKeyForm(scenario, seen)
             // The second witness, which reaches the same answer without going
             // through `MsgpackCodec.unpack` — this binding's own schema-less
             // decoder, and therefore a code path a control built on it cannot
@@ -334,7 +359,6 @@ class NodeKeyNullLeniencyConformanceTest {
                     "disagree about the `key` slot — one of the two reads is wrong, and a control " +
                     "that shares a code path with the thing it controls cannot tell you which",
             )
-            formsReplayed += onWire
             sc.assertString("key_form") { onWire }
 
             sc.assertString("name") { where }
@@ -358,7 +382,7 @@ class NodeKeyNullLeniencyConformanceTest {
                     "by the decoded and re-encoded values asserted below",
             )
 
-            val message = decode(scenario)
+            val message = decode(scenario, seen)
             sc.assertString("variant") { variantOf(message) }
             sc.requireAllSatisfied()
 
@@ -371,7 +395,7 @@ class NodeKeyNullLeniencyConformanceTest {
                 assertEquals(expected, key, "decoded_key")
             }
 
-            val node = reencodedNode(scenario, message)
+            val node = reencodedNode(scenario, message, seen)
             // The encode half, which no assertion over the decoded value reaches.
             keys.assertKeyWith("reencoded_key_field_present") { want ->
                 val encoded = node["key"]
@@ -419,19 +443,25 @@ class NodeKeyNullLeniencyConformanceTest {
         // literals: all four were green over a runner that decodes nothing,
         // which is the exact vacuity `anti_vacuity` exists to name.
         val meta = AssertionKeys("$path assertions", fixture.getValue("assertions").jsonObject)
+        // `required_of_binding` stays fixture-vs-literal ON PURPOSE, with
+        // `byte_canonical`, `self_describing`, `codec` and `role` in
+        // [CodecConformanceTest]. They are corpus DECLARATIONS a binding pins by
+        // agreement, not observations a single run can produce a comparable value
+        // for, so leaving them is a real limit on the rule rather than an instance
+        // of the vacuity the keys below were fixed for (`#lznullformblind`).
         meta.assertString("required_of_binding") { "MUST" }
         meta.assertInt("scenario_count") { replayed }
         meta.assertKeyWith("codecs") { want ->
             assertEquals(
                 want.jsonArray.map { it.jsonPrimitive.content }.toSet(),
-                codecsReplayed,
+                seen.codecs,
                 "$path: every declared codec must have been driven by some scenario",
             )
         }
         meta.assertKeyWith("fields") { want ->
             assertEquals(
                 want.jsonArray.map { it.jsonPrimitive.content }.toSet(),
-                fieldsReplayed,
+                seen.fields,
                 "$path: every declared optional-key site must have been exercised by some scenario",
             )
         }
@@ -442,7 +472,7 @@ class NodeKeyNullLeniencyConformanceTest {
         meta.assertKeyWith("key_forms") { want ->
             assertEquals(
                 want.jsonArray.map { it.jsonPrimitive.content }.toSet(),
-                formsReplayed,
+                seen.keyForms,
                 "$path: every declared wire form of `key` must have been classified off some " +
                     "scenario's own bytes before its decoder ran",
             )

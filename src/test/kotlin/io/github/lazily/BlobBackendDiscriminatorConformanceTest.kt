@@ -131,10 +131,28 @@ class BlobBackendDiscriminatorConformanceTest {
      * form, so the parse under test is inside the library rather than in the
      * runner.
      */
-    private fun decode(scenario: JsonObject): IpcMessage =
+    private fun decode(
+        scenario: JsonObject,
+        /**
+         * Records the codec entry point this call really dispatched into.
+         *
+         * `assertions.codecs` used to be compared against a set tallied from the
+         * scenario's own `codec` LABEL, which agrees with the fixture whatever the
+         * runner did with the token — green over a runner that reads it and enters
+         * no branch. Booking inside the arm makes the set a claim about work
+         * (`#lznullformblind`).
+         */
+        driven: MutableSet<String>,
+    ): IpcMessage =
         when (val codec = scenario.getValue("codec").jsonPrimitive.content) {
-            "json" -> IpcMessage.decodeJson(rawWire(scenario))
-            "msgpack" -> IpcMessage.decodeMsgpack(hexToBytes(rawWire(scenario)))
+            "json" -> {
+                driven += "json"
+                IpcMessage.decodeJson(rawWire(scenario))
+            }
+            "msgpack" -> {
+                driven += "msgpack"
+                IpcMessage.decodeMsgpack(hexToBytes(rawWire(scenario)))
+            }
             else -> error("unknown codec: $codec")
         }
 
@@ -225,8 +243,6 @@ class BlobBackendDiscriminatorConformanceTest {
         // drove, and a failing scenario dropping out of them would turn one red
         // into several unrelated ones.
         tally.backendForms += form
-        tally.codecs += codec
-        tally.outcomes += outcome
 
         // `expect.epoch` was REMOVED in fixture v2 and split into `frame_epoch`
         // and `blob_epoch`. It carried 9 in both places, so a runner reading the
@@ -253,10 +269,14 @@ class BlobBackendDiscriminatorConformanceTest {
             )
         }
 
-        val attempt = runCatching { decode(scenario) }
+        val attempt = runCatching { decode(scenario, tally.codecs) }
 
+        // Booked inside the arm the outcome really selected, never from the label:
+        // the `else` below fails closed, so a vocabulary this runner has no branch
+        // for cannot appear in the set (`#lznullformblind`).
         when (outcome) {
             "reject" -> {
+                tally.outcomes += "reject"
                 tally.rejected += 1
                 val error = attempt.exceptionOrNull()
                 tally.rejectionKinds += rejectionKindOf(error)
@@ -289,6 +309,7 @@ class BlobBackendDiscriminatorConformanceTest {
             }
 
             "accept" -> {
+                tally.outcomes += "accept"
                 tally.accepted += 1
                 val message =
                     attempt.getOrElse { fail("$where: the frame must decode, but it was refused: $it") }
@@ -365,6 +386,12 @@ class BlobBackendDiscriminatorConformanceTest {
         // — after the replay, so each one is a claim about work that happened
         // rather than about the file on disk.
         val meta = AssertionKeys("$path assertions", fixture.getValue("assertions").jsonObject)
+        // `required_of_binding` stays fixture-vs-literal ON PURPOSE, with
+        // `byte_canonical`, `self_describing`, `codec` and `role` in
+        // [CodecConformanceTest]. They are corpus DECLARATIONS a binding pins by
+        // agreement, not observations a single run can produce a comparable value
+        // for, so leaving them is a real limit on the rule rather than an instance
+        // of the vacuity the keys below were fixed for (`#lznullformblind`).
         meta.assertString("required_of_binding") { "MUST" }
         meta.assertInt("scenario_count") { tally.replayed }
         meta.assertStrings("codecs") { tally.codecs.sorted() }
