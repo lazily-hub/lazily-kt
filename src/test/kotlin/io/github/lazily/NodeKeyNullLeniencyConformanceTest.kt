@@ -102,7 +102,16 @@ class NodeKeyNullLeniencyConformanceTest {
         }
 
     @Test
-    fun `NodeKey null-leniency - both wire forms decode as absent, the encoder still omits`() {
+    fun `NodeKey null-leniency - both wire forms decode as absent, the encoder still omits`() =
+        proseScope(path).use { replayFixture() }
+
+    /**
+     * The replay, inside the prose scope that arms [verifyProse]: leaving it
+     * with a discharge claim still pending fails, so a run that names
+     * discharging assertions and never checks the naming is reported rather
+     * than trusted (`#lzprosekeyconvention`).
+     */
+    private fun replayFixture() {
         val fixture = loadFixture()
         val scenarios = fixture.getValue("scenarios").jsonArray
 
@@ -112,19 +121,40 @@ class NodeKeyNullLeniencyConformanceTest {
         meta.assertStrings("codecs") { listOf("json", "msgpack") }
         meta.assertStrings("fields") { listOf("snapshot", "node_add") }
         meta.assertStrings("key_forms") { listOf("omitted", "null", "present") }
-        for (prose in listOf(
+        // The four paragraphs the corpus declares in `assertions.prose`, each
+        // DISCHARGED by the executable keys carrying its obligation
+        // (`#lzprosekeyconvention`). The blanket "it states WHY the fixture is
+        // shaped this way" reason these replaced was true of all four and
+        // checked by nothing.
+        meta.proseKey(
+            // a decoder accepts BOTH forms as absent and constructs a key from
+            // neither — `decoded_key` is the comparison, `key_forms` is what
+            // proves all three forms were driven.
             "clause",
+            listOf("decoded_key", "key_forms"),
+        )
+        meta.proseKey(
+            // the raw-text / raw-hex carriage is what lets an ABSENT map entry
+            // and an explicit nil arrive as different bytes, in both codecs.
             "wire_encoding",
+            listOf("key_forms", "codecs"),
+        )
+        meta.proseKey(
+            // its own words: "`expect.reencoded_key_field_present` is the half
+            // a decode assertion cannot reach".
             "reencode_obligation",
+            listOf("reencoded_key_field_present"),
+        )
+        meta.proseKey(
+            // its own words: "`present` forces a real key through and `omitted`
+            // forces a real decode" — both are `key_forms` entries whose
+            // `decoded_key` is asserted, across every scenario.
             "anti_vacuity",
-            "generator",
-        )) {
-            meta.excuseKey(
-                prose,
-                "prose: it states WHY the fixture is shaped this way; the behaviour it " +
-                    "describes is asserted by the per-scenario decode and re-encode below",
-            )
-        }
+            listOf("decoded_key", "key_forms", "scenario_count"),
+        )
+        // NOT prose: `generator` names an upstream script, not an obligation,
+        // and the corpus does not declare it.
+        meta.excuseKey("generator", "names the upstream script that mints the fixture, not an obligation")
         meta.requireAllSatisfied()
 
         // Anti-vacuity in both directions. A runner that never decodes reports
@@ -190,5 +220,9 @@ class NodeKeyNullLeniencyConformanceTest {
             "only the `present` scenarios carry a key; a runner reporting absent for " +
                 "everything satisfies the null cases trivially",
         )
+
+        // Rule 6: every key named by a discharge above must be one this
+        // fixture's run really ASSERTED.
+        verifyProse(path)
     }
 }

@@ -165,6 +165,7 @@ class CodecConformanceTest {
         codec: String,
         byteCanonical: Boolean,
         role: String,
+        noteDischargedBy: List<String>,
     ) {
         assertEquals(codec, fixture.getValue("codec").jsonPrimitive.content, "$path: fixture codec field")
         val meta = AssertionKeys("$path assertions", fixture.getValue("assertions").jsonObject)
@@ -174,10 +175,15 @@ class CodecConformanceTest {
         meta.assertString("required_of_binding") { "MUST" }
         meta.assertString("role") { role }
         meta.assertInt("scenario_count") { fixture.getValue("scenarios").jsonArray.size }
-        meta.excuseKey(
-            "note",
-            "prose: documents the reference-vs-byte-canonical distinction, states nothing the replay observes",
-        )
+        // `note` is the one key the corpus declares prose here, so it is
+        // DISCHARGED rather than excused (`#lzprosekeyconvention`). It is also
+        // the case the reserved-annotation exemption would have swallowed: a
+        // key named `note` is exempt BY NAME in a per-step block, and the
+        // declaration is what overrides that for a top-level paragraph stating
+        // an obligation. The excuse it replaces — "states nothing the replay
+        // observes" — was false: both senses of "canonical" it keeps apart are
+        // pinned by keys below.
+        meta.proseKey("note", noteDischargedBy)
         meta.requireAllSatisfied()
     }
 
@@ -197,10 +203,28 @@ class CodecConformanceTest {
             ).keys.sorted()
 
     @Test
-    fun `json frames round-trip through the reference codec`() {
+    fun `json frames round-trip through the reference codec`() =
+        proseScope("codec/frame_roundtrip_json.json").use { replayJsonFixture() }
+
+    /**
+     * The json replay, inside the prose scope that arms [verifyProse]: leaving
+     * it with a discharge claim still pending fails (`#lzprosekeyconvention`).
+     */
+    private fun replayJsonFixture() {
         val path = "codec/frame_roundtrip_json.json"
         val fixture = loadFixture(path)
-        assertFixtureBlock(path, fixture, codec = "json", byteCanonical = true, role = "reference")
+        assertFixtureBlock(
+            path,
+            fixture,
+            codec = "json",
+            byteCanonical = true,
+            role = "reference",
+            // The paragraph's obligation is that `role` and `byte_canonical`
+            // stay DISTINCT senses of "canonical" — "both are pinned here so a
+            // runner cannot conflate them", in its own words. Both are asserted
+            // above, against different observations.
+            noteDischargedBy = listOf("role", "byte_canonical"),
+        )
 
         var replayed = 0
         for (scenario in ConformanceScenarios.of(path, fixture)) {
@@ -224,10 +248,17 @@ class CodecConformanceTest {
             replayed += 1
         }
         assertEquals(3, replayed, "one scenario per IpcMessage variant")
+        verifyProse(path)
     }
 
     @Test
-    fun `msgpack frames round-trip through the cross-language binary default`() {
+    fun `msgpack frames round-trip through the cross-language binary default`() =
+        proseScope("codec/frame_roundtrip_msgpack.json").use { replayMsgpackFixture() }
+
+    /**
+     * The msgpack replay, inside the prose scope that arms [verifyProse].
+     */
+    private fun replayMsgpackFixture() {
         val path = "codec/frame_roundtrip_msgpack.json"
         val fixture = loadFixture(path)
         assertFixtureBlock(
@@ -236,6 +267,13 @@ class CodecConformanceTest {
             codec = "msgpack",
             byteCanonical = false,
             role = "cross_language_binary_default",
+            // The paragraph states two things and names the key for the second:
+            // `byte_canonical: false` is why this fixture pins decoded values
+            // instead of golden bytes, and the named-field map rule "is what
+            // `encoded_body_field_names` below verifies". That key is asserted
+            // per scenario, AFTER this block — which is why the ledger is
+            // fixture-scoped rather than block-scoped.
+            noteDischargedBy = listOf("byte_canonical", "encoded_body_field_names"),
         )
 
         var replayed = 0
@@ -293,6 +331,7 @@ class CodecConformanceTest {
             replayed += 1
         }
         assertEquals(3, replayed, "one scenario per IpcMessage variant")
+        verifyProse(path)
     }
 
     /**

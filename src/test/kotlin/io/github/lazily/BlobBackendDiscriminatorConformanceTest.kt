@@ -326,7 +326,17 @@ class BlobBackendDiscriminatorConformanceTest {
     }
 
     @Test
-    fun `an omitted or null blob backend decodes as shm and a bad backend is refused`() {
+    fun `an omitted or null blob backend decodes as shm and a bad backend is refused`() =
+        proseScope(path).use { replayFixture() }
+
+    /**
+     * The replay, inside the prose scope that arms [verifyProse].
+     *
+     * The scope is the seam: leaving it with a discharge claim still pending
+     * fails, so a run that names discharging assertions and never checks the
+     * naming is reported rather than trusted (`#lzprosekeyconvention`).
+     */
+    private fun replayFixture() {
         val fixture = loadFixture()
         val scenarios = fixture.getValue("scenarios").jsonArray
         val tally = Tally()
@@ -390,30 +400,77 @@ class BlobBackendDiscriminatorConformanceTest {
                     "scenario — a backend nothing decodes to is a vocabulary the binding does not have",
             )
         }
-        for ((prose, proof) in listOf(
-            "clause" to "the per-scenario decode below drives every arm of it",
-            "wire_encoding" to
-                "wireCarriesBackendField / wireCarriesForm assert the raw bytes match each " +
-                "scenario's declared form, which is the fact this prose explains",
-            "reject_obligation" to "asserted per scenario by `error_names_token`",
-            "backend_form_vocabulary" to
-                "its two obligations are asserted by `backend_forms` above and by the " +
-                "every-backend-decodes-to-something set difference inside `backends`",
-            "null_form" to
-                "asserted by the backend_null_* scenarios — `decoded_backend` is shm and " +
-                "`reencoded_backend_field_present` is false, so the null does not survive the trip",
-            "non_string_form" to
-                "asserted by the backend_non_string_* scenarios — `rejection_kind` is matched " +
-                "against the exception TYPE and `rejection_is_decode_error` against the family",
-            "epoch_disambiguation" to
-                "asserted by the separate `frame_epoch` / `blob_epoch` reads per scenario and by " +
-                "the frameEpochs-vs-blobEpochs disjointness check below",
-            "anti_vacuity" to "the four controls it names are the tallies asserted below",
-            "theorem" to "prose: names the lazily-formal theorem this clause discharges",
-            "generator" to "prose: names the upstream script that mints the fixture",
-        )) {
-            meta.excuseKey(prose, "prose — $proof")
-        }
+        // The nine paragraphs the corpus declares in `assertions.prose`, each
+        // DISCHARGED by the executable keys that carry its obligation
+        // (`#lzprosekeyconvention`). Not excused: a reason naming the
+        // discharging assertion in words is unfalsifiable, and this fixture is
+        // the one that proved it — nine bindings replayed these same paragraphs
+        // and produced four different treatments. Every key named below is
+        // asserted by this run, and `verifyProse` at the end checks that.
+        meta.proseKey(
+            // omitted/null decode as shm; a present unknown is REFUSED through
+            // the documented family, naming the token, never normalized.
+            "clause",
+            listOf("decoded_backend", "rejected", "rejection_is_decode_error", "error_names_token"),
+        )
+        meta.proseKey(
+            // the raw-text / raw-hex carriage is what lets every declared wire
+            // form — including the two that are not tokens — reach the decoder
+            // in both codecs at all.
+            "wire_encoding",
+            listOf("codecs", "backend_forms"),
+        )
+        meta.proseKey(
+            // its own words: "a runner MUST check that every backend in
+            // `assertions.backends` appears as the `decoded_backend` of some
+            // accept scenario" — the set difference inside `backends`.
+            "backend_form_vocabulary",
+            listOf("backend_forms", "backends", "decoded_backend"),
+        )
+        meta.proseKey(
+            // its own words: "`error_names_token` is the assertion that
+            // separates them" — a refusal for the stated reason, not a bare
+            // is-error.
+            "reject_obligation",
+            listOf("error_names_token", "rejection_kind"),
+        )
+        meta.proseKey(
+            // null is the ABSENT form: it decodes as shm and does not survive
+            // the re-encode.
+            "null_form",
+            listOf("decoded_backend", "reencoded_backend_field_present"),
+        )
+        meta.proseKey(
+            // refused, and refused through the SAME family — `rejection_kind`
+            // is which of the two refusals, `rejection_is_decode_error` is the
+            // family.
+            "non_string_form",
+            listOf("rejected", "rejection_is_decode_error", "rejection_kind"),
+        )
+        meta.proseKey(
+            // the spec's own worked example: two epochs, two sources, asserted
+            // separately per scenario.
+            "epoch_disambiguation",
+            listOf("frame_epoch", "blob_epoch"),
+        )
+        meta.proseKey(
+            // its four controls, in order: a real decode and the field actually
+            // READ (`decoded_backend`), the encoder half
+            // (`reencoded_backend_field_present`), the vocabulary (`backends`),
+            // and that every scenario ran (`scenario_count`).
+            "anti_vacuity",
+            listOf("decoded_backend", "reencoded_backend_field_present", "backends", "scenario_count"),
+        )
+        meta.proseKey(
+            // `resolve_wrong_backend`: an unknown kind is refused rather than
+            // routed. Observably, nothing decodes to a backend it did not
+            // carry, and the unknown token never decodes at all.
+            "theorem",
+            listOf("rejected", "decoded_backend"),
+        )
+        // NOT prose: `generator` names an upstream script, not an obligation,
+        // and the corpus does not declare it.
+        meta.excuseKey("generator", "names the upstream script that mints the fixture, not an obligation")
         meta.requireAllSatisfied()
 
         // Anti-vacuity. A runner that refused everything would satisfy all four
@@ -444,5 +501,9 @@ class BlobBackendDiscriminatorConformanceTest {
             "the frame epoch and the descriptor epoch must not be the same number, or reading " +
                 "either one satisfies both assertions",
         )
+
+        // Rule 6, and the whole point of the convention: every key named by a
+        // discharge above must be one this fixture's run really ASSERTED.
+        verifyProse(path)
     }
 }

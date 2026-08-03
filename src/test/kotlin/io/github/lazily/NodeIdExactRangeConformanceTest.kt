@@ -89,22 +89,20 @@ class NodeIdExactRangeConformanceTest {
         }
 
     @Test
-    fun `NodeId exact-representation bound is enforced by refusal, never rounding`() {
-        val fixture = loadFixture()
-        val scenarios = fixture.getValue("scenarios").jsonArray
+    fun `NodeId exact-representation bound is enforced by refusal, never rounding`() =
+        proseScope(path).use { replayFixture() }
 
-        val meta = AssertionKeys("$path assertions", fixture.getValue("assertions").jsonObject)
-        meta.assertString("required_of_binding") { "MUST" }
-        meta.assertInt("scenario_count") { scenarios.size }
-        meta.assertStrings("codecs") { listOf("json", "msgpack") }
-        for (prose in listOf("clause", "wire_encoding", "outcomes", "anti_vacuity", "generator")) {
-            meta.excuseKey(
-                prose,
-                "prose: it states WHY the fixture is shaped this way; the behaviour it " +
-                    "describes is asserted by the per-scenario decode below",
-            )
-        }
-        meta.requireAllSatisfied()
+    /**
+     * The replay, inside the prose scope that arms [verifyProse]: leaving it
+     * with a discharge claim still pending fails, so a run that names
+     * discharging assertions and never checks the naming is reported rather
+     * than trusted (`#lzprosekeyconvention`).
+     */
+    private fun replayFixture() {
+        val fixture = loadFixture()
+        // The outcome vocabulary the run actually drove, so `assertions.outcomes`
+        // is a claim about work that happened rather than about the file on disk.
+        val observedOutcomes = linkedSetOf<String>()
 
         // Anti-vacuity. `exact_or_reject` is satisfied by a runner that decodes
         // nothing and calls everything refused — and lazily-kt really does
@@ -133,6 +131,7 @@ class NodeIdExactRangeConformanceTest {
                 if (outcome == "exact") {
                     assertTrue(representable, "$where: fixture marks an unrepresentable identifier `exact`")
                 }
+                observedOutcomes += outcome
             }
 
             val message = decode(scenario)
@@ -199,5 +198,55 @@ class NodeIdExactRangeConformanceTest {
         // stopped refusing, and one that stopped decoding, are each a failure.
         assertEquals(4, accepted, "lazily-kt decodes the four scenarios inside [0, 2^63)")
         assertEquals(2, refused, "lazily-kt refuses both u64::MAX identifiers")
+
+        // The fixture-level block, asserted AFTER the replay so each key is a
+        // claim about what the run observed.
+        val meta = AssertionKeys("$path assertions", fixture.getValue("assertions").jsonObject)
+        meta.assertString("required_of_binding") { "MUST" }
+        meta.assertInt("scenario_count") { accepted + refused }
+        meta.assertStrings("codecs") { listOf("json", "msgpack") }
+        // NOT a prose key, and the corpus does not declare it one: `outcomes`
+        // maps a VOCABULARY to English glosses, so the assertion is the key set
+        // and the glosses ride along (`#lzprosekeyconvention` § Definition). It
+        // used to be excused as prose, which left the vocabulary unchecked — a
+        // scenario carrying a third outcome would have passed.
+        meta.assertKeyWith("outcomes") { want ->
+            assertEquals(
+                want.jsonObject.keys,
+                observedOutcomes,
+                "$path: every declared outcome must have been driven by some scenario",
+            )
+        }
+
+        // The three paragraphs the corpus declares in `assertions.prose`, each
+        // DISCHARGED by the executable keys carrying its obligation.
+        meta.proseKey(
+            // reject rather than round: `node_id_decimal` is the discriminating
+            // comparison — a neighbouring identifier is visible rather than
+            // approximately right — and `outcome` is which half applies.
+            "clause",
+            listOf("node_id_decimal", "outcome"),
+        )
+        meta.proseKey(
+            // its own words: a runner "MUST compare the decoded identifier by
+            // its decimal rendering", through the codec under test, in both.
+            "wire_encoding",
+            listOf("node_id_decimal", "codecs"),
+        )
+        meta.proseKey(
+            // its own words: "the two `exact` scenarios are the control" — the
+            // outcome vocabulary plus the decimal comparison, over every
+            // scenario.
+            "anti_vacuity",
+            listOf("outcome", "node_id_decimal", "outcomes", "scenario_count"),
+        )
+        // NOT prose: `generator` names an upstream script, not an obligation,
+        // and the corpus does not declare it.
+        meta.excuseKey("generator", "names the upstream script that mints the fixture, not an obligation")
+        meta.requireAllSatisfied()
+
+        // Rule 6: every key named by a discharge above must be one this
+        // fixture's run really ASSERTED.
+        verifyProse(path)
     }
 }
