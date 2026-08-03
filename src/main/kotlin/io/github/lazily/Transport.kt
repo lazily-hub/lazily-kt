@@ -68,13 +68,19 @@ enum class BlobBackendKind(
          * guarantee is meant to be structural, discharged by routing; normalization
          * downgrades it to a probabilistic one discharged by a 64-bit checksum,
          * against a backend this build genuinely resolves.
+         *
+         * The refusal is an [IpcDecodeException.UnknownBlobBackend] — a member of
+         * the ONE decode-error family, so the caller catching it also catches the
+         * non-string refusal `ShmBlobRef.fromJson` raises. It is still an
+         * `IllegalArgumentException`, which is what this function used to throw
+         * bare, so the published contract is unchanged.
          */
         fun fromWire(s: String): BlobBackendKind =
             when (s) {
                 "shm" -> Shm
                 "arrow" -> Arrow
                 "in_process" -> InProcess
-                else -> throw IllegalArgumentException("unknown blob backend: $s")
+                else -> throw IpcDecodeException.UnknownBlobBackend(s)
             }
     }
 }

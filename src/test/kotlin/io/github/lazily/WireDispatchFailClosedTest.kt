@@ -1,6 +1,7 @@
 package io.github.lazily
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
@@ -49,6 +50,33 @@ class WireDispatchFailClosedTest {
         assertTrue(ref.backend.isDefault)
     }
 
+    /**
+     * PINNED LENIENCY. An explicit `"backend": null` is the ABSENT form, not a
+     * present-unknown one, and decodes as [BlobBackendKind.Shm] — the
+     * `#lzkeynullstrict` rule, not the unknown-token rule.
+     *
+     * This site used to REFUSE it: `JsonNull` is a `JsonPrimitive` whose `isString`
+     * is false, so the null fell into the non-string arm and a frame a serde-style
+     * peer emits whenever it forgets `skip_serializing_if` came back as a decode
+     * error. The null does not survive the round trip either — the backend is the
+     * default, so `toJson` omits the field.
+     */
+    @Test
+    fun explicitNullBackendDecodesAsShmAndIsNotReEmitted() {
+        val ref = ShmBlobRef.fromJson(blobRefJson { put("backend", JsonNull) })
+        assertEquals(BlobBackendKind.Shm, ref.backend)
+        assertTrue(!ref.toJson().containsKey("backend"), "the null must not survive a round trip")
+
+        // The msgpack half: nil (0xc0) unpacks to the same JsonNull.
+        assertEquals(
+            BlobBackendKind.Shm,
+            ShmBlobRef
+                .fromJson(
+                    MsgpackCodec.unpack(MsgpackCodec.pack(blobRefJson { put("backend", JsonNull) })),
+                ).backend,
+        )
+    }
+
     /** A known non-default backend string still round-trips exactly. */
     @Test
     fun knownBackendStringDecodesExactly() {
@@ -86,9 +114,10 @@ class WireDispatchFailClosedTest {
     fun unknownBackendTokenIsRejectedAndNamesTheToken() {
         for (bogus in listOf("quantum", "rdma", "SHM", "Arrow", "in-process", "")) {
             val e =
-                assertFailsWith<IllegalArgumentException>("backend=$bogus must be rejected") {
+                assertFailsWith<IpcDecodeException.UnknownBlobBackend>("backend=$bogus must be rejected") {
                     ShmBlobRef.fromJson(blobRefJson { put("backend", bogus) })
                 }
+            assertEquals(bogus, e.token)
             assertTrue(
                 e.message!!.contains("unknown blob backend") && e.message!!.contains(bogus),
                 "message must name the offending token, got: ${e.message}",
@@ -97,29 +126,38 @@ class WireDispatchFailClosedTest {
     }
 
     /**
-     * FAIL CLOSED. A `backend` that is present but not a JSON string is a shape
-     * violation, not a forward-compat backend name. It used to be absorbed as Shm by
-     * the `as? JsonPrimitive` cast.
+     * FAIL CLOSED. A `backend` that is present, not null and not a JSON string is a
+     * shape violation, not a forward-compat backend name. It used to be absorbed as
+     * Shm by the `as? JsonPrimitive` cast.
+     *
+     * The refusal arrives through the SAME decode-error family the unknown token
+     * uses ([IpcDecodeException]), which is the half that used to be missing: the
+     * two refusals were an `IllegalStateException` and an `IllegalArgumentException`,
+     * neither a subtype of the other, so a caller guarding a decode with the
+     * documented one had the other fail past the handler.
      */
     @Test
     fun nonStringBackendIsRejected() {
-        val numeric = assertFailsWith<IllegalStateException> {
-            ShmBlobRef.fromJson(blobRefJson { put("backend", 7) })
-        }
+        val numeric =
+            assertFailsWith<IpcDecodeException.NonStringBlobBackend> {
+                ShmBlobRef.fromJson(blobRefJson { put("backend", 7) })
+            }
         assertTrue(numeric.message!!.contains("backend must be a string"), numeric.message!!)
 
-        assertFailsWith<IllegalStateException> {
+        assertFailsWith<IpcDecodeException.NonStringBlobBackend> {
             ShmBlobRef.fromJson(
-                json.parseToJsonElement(
-                    """{"offset":0,"len":3,"generation":1,"epoch":0,"checksum":42,"backend":{"name":"arrow"}}""",
-                ).jsonObject,
+                json
+                    .parseToJsonElement(
+                        """{"offset":0,"len":3,"generation":1,"epoch":0,"checksum":42,"backend":{"name":"arrow"}}""",
+                    ).jsonObject,
             )
         }
-        assertFailsWith<IllegalStateException> {
+        assertFailsWith<IpcDecodeException.NonStringBlobBackend> {
             ShmBlobRef.fromJson(
-                json.parseToJsonElement(
-                    """{"offset":0,"len":3,"generation":1,"epoch":0,"checksum":42,"backend":true}""",
-                ).jsonObject,
+                json
+                    .parseToJsonElement(
+                        """{"offset":0,"len":3,"generation":1,"epoch":0,"checksum":42,"backend":true}""",
+                    ).jsonObject,
             )
         }
     }
@@ -134,7 +172,7 @@ class WireDispatchFailClosedTest {
     @Test
     fun nonStringBackendIsRejectedOverMsgpackToo() {
         for (bogus in listOf(JsonPrimitive(7), JsonPrimitive(true), buildJsonObject { put("name", "arrow") })) {
-            assertFailsWith<IllegalStateException>("msgpack backend=$bogus must be rejected") {
+            assertFailsWith<IpcDecodeException.NonStringBlobBackend>("msgpack backend=$bogus must be rejected") {
                 ShmBlobRef.fromJson(
                     MsgpackCodec.unpack(MsgpackCodec.pack(blobRefJson { put("backend", bogus) })),
                 )

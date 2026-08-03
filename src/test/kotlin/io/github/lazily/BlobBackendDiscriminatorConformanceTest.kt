@@ -14,15 +14,23 @@ import kotlin.test.fail
 /**
  * Blob-backend discriminator strictness on decode (`#lzblobbackendstrict`).
  *
- * protocol.md § Shared-memory payload path splits `ShmBlobRef.backend` into two
- * facts that look like one and get opposite answers:
+ * protocol.md § Shared-memory payload path splits `ShmBlobRef.backend` into facts
+ * that look like one and get opposite answers:
  *
  * - an **OMITTED** `backend` MUST decode as `shm` — the forward-compatibility
  *   channel, and the only one, because every descriptor minted before the field
  *   existed has that shape. A conforming encoder MUST omit it for `shm` too, so a
  *   pre-field descriptor round-trips byte-identically.
+ * - an explicit **NULL** `backend` is the same ABSENT form (`#lzkeynullstrict`),
+ *   not a present-unknown one: a serde-style peer that did not apply
+ *   `skip_serializing_if` emits `null` where a conforming encoder omits, so
+ *   refusing it is stricter than the reference implementation on a frame the
+ *   reference implementation produces.
  * - a **PRESENT** `backend` outside the enum MUST be rejected, naming the token,
  *   and MUST NOT be normalized to `shm`, to another backend, or to a sentinel.
+ * - a **PRESENT NON-STRING** `backend` MUST be rejected too, and — the half that
+ *   is easy to miss — through the SAME decode-error family, so the one catch a
+ *   caller already wraps a decode in covers both refusals.
  *
  * lazily-kt normalized the unknown token and documented that as forward-compat.
  * The clause overturns it: a new backend enters by adding an enum value — a spec
@@ -31,9 +39,15 @@ import kotlin.test.fail
  * `shm` table, which is exactly what `resolve_wrong_backend` says never happens.
  *
  * The wire is carried as raw text (json) and lowercase hex (msgpack) on purpose.
- * `schemas/defs.json` closes `backend` to an enum, so the reject frames are
- * schema-INVALID by design and cannot be carried as parsed objects; the runner
- * decodes the raw form rather than re-serializing something the fixture parsed.
+ * `schemas/defs.json` closes `backend` to an enum, so the reject frames — and the
+ * null frames, which are accepts — are schema-INVALID by design and cannot be
+ * carried as parsed objects; the runner decodes the raw form rather than
+ * re-serializing something the fixture parsed.
+ *
+ * Fixture v2 also SPLIT the epoch. `expect.epoch` is gone; `frame_epoch` (the
+ * Delta's) and `blob_epoch` (the descriptor's) are different numbers, so a runner
+ * reading the wrong one now fails instead of satisfying a single key from either
+ * source.
  */
 class BlobBackendDiscriminatorConformanceTest {
     private val json = Json
@@ -64,6 +78,8 @@ class BlobBackendDiscriminatorConformanceTest {
             else -> error("unknown codec: $codec")
         }
 
+    private fun isJson(scenario: JsonObject): Boolean = scenario.getValue("codec").jsonPrimitive.content == "json"
+
     /**
      * Whether the wire frame physically carries a `backend` map entry.
      *
@@ -73,20 +89,42 @@ class BlobBackendDiscriminatorConformanceTest {
      * testing the other case.
      */
     private fun wireCarriesBackendField(scenario: JsonObject): Boolean =
-        when (scenario.getValue("codec").jsonPrimitive.content) {
-            "json" -> rawWire(scenario).contains("\"backend\"")
-            else -> rawWire(scenario).contains(hexOf("backend"))
+        if (isJson(scenario)) {
+            rawWire(scenario).contains("\"backend\"")
+        } else {
+            rawWire(scenario).contains(hexOf("backend"))
         }
 
-    /** Whether the wire frame physically carries [token] as a string. */
-    private fun wireCarriesToken(
+    /**
+     * Whether the wire frame physically carries the VALUE that [form] claims.
+     *
+     * Three of the seven forms are not tokens, so a token substring probe does not
+     * reach them: `omitted` writes no entry, `null` writes a nil and `non_string`
+     * writes an integer where a token belongs. The latter two are matched against
+     * the exact bytes instead, because `contains("null")` would pass on frames that
+     * carry no null at all.
+     */
+    private fun wireCarriesForm(
         scenario: JsonObject,
-        token: String,
-    ): Boolean =
-        when (scenario.getValue("codec").jsonPrimitive.content) {
-            "json" -> rawWire(scenario).contains("\"$token\"")
-            else -> rawWire(scenario).contains(hexOf(token))
+        form: String,
+    ): Boolean {
+        val wire = rawWire(scenario)
+        return when (form) {
+            "null" ->
+                if (isJson(scenario)) {
+                    wire.contains("\"backend\": null")
+                } else {
+                    wire.endsWith(hexOf("backend") + "c0")
+                }
+            "non_string" ->
+                if (isJson(scenario)) {
+                    wire.contains("\"backend\": 7")
+                } else {
+                    wire.endsWith(hexOf("backend") + "07")
+                }
+            else -> if (isJson(scenario)) wire.contains("\"$form\"") else wire.contains(hexOf(form))
         }
+    }
 
     /**
      * Decode a scenario's wire frame through the codec it names, from the RAW
@@ -136,6 +174,23 @@ class BlobBackendDiscriminatorConformanceTest {
     }
 
     /**
+     * Which refusal the library actually raised, in the fixture's own vocabulary.
+     *
+     * `rejection_kind` is asserted against THIS, never used to select an assertion
+     * arm. A discriminator that only picks a branch proves nothing — both reject
+     * scenarios would pass on one undifferentiated "it threw". Answering correctly
+     * requires the library to distinguish the two refusals by TYPE, which is the
+     * same fact `rejection_is_decode_error` needs one level up.
+     */
+    private fun rejectionKindOf(error: Throwable?): String =
+        when (error) {
+            null -> "none — the frame decoded"
+            is IpcDecodeException.UnknownBlobBackend -> "unknown_token"
+            is IpcDecodeException.NonStringBlobBackend -> "non_string"
+            else -> "other(${error::class.simpleName})"
+        }
+
+    /**
      * What the replay observed across the whole fixture, so the anti-vacuity
      * counters are computed from the run rather than declared by it.
      */
@@ -143,9 +198,17 @@ class BlobBackendDiscriminatorConformanceTest {
         var accepted = 0
         var rejected = 0
         val decodedBackends = mutableListOf<String>()
+        val backendForms = linkedSetOf<String>()
+        val rejectionKinds = linkedSetOf<String>()
+        val codecs = linkedSetOf<String>()
+        val outcomes = linkedSetOf<String>()
+        val frameEpochs = linkedSetOf<Long>()
+        val blobEpochs = linkedSetOf<Long>()
+
+        val replayed: Int get() = accepted + rejected
     }
 
-    /** Replay one scenario; throws on the first assertion it fails. */
+    /** Replay one scenario; throws on the first assertion IT fails. */
     private fun replay(
         scenario: JsonObject,
         tally: Tally,
@@ -154,7 +217,25 @@ class BlobBackendDiscriminatorConformanceTest {
         val codec = scenario.getValue("codec").jsonPrimitive.content
         val form = scenario.getValue("backend_form").jsonPrimitive.content
         val outcome = scenario.getValue("outcome").jsonPrimitive.content
-        val keys = AssertionKeys("$path $where", scenario.getValue("expect").jsonObject)
+        val expect = scenario.getValue("expect").jsonObject
+        val keys = AssertionKeys("$path $where", expect)
+
+        // Booked before the first assertion, so a scenario that FAILS still counts
+        // as replayed: the vocabulary checks at the end are about what the runner
+        // drove, and a failing scenario dropping out of them would turn one red
+        // into several unrelated ones.
+        tally.backendForms += form
+        tally.codecs += codec
+        tally.outcomes += outcome
+
+        // `expect.epoch` was REMOVED in fixture v2 and split into `frame_epoch`
+        // and `blob_epoch`. It carried 9 in both places, so a runner reading the
+        // Delta's epoch and one reading the descriptor's both satisfied it. If it
+        // ever comes back, fail here rather than silently re-fusing the two.
+        assertTrue(
+            "epoch" !in expect,
+            "$where: `expect.epoch` is ambiguous and was removed — assert `frame_epoch` and `blob_epoch`",
+        )
 
         // The scenario's declared wire form must match the bytes it carries, in
         // both directions. Without this an omitted-backend assertion could be
@@ -167,8 +248,8 @@ class BlobBackendDiscriminatorConformanceTest {
         )
         if (form != "omitted") {
             assertTrue(
-                wireCarriesToken(scenario, form),
-                "$where: the wire frame does not carry the token `$form`",
+                wireCarriesForm(scenario, form),
+                "$where: the wire frame does not carry the `$form` form of `backend`",
             )
         }
 
@@ -177,19 +258,32 @@ class BlobBackendDiscriminatorConformanceTest {
         when (outcome) {
             "reject" -> {
                 tally.rejected += 1
+                val error = attempt.exceptionOrNull()
+                tally.rejectionKinds += rejectionKindOf(error)
+
                 keys.assertBoolean("rejected") { attempt.isFailure }
+                // The refusal must land in the ONE family a caller guards a decode
+                // with. A frame refused by an exception outside it still fails —
+                // past the handler, where the peer never sees it, which is a
+                // refusal that behaves like a crash.
+                keys.assertBoolean("rejection_is_decode_error") { error is IpcDecodeException }
+                keys.assertString("rejection_kind") { rejectionKindOf(error) }
                 keys.assertKeyWith("error_names_token") { want ->
                     val token = want.jsonPrimitive.content
-                    val error =
-                        attempt.exceptionOrNull()
-                            ?: fail("$where: the frame decoded; a `backend` of `$token` must be refused")
-                    val text = error.message ?: ""
+                    val raised =
+                        error ?: fail("$where: the frame decoded; a `backend` of `$token` must be refused")
+                    val text = raised.message ?: ""
                     // Not a bare is-error assertion: a decoder that refused the
                     // frame because it mis-parsed `checksum` implements none of
                     // the clause and would pass one.
                     assertTrue(
                         text.contains(token),
                         "$where: the error must name the offending token `$token`, got: $text",
+                    )
+                    assertEquals(
+                        token,
+                        (raised as IpcDecodeException.UnknownBlobBackend).token,
+                        "$where: the refusal must CARRY the token, not only mention it in prose",
                     )
                 }
             }
@@ -207,13 +301,18 @@ class BlobBackendDiscriminatorConformanceTest {
                 val op = assertIs<DeltaOp.SlotValue>(delta.ops.single(), "$where: one SlotValue op")
                 val blob = assertIs<IpcValue.SharedBlob>(op.payload, "$where: SharedBlob payload").blob
                 tally.decodedBackends += blob.backend.wire
+                tally.frameEpochs += delta.epoch
+                tally.blobEpochs += blob.epoch
 
                 keys.assertLong("node") { op.node }
                 keys.assertLong("offset") { blob.offset }
                 keys.assertLong("len") { blob.len }
                 keys.assertLong("generation") { blob.generation }
-                keys.assertLong("epoch") { blob.epoch }
                 keys.assertLong("checksum") { blob.checksum }
+                // Two epochs, two sources. The Delta's orders deltas; the
+                // descriptor's is the arena incarnation the blob was written into.
+                keys.assertLong("frame_epoch") { delta.epoch }
+                keys.assertLong("blob_epoch") { blob.epoch }
                 keys.assertString("decoded_backend") { blob.backend.wire }
                 keys.assertBoolean("reencoded_backend_field_present") {
                     reencodedBlobObject(message, codec).containsKey("backend")
@@ -227,48 +326,17 @@ class BlobBackendDiscriminatorConformanceTest {
     }
 
     @Test
-    fun `an omitted blob backend decodes as shm and an unknown token is refused`() {
+    fun `an omitted or null blob backend decodes as shm and a bad backend is refused`() {
         val fixture = loadFixture()
         val scenarios = fixture.getValue("scenarios").jsonArray
-
-        val meta = AssertionKeys("$path assertions", fixture.getValue("assertions").jsonObject)
-        meta.assertString("required_of_binding") { "MUST" }
-        meta.assertInt("scenario_count") { scenarios.size }
-        meta.assertStrings("codecs") {
-            scenarios.map { it.jsonObject.getValue("codec").jsonPrimitive.content }.distinct().sorted()
-        }
-        meta.assertStrings("outcomes") {
-            scenarios.map { it.jsonObject.getValue("outcome").jsonPrimitive.content }.distinct().sorted()
-        }
-        // The enum the clause closes, in the spec's own order — a binding that
-        // grew or lost a backend is a wire break, not a local detail.
-        meta.assertStrings("backends") { BlobBackendKind.entries.map { it.wire } }
-        for (prose in listOf(
-            "clause",
-            "wire_encoding",
-            "reject_obligation",
-            "anti_vacuity",
-            "theorem",
-            "generator",
-        )) {
-            meta.excuseKey(
-                prose,
-                "prose: it states WHY the fixture is shaped this way; the behaviour it " +
-                    "describes is asserted by the per-scenario decode below",
-            )
-        }
-        meta.requireAllSatisfied()
-
-        // Anti-vacuity. A runner that refused everything would satisfy both reject
-        // scenarios, and one that decoded everything as the default would satisfy
-        // four of the six accepts. Both halves are pinned at the end.
         val tally = Tally()
 
         // Every scenario is replayed and REPORTED, rather than the first failure
         // aborting the loop. A fixture whose halves differ only by codec is
         // otherwise half-unfalsifiable: one defect throws on the `json` scenario
-        // and the `msgpack` one never runs, so nothing distinguishes a msgpack
-        // assertion that holds from one that is never reached.
+        // and the `msgpack` twin never runs, so nothing distinguishes a msgpack
+        // assertion that holds from one that is never reached. lazily-kt hit
+        // exactly that while implementing v1.
         val failures = mutableListOf<String>()
         for (scenario in ConformanceScenarios.of(path, fixture)) {
             try {
@@ -283,14 +351,98 @@ class BlobBackendDiscriminatorConformanceTest {
                 failures.joinToString("\n"),
         )
 
-        assertEquals(6, tally.accepted, "six scenarios decode (omitted, explicit shm, arrow — in both codecs)")
-        assertEquals(2, tally.rejected, "both unknown-token scenarios are refused")
-        // A decoder that ignores the discriminator and hardcodes the default
-        // passes every scenario above except this one.
+        // The fixture's vocabulary blocks, asserted against what the run OBSERVED
+        // — after the replay, so each one is a claim about work that happened
+        // rather than about the file on disk.
+        val meta = AssertionKeys("$path assertions", fixture.getValue("assertions").jsonObject)
+        meta.assertString("required_of_binding") { "MUST" }
+        meta.assertInt("scenario_count") { tally.replayed }
+        meta.assertStrings("codecs") { tally.codecs.sorted() }
+        meta.assertStrings("outcomes") { tally.outcomes.sorted() }
+        meta.assertKeyWith("backend_forms") { want ->
+            assertEquals(
+                want.jsonArray.map { it.jsonPrimitive.content }.toSet(),
+                tally.backendForms,
+                "$path: every declared wire form of `backend` must have been replayed",
+            )
+        }
+        meta.assertKeyWith("rejection_kinds") { want ->
+            assertEquals(
+                want.jsonArray.map { it.jsonPrimitive.content }.toSet(),
+                tally.rejectionKinds,
+                "$path: every declared refusal must have been raised, distinguishably",
+            )
+        }
+        // The enum the clause closes, and the VOCABULARY-COMPLETENESS check. The
+        // first half is a wire contract: a binding that grew or lost a backend is
+        // a wire break. The second half is what v1 could not see — it declared
+        // three backends and carried scenarios for two, so a binding knowing only
+        // {shm, arrow} rejected `in_process`, conformingly by the letter of the
+        // clause, and passed all eight. It is a SET DIFFERENCE against what
+        // actually decoded; no count of scenarios reaches it.
+        meta.assertKeyWith("backends") { want ->
+            val declared = want.jsonArray.map { it.jsonPrimitive.content }
+            assertEquals(BlobBackendKind.entries.map { it.wire }, declared, "$path: the closed enum")
+            assertEquals(
+                emptySet(),
+                declared.toSet() - tally.decodedBackends.toSet(),
+                "$path: every declared backend must appear as the decoded_backend of some accept " +
+                    "scenario — a backend nothing decodes to is a vocabulary the binding does not have",
+            )
+        }
+        for ((prose, proof) in listOf(
+            "clause" to "the per-scenario decode below drives every arm of it",
+            "wire_encoding" to
+                "wireCarriesBackendField / wireCarriesForm assert the raw bytes match each " +
+                "scenario's declared form, which is the fact this prose explains",
+            "reject_obligation" to "asserted per scenario by `error_names_token`",
+            "backend_form_vocabulary" to
+                "its two obligations are asserted by `backend_forms` above and by the " +
+                "every-backend-decodes-to-something set difference inside `backends`",
+            "null_form" to
+                "asserted by the backend_null_* scenarios — `decoded_backend` is shm and " +
+                "`reencoded_backend_field_present` is false, so the null does not survive the trip",
+            "non_string_form" to
+                "asserted by the backend_non_string_* scenarios — `rejection_kind` is matched " +
+                "against the exception TYPE and `rejection_is_decode_error` against the family",
+            "epoch_disambiguation" to
+                "asserted by the separate `frame_epoch` / `blob_epoch` reads per scenario and by " +
+                "the frameEpochs-vs-blobEpochs disjointness check below",
+            "anti_vacuity" to "the four controls it names are the tallies asserted below",
+            "theorem" to "prose: names the lazily-formal theorem this clause discharges",
+            "generator" to "prose: names the upstream script that mints the fixture",
+        )) {
+            meta.excuseKey(prose, "prose — $proof")
+        }
+        meta.requireAllSatisfied()
+
+        // Anti-vacuity. A runner that refused everything would satisfy all four
+        // reject scenarios, and one that decoded everything as the default would
+        // satisfy six of the ten accepts.
         assertEquals(
-            listOf("arrow", "arrow", "shm", "shm", "shm", "shm"),
+            10,
+            tally.accepted,
+            "ten scenarios decode (omitted, explicit shm, arrow, in_process, null — in both codecs)",
+        )
+        assertEquals(4, tally.rejected, "both unknown-token and both non-string scenarios are refused")
+        // A decoder that ignores the discriminator and hardcodes the default
+        // passes every accept scenario except the arrow and in_process ones.
+        assertEquals(
+            listOf("arrow", "arrow", "in_process", "in_process", "shm", "shm", "shm", "shm", "shm", "shm"),
             tally.decodedBackends.sorted(),
             "the discriminator is READ, not assumed",
+        )
+        // The two epochs are DIFFERENT numbers from DIFFERENT places. A runner
+        // reading the Delta's epoch where the descriptor's is expected fails the
+        // per-scenario assertion; this pins that they never coincided by accident,
+        // which is exactly what made v1's single `epoch` key unfalsifiable.
+        assertEquals(setOf(9L), tally.frameEpochs, "every frame carries Delta epoch 9")
+        assertEquals(setOf(5L), tally.blobEpochs, "every descriptor carries arena epoch 5")
+        assertEquals(
+            emptySet(),
+            tally.frameEpochs intersect tally.blobEpochs,
+            "the frame epoch and the descriptor epoch must not be the same number, or reading " +
+                "either one satisfies both assertions",
         )
     }
 }

@@ -23,11 +23,65 @@ private val ipcJson =
         prettyPrint = false
     }
 
-private fun JsonElement.asObject(name: String): JsonObject = this as? JsonObject ?: error("$name must be a JSON object")
+/**
+ * The `IpcMessage` decode-error family — every refusal `IpcMessage.decodeJson` /
+ * `IpcMessage.decodeMsgpack` raises against a frame it will not accept.
+ *
+ * One family, because a caller guards a decode with ONE catch. The refusals used
+ * to be split across whatever Kotlin builtin the call site reached for:
+ * [BlobBackendKind.fromWire] threw `IllegalArgumentException`, every shape
+ * violation threw `IllegalStateException` via `error(...)`, and neither is a
+ * subtype of the other — so a peer catching the documented one for an unknown
+ * `backend` token had a non-string `backend` fail straight PAST the handler. The
+ * frame is still refused either way; the difference is that nobody downstream
+ * ever sees it, which is a refusal that behaves like a crash
+ * (`#lzblobbackendstrict`, `conformance/codec/blob_backend_discriminator.json`
+ * `rejection_is_decode_error`).
+ *
+ * It extends `IllegalArgumentException` so the contract [BlobBackendKind.fromWire]
+ * already published stays true — a malformed frame is a bad argument — while the
+ * subclasses below let a caller (and the conformance runner) tell WHICH refusal
+ * it is looking at rather than inferring it from message text.
+ *
+ * The byte-level `msgpack` reader keeps its own [MsgpackCodecException]: that is a
+ * failure to read the frame at all, before any `IpcMessage` shape exists to judge.
+ */
+sealed class IpcDecodeException(
+    message: String,
+) : IllegalArgumentException(message) {
+    /** A frame whose shape is wrong — a missing field, a wrong JSON type, an unknown variant tag. */
+    class Malformed(
+        message: String,
+    ) : IpcDecodeException(message)
 
-private fun JsonElement.asArray(name: String): JsonArray = this as? JsonArray ?: error("$name must be a JSON array")
+    /**
+     * `ShmBlobRef.backend` carried a token outside the closed enum. Names the
+     * token, which is the assertion separating this refusal from a decoder that
+     * happened to reject the frame for an unrelated reason.
+     */
+    class UnknownBlobBackend(
+        val token: String,
+    ) : IpcDecodeException("unknown blob backend: $token")
 
-private fun JsonObject.required(name: String): JsonElement = this[name] ?: error("missing required field: $name")
+    /**
+     * `ShmBlobRef.backend` was present and not a string. There is no token to
+     * name; the clause is written about tokens and this arrives through a door it
+     * does not describe, which is why it is a separate type rather than a
+     * different message.
+     */
+    class NonStringBlobBackend(
+        val raw: JsonElement,
+    ) : IpcDecodeException("ShmBlobRef.backend must be a string, got $raw")
+}
+
+private fun JsonElement.asObject(name: String): JsonObject =
+    this as? JsonObject ?: throw IpcDecodeException.Malformed("$name must be a JSON object")
+
+private fun JsonElement.asArray(name: String): JsonArray =
+    this as? JsonArray ?: throw IpcDecodeException.Malformed("$name must be a JSON array")
+
+private fun JsonObject.required(name: String): JsonElement =
+    this[name] ?: throw IpcDecodeException.Malformed("missing required field: $name")
 
 private fun JsonObject.longField(name: String): Long = required(name).jsonPrimitive.long
 
@@ -192,21 +246,36 @@ data class ShmBlobRef(
                 //  That optionality is the forward-compatibility channel, and the
                 //  only one.
                 //
-                //  PRESENT is a different fact and gets the opposite answer. A
-                //  token outside the enum is REFUSED by BlobBackendKind.fromWire,
-                //  which names it. Normalizing it to Shm would route a non-shm
-                //  descriptor into the shm table, which is precisely what
-                //  resolve_wrong_backend says never happens — see fromWire for why
-                //  the checksum-catches-it defence argues the wrong way.
+                //  EXPLICIT NULL is the ABSENT form too, not a present-unknown one
+                //  (#lzkeynullstrict — the same rule optionalNodeKey applies a few
+                //  lines up, and for the same reason). A serde-style peer that did
+                //  not apply `skip_serializing_if` to an optional field emits
+                //  `null` where a conforming encoder omits, so refusing it is
+                //  stricter than the reference implementation on a frame the
+                //  reference implementation produces. This site DID refuse it: a
+                //  JsonNull is a JsonPrimitive whose `isString` is false, so it
+                //  fell into the non-string arm below and a legal frame came back
+                //  as a decode error. The null does not survive the round trip
+                //  either — the backend is Shm, so toJson omits the field.
                 //
-                //  PRESENT but NOT a JSON string is a shape violation, the class of
-                //  error every sibling field on this descriptor rejects through
-                //  longField. It is refused here rather than coerced into a token.
+                //  PRESENT and a string is a different fact and gets the opposite
+                //  answer. A token outside the enum is REFUSED by
+                //  BlobBackendKind.fromWire, which names it. Normalizing it to Shm
+                //  would route a non-shm descriptor into the shm table, which is
+                //  precisely what resolve_wrong_backend says never happens — see
+                //  fromWire for why the checksum-catches-it defence argues the
+                //  wrong way.
+                //
+                //  PRESENT but NOT a string and NOT null is a shape violation, the
+                //  class of error every sibling field on this descriptor rejects
+                //  through longField. It is refused here rather than coerced into a
+                //  token, and through the same decode-error family the unknown
+                //  token uses so one catch covers both.
                 backend =
-                obj["backend"]?.let { raw ->
+                obj["backend"]?.takeIf { it !is JsonNull }?.let { raw ->
                     val name =
                         (raw as? JsonPrimitive)?.takeIf { it.isString }?.content
-                            ?: error("ShmBlobRef.backend must be a string, got $raw")
+                            ?: throw IpcDecodeException.NonStringBlobBackend(raw)
                     BlobBackendKind.fromWire(name)
                 } ?: BlobBackendKind.Shm,
             )
@@ -263,7 +332,7 @@ sealed interface NodeState {
                 "Payload" -> Payload(bytesFromJson(body))
                 "SharedBlob" -> SharedBlob(ShmBlobRef.fromJson(body))
                 "Opaque" -> Opaque
-                else -> error("unknown NodeState variant: $tag")
+                else -> throw IpcDecodeException.Malformed("unknown NodeState variant: $tag")
             }
         }
     }
@@ -310,7 +379,7 @@ sealed interface IpcValue {
             return when (tag) {
                 "Inline" -> Inline(bytesFromJson(body))
                 "SharedBlob" -> SharedBlob(ShmBlobRef.fromJson(body))
-                else -> error("unknown IpcValue variant: $tag")
+                else -> throw IpcDecodeException.Malformed("unknown IpcValue variant: $tag")
             }
         }
     }
@@ -669,7 +738,7 @@ sealed interface DeltaOp {
                         dependent = body.longField("dependent"),
                         dependency = body.longField("dependency"),
                     )
-                else -> error("unknown DeltaOp variant: $tag")
+                else -> throw IpcDecodeException.Malformed("unknown DeltaOp variant: $tag")
             }
         }
     }
@@ -984,7 +1053,7 @@ sealed interface IpcMessage {
                 "CrdtSync" -> CrdtSyncMessage(CrdtSync.fromJson(body))
                 "ResyncRequest" -> ResyncRequestMessage(ResyncRequest.fromJson(body))
                 "OutboxAck" -> OutboxAckMessage(OutboxAck.fromJson(body))
-                else -> error("unknown IpcMessage variant: $tag")
+                else -> throw IpcDecodeException.Malformed("unknown IpcMessage variant: $tag")
             }
         }
     }
