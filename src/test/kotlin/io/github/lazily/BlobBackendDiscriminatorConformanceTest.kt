@@ -271,10 +271,26 @@ class BlobBackendDiscriminatorConformanceTest {
 
         val attempt = runCatching { decode(scenario, tally.codecs) }
 
-        // Booked inside the arm the outcome really selected, never from the label:
-        // the `else` below fails closed, so a vocabulary this runner has no branch
-        // for cannot appear in the set (`#lznullformblind`).
-        when (outcome) {
+        // Decode ONCE, then assert the label against the real verdict — before
+        // the label is allowed to select anything (`#lznullformblind`). A label
+        // used as a selector is not an assertion: a reject frame this binding
+        // wrongly ACCEPTED took the reject arm anyway and was caught only
+        // indirectly, by whichever key inside it happened to disagree. Now the
+        // contradiction is named where it happens, and the anti-vacuity counters
+        // below are keyed off the verdict rather than off the same label they
+        // are supposed to be guarding.
+        val verdict = if (attempt.isFailure) "reject" else "accept"
+        assertEquals(
+            outcome,
+            verdict,
+            "$where: the scenario declares outcome `$outcome` but the decoder returned `$verdict` " +
+                "— the label and the run disagree",
+        )
+
+        // Booked inside the arm the verdict really selected, never from the
+        // label: the `else` below fails closed, so a vocabulary this runner has
+        // no branch for cannot appear in the set.
+        when (verdict) {
             "reject" -> {
                 tally.outcomes += "reject"
                 tally.rejected += 1
@@ -340,7 +356,7 @@ class BlobBackendDiscriminatorConformanceTest {
                 }
             }
 
-            else -> fail("$where: unknown outcome `$outcome`")
+            else -> fail("$where: unknown outcome `$verdict`")
         }
 
         keys.requireAllSatisfied()

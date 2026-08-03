@@ -540,6 +540,45 @@ if [ "$sc_fixtures" -eq 0 ] || [ "$sc_total" -eq 0 ]; then
   missing=$((missing + 1))
 fi
 
+# --- rung 0: was every fixture-level `assertions` block BOUND to a tracker? ---
+#
+# Every other rung here is scoped to a block a runner ALREADY OPENED. The unread
+# check, the unasserted check and the prose ledger all live inside AssertionKeys,
+# so a fixture-level `assertions` block that no runner ever constructs an
+# AssertionKeys over reports NOTHING: its keys are not unread, because nothing was
+# reading them. lazily-dart found two such blocks in its own suite — eight silent
+# keys, including the invariant that a forwarded `from` is the server's registered
+# peer id and never a client-supplied one. No grep finds that; the evidence is the
+# absence of a call, so it has to be recorded at runtime like every other rung
+# here (#lznullformblind).
+#
+# ConformanceFixtures inventories the block when it reads the fixture, and
+# AssertionKeys books it bound when it is constructed over it — matched by
+# CONTENT, not by the `where` label a runner picks for itself.
+BLOCK_LEDGER="${3:-${LAZILY_CONFORMANCE_ASSERTION_BLOCK_LEDGER:-build/conformance-assertion-blocks.txt}}"
+if [ ! -f "$BLOCK_LEDGER" ]; then
+  echo "ERROR: assertion-block ledger not found at $BLOCK_LEDGER." >&2
+  echo "       That is missing EVIDENCE, not evidence of absence: the suite ran" >&2
+  echo "       without the rung-0 recorder attached (#lzvacuousrun)." >&2
+  missing=$((missing + 1))
+else
+  blocks_total=$(grep -c . "$BLOCK_LEDGER" || true)
+  unbound=$(awk -F'\t' '$2 == "UNBOUND" { print $1 }' "$BLOCK_LEDGER")
+  if [ -n "$unbound" ]; then
+    echo "ERROR: fixture-level \`assertions\` block(s) that NO runner bound to a tracker:" >&2
+    echo "$unbound" | sed 's/^/         /' >&2
+    echo "       Their keys are silent — not unread, because nothing reads them —" >&2
+    echo "       so every other rung passes over them (#lznullformblind). Bind the" >&2
+    echo "       block with AssertionKeys and assert its keys." >&2
+    missing=$((missing + 1))
+  fi
+  if [ "$blocks_total" -eq 0 ]; then
+    echo "ERROR: ZERO fixture-level \`assertions\` blocks were inventoried." >&2
+    echo "       Rung 0 is vacuously green over an empty population." >&2
+    missing=$((missing + 1))
+  fi
+fi
+
 if [ "$missing" -gt 0 ]; then
   echo "conformance coverage FAILED: $missing problem(s)" >&2
   exit 1
@@ -552,3 +591,6 @@ echo "scenario coverage OK: $sc_replayed/$sc_total scenarios across $sc_fixtures
      "scenario-bearing fixtures were REPLAYED ($sc_excused excused of" \
      "${#KNOWN_UNREPLAYED_SCENARIOS[@]} excuseScenario entries; runtime ledger —" \
      "these scenarios really ran)"
+echo "assertion-block coverage OK: $blocks_total/$blocks_total fixture-level \`assertions\`" \
+     "block(s) opened by the suite were BOUND to a tracker (runtime ledger — a block" \
+     "nobody binds is silent to every other rung)"

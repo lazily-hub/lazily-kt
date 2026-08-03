@@ -207,12 +207,6 @@ class NodeIdExactRangeConformanceTest {
             keys.requireAllSatisfied()
         }
 
-        // Four scenarios (2^53-1 and 2^53+1, in both codecs) are inside Long;
-        // the two at u64::MAX are not. Pinning both halves means a decoder that
-        // stopped refusing, and one that stopped decoding, are each a failure.
-        assertEquals(4, accepted, "lazily-kt decodes the four scenarios inside [0, 2^63)")
-        assertEquals(2, refused, "lazily-kt refuses both u64::MAX identifiers")
-
         // The fixture-level block, asserted AFTER the replay so each key is a
         // claim about what the run observed.
         val meta = AssertionKeys("$path assertions", fixture.getValue("assertions").jsonObject)
@@ -270,6 +264,17 @@ class NodeIdExactRangeConformanceTest {
         // and the corpus does not declare it.
         meta.excuseKey("generator", "names the upstream script that mints the fixture, not an obligation")
         meta.requireAllSatisfied()
+
+        // The runner-side floors go LAST (`#lznullformblind`). A hardcoded count
+        // placed AHEAD of the fixture's own `scenario_count` fires first and
+        // swallows it: the fixture assertion is then unreachable for exactly the
+        // input that would have falsified it, which is a correct assertion that
+        // can never run.
+        // Four scenarios (2^53-1 and 2^53+1, in both codecs) are inside Long;
+        // the two at u64::MAX are not. Pinning both halves means a decoder that
+        // stopped refusing, and one that stopped decoding, are each a failure.
+        assertEquals(4, accepted, "lazily-kt decodes the four scenarios inside [0, 2^63)")
+        assertEquals(2, refused, "lazily-kt refuses both u64::MAX identifiers")
 
         // Rule 6: every key named by a discharge above must be one this
         // fixture's run really ASSERTED.

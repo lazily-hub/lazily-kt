@@ -227,6 +227,14 @@ class AssertionKeys(
      * the read does not consume `prose` — that key is consumed and asserted by
      * the discharged-set comparison in [requireAllSatisfied], and nowhere else.
      */
+    init {
+        // Rung 0: book this block as BOUND if it is a fixture's top-level
+        // `assertions` block. Everything below is scoped to a block a runner
+        // opened, so an `assertions` block nobody binds is silent — no unread
+        // key, no unasserted key, no discharge (`#lznullformblind`).
+        ConformanceFixtures.noteBound(obj)
+    }
+
     private val declaredProse: Set<String> =
         when (val declaration = obj["prose"]) {
             null -> emptySet()

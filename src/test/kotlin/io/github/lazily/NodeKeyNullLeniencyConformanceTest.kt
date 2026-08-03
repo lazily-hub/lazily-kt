@@ -361,6 +361,11 @@ class NodeKeyNullLeniencyConformanceTest {
             )
             sc.assertString("key_form") { onWire }
 
+            // A CORPUS-consistency cross-check, not a behaviour claim: the two
+            // identifiers a scenario carries must agree, so the ledger records
+            // the same scenario either resolver finds it by. It can fail for
+            // some corpus input, which is what keeps it out of the vacuous class
+            // the rest of this file is about.
             sc.assertString("name") { where }
             sc.excuseKey("id", "the ledger key this loop records; it names the scenario rather than asserting it")
             sc.excuseKey("expect", "container: asserted key-by-key against the DECODED and RE-ENCODED frames below")
@@ -427,14 +432,6 @@ class NodeKeyNullLeniencyConformanceTest {
             }
             keys.requireAllSatisfied()
         }
-
-        assertEquals(12, replayed, "two fields x three key forms x two codecs")
-        assertEquals(
-            4,
-            keysDecoded,
-            "only the `present` scenarios carry a key; a runner reporting absent for " +
-                "everything satisfies the null cases trivially",
-        )
 
         // The fixture-level block, asserted AFTER the replay so every key is a
         // claim about work that happened rather than about the file on disk.
@@ -519,6 +516,19 @@ class NodeKeyNullLeniencyConformanceTest {
         // and the corpus does not declare it.
         meta.excuseKey("generator", "names the upstream script that mints the fixture, not an obligation")
         meta.requireAllSatisfied()
+
+        // The runner-side floors go LAST (`#lznullformblind`). A hardcoded count
+        // placed AHEAD of the fixture's own `scenario_count` fires first and
+        // swallows it: the fixture assertion is then unreachable for exactly the
+        // input that would have falsified it, which is a correct assertion that
+        // can never run.
+        assertEquals(12, replayed, "two fields x three key forms x two codecs")
+        assertEquals(
+            4,
+            keysDecoded,
+            "only the `present` scenarios carry a key; a runner reporting absent for " +
+                "everything satisfies the null cases trivially",
+        )
 
         // Rule 6: every key named by a discharge above must be one this
         // fixture's run really ASSERTED.

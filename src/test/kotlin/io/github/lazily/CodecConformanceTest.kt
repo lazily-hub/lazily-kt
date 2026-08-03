@@ -251,10 +251,12 @@ class CodecConformanceTest {
             keys.requireAllSatisfied()
             replayed += 1
         }
-        assertEquals(3, replayed, "one scenario per IpcMessage variant")
-
         // The fixture-level block, AFTER the replay: every key in it is now a
-        // claim about the run rather than about the file on disk.
+        // claim about the run rather than about the file on disk. It also comes
+        // BEFORE the runner-side floor below — a hardcoded count placed ahead of
+        // the fixture's own `scenario_count` fires first and makes it
+        // unreachable for exactly the input that would falsify it
+        // (`#lznullformblind`).
         assertFixtureBlock(
             path,
             fixture,
@@ -268,6 +270,7 @@ class CodecConformanceTest {
             // in that block, against different observations.
             noteDischargedBy = listOf("role", "byte_canonical"),
         )
+        assertEquals(3, replayed, "one scenario per IpcMessage variant")
         verifyProse(path)
     }
 
@@ -336,10 +339,12 @@ class CodecConformanceTest {
             keys.requireAllSatisfied()
             replayed += 1
         }
-        assertEquals(3, replayed, "one scenario per IpcMessage variant")
-
         // The fixture-level block, AFTER the replay: every key in it is now a
-        // claim about the run rather than about the file on disk.
+        // claim about the run rather than about the file on disk. It also comes
+        // BEFORE the runner-side floor below — a hardcoded count placed ahead of
+        // the fixture's own `scenario_count` fires first and makes it
+        // unreachable for exactly the input that would falsify it
+        // (`#lznullformblind`).
         assertFixtureBlock(
             path,
             fixture,
@@ -355,6 +360,7 @@ class CodecConformanceTest {
             // fixture-scoped rather than block-scoped.
             noteDischargedBy = listOf("byte_canonical", "encoded_body_field_names"),
         )
+        assertEquals(3, replayed, "one scenario per IpcMessage variant")
         verifyProse(path)
     }
 
