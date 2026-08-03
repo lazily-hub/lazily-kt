@@ -62,17 +62,26 @@ class NodeIdExactRangeConformanceTest {
      * identifier outside `Long`. The caller decides which of the two is
      * correct, because that split is the whole point of the fixture.
      */
-    private fun decode(scenario: JsonObject): IpcMessage? =
+    private fun decode(
+        scenario: JsonObject,
+        /** Records the codec entry point this call really dispatched into. */
+        driven: MutableSet<String>,
+    ): IpcMessage? =
         try {
             when (val codec = scenario.getValue("codec").jsonPrimitive.content) {
                 // The raw TEXT through the codec's own entry point, so the parse
                 // that would round on a narrower runtime is inside the code
                 // under test rather than in the runner.
-                "json" -> IpcMessage.decodeJson(scenario.getValue("wire_json").jsonPrimitive.content)
-                "msgpack" ->
+                "json" -> {
+                    driven += "json"
+                    IpcMessage.decodeJson(scenario.getValue("wire_json").jsonPrimitive.content)
+                }
+                "msgpack" -> {
+                    driven += "msgpack"
                     IpcMessage.decodeMsgpack(
                         hexToBytes(scenario.getValue("wire_msgpack_hex").jsonPrimitive.content),
                     )
+                }
                 else -> error("unknown codec: $codec")
             }
         } catch (e: NumberFormatException) {
@@ -103,6 +112,11 @@ class NodeIdExactRangeConformanceTest {
         // The outcome vocabulary the run actually drove, so `assertions.outcomes`
         // is a claim about work that happened rather than about the file on disk.
         val observedOutcomes = linkedSetOf<String>()
+        // Likewise the codec vocabulary. `assertions.codecs` was compared against
+        // a hand-written `listOf("json", "msgpack")` — the fixture against a
+        // runner-side constant, which moves for neither a corpus edit nor a
+        // library regression (`#lznullformblind`).
+        val observedCodecs = linkedSetOf<String>()
 
         // Anti-vacuity. `exact_or_reject` is satisfied by a runner that decodes
         // nothing and calls everything refused — and lazily-kt really does
@@ -134,7 +148,7 @@ class NodeIdExactRangeConformanceTest {
                 observedOutcomes += outcome
             }
 
-            val message = decode(scenario)
+            val message = decode(scenario, observedCodecs)
 
             if (message == null) {
                 assertTrue(
@@ -204,7 +218,13 @@ class NodeIdExactRangeConformanceTest {
         val meta = AssertionKeys("$path assertions", fixture.getValue("assertions").jsonObject)
         meta.assertString("required_of_binding") { "MUST" }
         meta.assertInt("scenario_count") { accepted + refused }
-        meta.assertStrings("codecs") { listOf("json", "msgpack") }
+        meta.assertKeyWith("codecs") { want ->
+            assertEquals(
+                want.jsonArray.map { it.jsonPrimitive.content }.toSet(),
+                observedCodecs,
+                "$path: every declared codec must have been driven by some scenario",
+            )
+        }
         // NOT a prose key, and the corpus does not declare it one: `outcomes`
         // maps a VOCABULARY to English glosses, so the assertion is the key set
         // and the glosses ride along (`#lzprosekeyconvention` § Definition). It

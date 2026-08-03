@@ -165,16 +165,29 @@ class CodecConformanceTest {
         codec: String,
         byteCanonical: Boolean,
         role: String,
+        /**
+         * Scenarios this fixture's loop really REPLAYED. `scenario_count` used to
+         * be compared against `fixture["scenarios"].size` — the fixture against
+         * itself, green over a runner that decodes nothing, which is the exact
+         * vacuity these fixtures exist to rule out. So this block is asserted
+         * AFTER the replay, and this is the count of work that happened.
+         */
+        replayed: Int,
+        /** Codecs the loop really drove, so `assertions.codec` is a claim about the run. */
+        codecsDriven: Set<String>,
         noteDischargedBy: List<String>,
     ) {
         assertEquals(codec, fixture.getValue("codec").jsonPrimitive.content, "$path: fixture codec field")
         val meta = AssertionKeys("$path assertions", fixture.getValue("assertions").jsonObject)
-        meta.assertString("codec") { codec }
+        // Against the codec entry points the loop really dispatched into, not
+        // against the runner-side literal it used to name: an empty set here
+        // means nothing was encoded or decoded, and `single()` says so.
+        meta.assertString("codec") { codecsDriven.single() }
         meta.assertBoolean("self_describing") { true }
         meta.assertBoolean("byte_canonical") { byteCanonical }
         meta.assertString("required_of_binding") { "MUST" }
         meta.assertString("role") { role }
-        meta.assertInt("scenario_count") { fixture.getValue("scenarios").jsonArray.size }
+        meta.assertInt("scenario_count") { replayed }
         // `note` is the one key the corpus declares prose here, so it is
         // DISCHARGED rather than excused (`#lzprosekeyconvention`). It is also
         // the case the reserved-annotation exemption would have swallowed: a
@@ -213,20 +226,9 @@ class CodecConformanceTest {
     private fun replayJsonFixture() {
         val path = "codec/frame_roundtrip_json.json"
         val fixture = loadFixture(path)
-        assertFixtureBlock(
-            path,
-            fixture,
-            codec = "json",
-            byteCanonical = true,
-            role = "reference",
-            // The paragraph's obligation is that `role` and `byte_canonical`
-            // stay DISTINCT senses of "canonical" — "both are pinned here so a
-            // runner cannot conflate them", in its own words. Both are asserted
-            // above, against different observations.
-            noteDischargedBy = listOf("role", "byte_canonical"),
-        )
 
         var replayed = 0
+        val codecsDriven = linkedSetOf<String>()
         for (scenario in ConformanceScenarios.of(path, fixture)) {
             val where = scenario.getValue("id").jsonPrimitive.content
             val source = IpcMessage.fromJson(scenario.getValue("wire"))
@@ -240,6 +242,7 @@ class CodecConformanceTest {
             // literal is never re-asserted, so a codec that silently drops a
             // field cannot be masked by reading the input back.
             val roundTripped = IpcMessage.decodeJson(source.encodeJson())
+            codecsDriven += "json"
 
             val keys = AssertionKeys("$path $where", scenario.getValue("expect").jsonObject)
             keys.assertBoolean("round_trip_equals_source") { roundTripped == source }
@@ -248,6 +251,23 @@ class CodecConformanceTest {
             replayed += 1
         }
         assertEquals(3, replayed, "one scenario per IpcMessage variant")
+
+        // The fixture-level block, AFTER the replay: every key in it is now a
+        // claim about the run rather than about the file on disk.
+        assertFixtureBlock(
+            path,
+            fixture,
+            codec = "json",
+            byteCanonical = true,
+            role = "reference",
+            replayed = replayed,
+            codecsDriven = codecsDriven,
+            // The paragraph's obligation is that `role` and `byte_canonical`
+            // stay DISTINCT senses of "canonical" — "both are pinned here so a
+            // runner cannot conflate them", in its own words. Both are asserted
+            // in that block, against different observations.
+            noteDischargedBy = listOf("role", "byte_canonical"),
+        )
         verifyProse(path)
     }
 
@@ -261,22 +281,9 @@ class CodecConformanceTest {
     private fun replayMsgpackFixture() {
         val path = "codec/frame_roundtrip_msgpack.json"
         val fixture = loadFixture(path)
-        assertFixtureBlock(
-            path,
-            fixture,
-            codec = "msgpack",
-            byteCanonical = false,
-            role = "cross_language_binary_default",
-            // The paragraph states two things and names the key for the second:
-            // `byte_canonical: false` is why this fixture pins decoded values
-            // instead of golden bytes, and the named-field map rule "is what
-            // `encoded_body_field_names` below verifies". That key is asserted
-            // per scenario, AFTER this block — which is why the ledger is
-            // fixture-scoped rather than block-scoped.
-            noteDischargedBy = listOf("byte_canonical", "encoded_body_field_names"),
-        )
 
         var replayed = 0
+        val codecsDriven = linkedSetOf<String>()
         for (scenario in ConformanceScenarios.of(path, fixture)) {
             val where = scenario.getValue("id").jsonPrimitive.content
             val source = IpcMessage.fromJson(scenario.getValue("wire"))
@@ -325,12 +332,32 @@ class CodecConformanceTest {
             // never re-asserted, so a codec that silently drops a field cannot
             // be masked by reading the input back.
             val roundTripped = IpcMessage.decodeMsgpack(bytes)
+            codecsDriven += "msgpack"
             keys.assertBoolean("round_trip_equals_source") { roundTripped == source }
             assertValues(keys, roundTripped)
             keys.requireAllSatisfied()
             replayed += 1
         }
         assertEquals(3, replayed, "one scenario per IpcMessage variant")
+
+        // The fixture-level block, AFTER the replay: every key in it is now a
+        // claim about the run rather than about the file on disk.
+        assertFixtureBlock(
+            path,
+            fixture,
+            codec = "msgpack",
+            byteCanonical = false,
+            role = "cross_language_binary_default",
+            replayed = replayed,
+            codecsDriven = codecsDriven,
+            // The paragraph states two things and names the key for the second:
+            // `byte_canonical: false` is why this fixture pins decoded values
+            // instead of golden bytes, and the named-field map rule "is what
+            // `encoded_body_field_names` below verifies". That key is asserted
+            // per scenario, BEFORE this block — which is why the ledger is
+            // fixture-scoped rather than block-scoped.
+            noteDischargedBy = listOf("byte_canonical", "encoded_body_field_names"),
+        )
         verifyProse(path)
     }
 
