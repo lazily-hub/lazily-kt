@@ -227,6 +227,13 @@ class ReliableSyncConformanceTest {
             // Convergence is the point of the scenario, and it is state, not an
             // epoch counter: a receiver that requested the snapshot and then
             // failed to fold it still lands on final_last_epoch=4.
+            // The node-id KEY SET first, in both directions, then the values
+            // (#lzsubblockkeyset). Map equality below already subsumes it, but
+            // the tracker cannot see inside an opaque check — so the key-set
+            // claim is made through the entry point that records it, and a later
+            // edit that narrows the comparison to a few named ids fails instead
+            // of quietly comparing the rest against nothing.
+            e.assertKeySet("converged_nodes") { recv.state().keys.map { it.toString() } }
             e.assertKeyWith("converged_nodes") { assertEquals(nodeState(it), recv.state(), "converged_nodes") }
             // ... and it must equal what a receiver that never lost a frame
             // sees. The fixture does not record the dropped frame's contents, so
@@ -284,6 +291,8 @@ class ReliableSyncConformanceTest {
                 // At-least-once delivery, exactly-once effect: the re-sent frame
                 // carries a DIFFERENT payload for node 1 in the first scenario,
                 // so a receiver that folded it would land on 99, not 10.
+                // Key set in both directions, then the values (#lzsubblockkeyset).
+                e.assertKeySet("state_after") { recv.state().keys.map { it.toString() } }
                 e.assertKeyWith("state_after") { assertEquals(nodeState(it), recv.state(), "state_after") }
                 e.assertBoolean("net_effect_unchanged") { before == recv.state() }
             }

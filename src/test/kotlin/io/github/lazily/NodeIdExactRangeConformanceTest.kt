@@ -230,13 +230,13 @@ class NodeIdExactRangeConformanceTest {
         // and the glosses ride along (`#lzprosekeyconvention` § Definition). It
         // used to be excused as prose, which left the vocabulary unchecked — a
         // scenario carrying a third outcome would have passed.
-        meta.assertKeyWith("outcomes") { want ->
-            assertEquals(
-                want.jsonObject.keys,
-                observedOutcomes,
-                "$path: every declared outcome must have been driven by some scenario",
-            )
-        }
+        //
+        // Through the tracker's key-set entry point rather than assertKeyWith
+        // (`#lzsubblockkeyset`): the comparison is the same one, but the tracker
+        // now RECORDS that this object-valued key had its key set checked, so a
+        // future edit that reaches for the opaque entry point on it fails
+        // instead of silently comparing nothing.
+        meta.assertKeySet("outcomes") { observedOutcomes }
 
         // The three paragraphs the corpus declares in `assertions.prose`, each
         // DISCHARGED by the executable keys carrying its obligation.

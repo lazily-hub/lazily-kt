@@ -179,7 +179,8 @@ fun verifyProse(fixture: String) {
  * [array], [strings], [withPrefix]) mark a key **consumed** and nothing more. A
  * key becomes **asserted** only by going through one of the assertion entry
  * points ([assertLong], [assertInt], [assertBoolean], [assertString],
- * [assertStrings], [assertKeyWith]), each of which hands the fixture's own value
+ * [assertStrings], [assertKeyWith], [assertKeyValue], [assertKeySet], [sub]),
+ * each of which hands the fixture's own value
  * to the comparison. An arm that compares against a literal therefore never
  * marks its key, and [requireAllSatisfied] names it.
  *
@@ -206,6 +207,36 @@ fun verifyProse(fixture: String) {
  * [discharged][proseKey] instead, by naming the executable keys that carry its
  * obligation; [ProseLedger] then checks the naming against what the fixture's
  * run really asserted (`#lzprosekeyconvention`).
+ *
+ * ## Object-valued keys are checked by their KEY SET (`#lzsubblockkeyset`)
+ *
+ * Everything above is about the keys of a **block**. A key whose VALUE is itself
+ * a JSON object has the same defect one level down: a runner that compares five
+ * named sub-fields and stops leaves a sixth, added upstream, compared by
+ * nothing. That is the null form INSIDE an assertion key rather than beside one,
+ * and no rung above can see it — the parent key is read, asserted and consumed,
+ * so every guard reports clean. It was found by the `#lznullformblind`
+ * perturbation pass: planting a key inside `arena_blob.json`'s
+ * `assertions.descriptor` left the suite green while every scalar sibling
+ * reddened.
+ *
+ * A per-call-site field count is the cheap fix and the wrong one — it holds only
+ * while every site remembers. So the TRACKER holds an object-valued key's key
+ * set the way it already holds the block's, and three entry points satisfy the
+ * obligation:
+ *
+ * | entry point | how the key set is checked |
+ * |---|---|
+ * | [sub] | the child tracker owns every key beneath, so an unrecognised sub-key is an unconsumed key |
+ * | [assertKeySet] | the fixture's key set compared, in BOTH directions, against the set the run produced |
+ * | [assertKeyValue] | whole-element equality subsumes key-set equality — a planted key changes the object |
+ *
+ * and [requireAllSatisfied] FAILS for any object-valued key consumed through
+ * [assertKeyWith], [get], [obj] or any other read without one of the three. That
+ * is the point: a call site that reaches for the opaque entry point on an object
+ * value gets a red suite instead of a silent hole. [excuseKey] and [proseKey]
+ * stay available for a key that genuinely carries no key-set obligation — both
+ * already record a reason.
  */
 class AssertionKeys(
     private val where: String,
@@ -216,11 +247,34 @@ class AssertionKeys(
      * so the default recovers the path.
      */
     private val fixture: String = where.substringBefore(' '),
+    /**
+     * Whether to book this object as a BOUND fixture-level `assertions` block
+     * (rung 0, `#lznullformblind`). False for the child trackers [sub] mints:
+     * they guard an object nested INSIDE a block, and the rung-0 ledger is about
+     * top-level blocks only — booking one would let a nested object that happens
+     * to share a fixture block's shape and content answer for it.
+     */
+    private val rungZeroBind: Boolean = true,
 ) {
     private val consumed = mutableSetOf<String>()
     private val asserted = mutableSetOf<String>()
     private val excused = mutableMapOf<String, String>()
     private val discharged = mutableSetOf<String>()
+
+    /**
+     * Keys whose object VALUE was descended into with [sub]. The child tracker
+     * owns the finish check for everything beneath, so the obligation moved down
+     * rather than disappearing (`#lzsubblockkeyset`).
+     */
+    private val descended = mutableSetOf<String>()
+
+    /**
+     * Keys whose object VALUE had its key set checked — by [assertKeySet] or by
+     * the whole-element equality of [assertKeyValue] (`#lzsubblockkeyset`).
+     * Descent is tracked separately in [descended] and satisfies the same
+     * obligation.
+     */
+    private val keySetChecked = mutableSetOf<String>()
 
     /**
      * The keys THIS block declares to be prose, read straight off the object so
@@ -232,7 +286,7 @@ class AssertionKeys(
         // `assertions` block. Everything below is scoped to a block a runner
         // opened, so an `assertions` block nobody binds is silent — no unread
         // key, no unasserted key, no discharge (`#lznullformblind`).
-        ConformanceFixtures.noteBound(obj)
+        if (rungZeroBind) ConformanceFixtures.noteBound(obj)
     }
 
     private val declaredProse: Set<String> =
@@ -444,6 +498,91 @@ class AssertionKeys(
     }
 
     /**
+     * Assert [key]'s object value wholesale against [actual] — whole-element
+     * equality, which subsumes key-set equality (`#lzsubblockkeyset`).
+     *
+     * For a nested object the runner can produce in full. A key planted inside
+     * the fixture's object changes the element, so this comparison already sees
+     * it; the key is recorded as key-set-checked so [requireAllSatisfied] can
+     * tell it apart from the opaque [assertKeyWith] path, which cannot.
+     */
+    fun assertKeyValue(
+        key: String,
+        actual: () -> JsonElement,
+    ) {
+        guardNotProse(key, "asserting")
+        val want = this[key] ?: return
+        markAsserted(key)
+        keySetChecked += key
+        assertEquals(want, actual(), "$where: $key")
+    }
+
+    /**
+     * Assert that [key]'s object value has exactly the key set [actual]
+     * produced — set equality in BOTH directions (`#lzsubblockkeyset`).
+     *
+     * The entry point for an object-valued key that is a VOCABULARY: the
+     * sub-keys are the tokens and the values are English glosses, so the
+     * assertion is the key set and the glosses ride along. A declared token the
+     * run never produced and a produced token the fixture omits are both
+     * failures — one is a fixture that outran the binding, the other a binding
+     * that outran the fixture, and neither is allowed to pass quietly.
+     */
+    fun assertKeySet(
+        key: String,
+        actual: () -> Collection<String>,
+    ) {
+        guardNotProse(key, "asserting")
+        val want = this[key] ?: return
+        val declared =
+            (want as? JsonObject)?.keys
+                ?: error(
+                    "$where: assertKeySet('$key') needs a JSON OBJECT value, got $want " +
+                        "(#lzsubblockkeyset)",
+                )
+        markAsserted(key)
+        keySetChecked += key
+        val produced = actual().toSet()
+        check(declared == produced) {
+            val unreplayed = (declared - produced).sorted()
+            val undeclared = (produced - declared).sorted()
+            "$where: '$key' key-set mismatch. The fixture declares ${declared.sorted()}; this run " +
+                "produced ${produced.sorted()}. Declared but never produced: $unreplayed. Produced " +
+                "but not declared: $undeclared. An object-valued assertion key is checked by its " +
+                "KEY SET, in both directions, so a token added upstream cannot be compared by " +
+                "nothing (#lzsubblockkeyset)"
+        }
+    }
+
+    /**
+     * Descend into [key]'s object value: [block] runs against a CHILD tracker
+     * bound to that object, which is then finished (`#lzsubblockkeyset`).
+     *
+     * The parent key is satisfied structurally — the child owns the unread /
+     * unasserted / stale-excuse checks for every key beneath it, so a sub-field
+     * added upstream fails exactly the way an unconsumed top-level key does. The
+     * obligation moves down rather than disappearing.
+     *
+     * The block form is the only descend surface on purpose: handing back a bare
+     * child would reintroduce the hole one level lower, where a runner that
+     * forgets `requireAllSatisfied()` is green again.
+     */
+    fun sub(
+        key: String,
+        block: (AssertionKeys) -> Unit,
+    ) {
+        guardNotProse(key, "descending into")
+        val want = this[key] ?: return
+        val child =
+            (want as? JsonObject)
+                ?: error("$where: sub('$key') needs a JSON OBJECT value, got $want (#lzsubblockkeyset)")
+        descended += key
+        val keys = AssertionKeys("$where.$key", child, fixture, rungZeroBind = false)
+        block(keys)
+        keys.requireAllSatisfied()
+    }
+
+    /**
      * Declare that [key] is satisfied without a comparison at this call site,
      * and say why.
      *
@@ -513,7 +652,7 @@ class AssertionKeys(
                 "(#lzconsumednotasserted)"
         }
 
-        val unasserted = (present - asserted - excused.keys - discharged).sorted()
+        val unasserted = (present - asserted - excused.keys - discharged - descended).sorted()
         check(unasserted.isEmpty()) {
             "$where: assertion key(s) $unasserted were READ but never asserted. Reading a key " +
                 "marks it consumed and proves nothing: a named skip, a value bound and never " +
@@ -522,6 +661,34 @@ class AssertionKeys(
                 "assertInt / assertBoolean / assertString / assertStrings / assertKeyWith so " +
                 "the fixture's own value reaches the comparison, or excuseKey it with a reason " +
                 "(#lzconsumednotasserted)"
+        }
+
+        // One level down: an object-valued key the run consumed without ever
+        // comparing its KEY SET. Reading it, or handing it to assertKeyWith and
+        // checking five named sub-fields, leaves a sixth free to appear upstream
+        // and be compared by nothing (`#lzsubblockkeyset`). Excused and
+        // discharged keys are out — both already record a reason.
+        val unkeyed =
+            obj.entries
+                .filter { (key, value) ->
+                    value is JsonObject &&
+                        key in consumed &&
+                        key !in descended &&
+                        key !in keySetChecked &&
+                        key !in excused.keys &&
+                        key !in discharged &&
+                        key !in NARRATIVE
+                }.map { it.key }
+                .sorted()
+        check(unkeyed.isEmpty()) {
+            "$where: object-valued key(s) $unkeyed were consumed WITHOUT a key-set check. An " +
+                "assertion key whose value is a JSON object carries the same obligation the block " +
+                "itself does, one level down: a runner that compares named sub-fields and stops " +
+                "leaves a field added upstream compared by nothing, and every rung above reports " +
+                "clean because the parent key was read and asserted. Route it through sub(key) { } " +
+                "to descend, assertKeySet(key) { } when the sub-keys are a vocabulary, or " +
+                "assertKeyValue(key) { } to compare the whole element — or excuseKey it with a " +
+                "reason (#lzsubblockkeyset)"
         }
     }
 
@@ -542,6 +709,26 @@ inline fun JsonObject.consuming(
     block: (AssertionKeys) -> Unit,
 ) {
     val keys = AssertionKeys(where, this)
+    block(keys)
+    keys.requireAllSatisfied()
+}
+
+/**
+ * [consuming] for an object NESTED inside an assertion block — the value of an
+ * object-valued key, reached without a parent tracker (`#lzsubblockkeyset`).
+ *
+ * Use where the runner reads a sub-block by name rather than descending through
+ * [AssertionKeys.sub]: the nested object still gets its own key-set guard, so a
+ * sub-field added upstream is an unconsumed key instead of a value compared by
+ * nothing. It does NOT book a rung-0 bind — that ledger is about a fixture's
+ * top-level `assertions` block, and a nested object answering for one would be a
+ * false bind (`#lznullformblind`).
+ */
+inline fun JsonObject.consumingNested(
+    where: String,
+    block: (AssertionKeys) -> Unit,
+) {
+    val keys = AssertionKeys(where, this, rungZeroBind = false)
     block(keys)
     keys.requireAllSatisfied()
 }

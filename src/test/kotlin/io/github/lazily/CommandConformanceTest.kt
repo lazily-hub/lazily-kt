@@ -45,9 +45,25 @@ class CommandConformanceTest {
     private fun assertProjection(
         projection: CommandProjection,
         expect: JsonObject,
+    ) = assertImage(expect.getValue("projection"), projection.toImage(), "projection")
+
+    /**
+     * Compare [got] against the fixture's projection image BOTH ways round.
+     *
+     * The typed comparison is the readable one, but `fromJson` silently drops
+     * any field it does not know, so on its own it is blind to a key added to
+     * the fixture's object upstream — the null form one level down inside an
+     * assertion key (`#lzsubblockkeyset`). The second comparison re-encodes the
+     * produced image and compares whole ELEMENTS, which subsumes key-set
+     * equality: a planted or renamed field changes the object and reddens here.
+     */
+    private fun assertImage(
+        wantElement: JsonElement,
+        got: CommandProjectionImage,
+        where: String,
     ) {
-        val want = CommandProjectionImage.fromJson(expect.getValue("projection"))
-        assertEquals(want, projection.toImage(), "projection image mismatch")
+        assertEquals(CommandProjectionImage.fromJson(wantElement), got, "$where image mismatch")
+        assertEquals(wantElement.jsonObject, got.toJson(), "$where wire image mismatch")
     }
 
     // --- unit tests mirroring the Rust reducer ---
@@ -193,8 +209,7 @@ class CommandConformanceTest {
             if (i == conflictAt) assertIs<CommandApplyStatus.TerminalConflict>(status)
         }
         assertTrue(p.hasConflict(commandId))
-        val before = CommandProjectionImage.fromJson(expect.getValue("projection_before_conflict"))
-        assertEquals(before, p.toImage())
+        assertImage(expect.getValue("projection_before_conflict"), p.toImage(), "projection_before_conflict")
     }
 
     @Test

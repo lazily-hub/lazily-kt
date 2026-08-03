@@ -1236,29 +1236,34 @@ class ReactiveGraphConformanceTest {
         // A tail key the corpus adds would have been invisible here while the
         // fixture still reported as replayed (#lzassertunknownkeys).
         tail.consuming("$fixture expected tail") { t ->
-            t.assertKeyWith("final_state") { finalState ->
-                finalState.jsonObject.consuming("$fixture expected.final_state") { fin ->
-                    fin.assertKeyWith("dependents_of") { want ->
-                        val m = want.jsonObject
-                        for (id in m.keys.sorted()) {
+            // Descended rather than read-and-nested (#lzsubblockkeyset): the
+            // child trackers own the key sets of `final_state` and of each
+            // per-node map beneath it, so an id added upstream is an unconsumed
+            // key instead of a value nothing compares.
+            t.sub("final_state") { fin ->
+                fin.sub("dependents_of") { m ->
+                    for (id in m.keys.sorted()) {
+                        m.assertKeyWith(id) { want ->
                             val got = model.dependentsOf(id)
-                            check("final.dependents_of.$id", got, m[id])
+                            check("final.dependents_of.$id", got, want)
                             report.observation.degrees[id] = got
                         }
                     }
-                    fin.assertKeyWith("readable") { want ->
-                        val m = want.jsonObject
-                        for (id in m.keys.sorted()) {
+                }
+                fin.sub("readable") { m ->
+                    for (id in m.keys.sorted()) {
+                        m.assertKeyWith(id) { want ->
                             val ok = alive(model, id)
-                            check("final.readable.$id", ok, m[id])
+                            check("final.readable.$id", ok, want)
                             report.observation.readable[id] = ok
                         }
                     }
-                    fin.assertKeyWith("read") { want ->
-                        val m = want.jsonObject
-                        for (id in m.keys.sorted()) {
+                }
+                fin.sub("read") { m ->
+                    for (id in m.keys.sorted()) {
+                        m.assertKeyWith(id) { want ->
                             val got = readOrError(model, id)
-                            check("final.read.$id", got, m[id])
+                            check("final.read.$id", got, want)
                             report.observation.reads[id] = got
                         }
                     }
@@ -1277,59 +1282,59 @@ class ReactiveGraphConformanceTest {
                 )
             }
 
-            t.assertKeyWith("after_publish") { publishEl ->
-                publishEl.jsonObject.consuming("$fixture expected.after_publish") { p ->
-                    val publishOp = p.obj("op")
-                    if (publishOp != null) {
-                        p.excuseKey(
-                            "op",
-                            "the write this block replays, not an observable — every key below " +
-                                "asserts its effect",
+            t.sub("after_publish") { p ->
+                val publishOp = p.obj("op")
+                if (publishOp != null) {
+                    p.excuseKey(
+                        "op",
+                        "the write this block replays, not an observable — every key below " +
+                            "asserts its effect",
+                    )
+                    val before = model.runLog.size
+                    model.set(
+                        publishOp["id"]!!.jsonPrimitive.content,
+                        publishOp["value"]!!.jsonPrimitive.int,
+                    )
+                    model.settle()
+                    report.observation.afterPublishObserved =
+                        model.runLog.toList().subList(before, model.runLog.size)
+                    p.assertKeyWith("observed_by") { want ->
+                        checkList(
+                            "after_publish.observed_by",
+                            report.observation.afterPublishObserved,
+                            strs(want),
                         )
-                        val before = model.runLog.size
-                        model.set(
-                            publishOp["id"]!!.jsonPrimitive.content,
-                            publishOp["value"]!!.jsonPrimitive.int,
-                        )
-                        model.settle()
-                        report.observation.afterPublishObserved =
-                            model.runLog.toList().subList(before, model.runLog.size)
-                        p.assertKeyWith("observed_by") { want ->
-                            checkList(
-                                "after_publish.observed_by",
-                                report.observation.afterPublishObserved,
-                                strs(want),
-                            )
-                        }
-                        // Order matches the reference runner: reads (which re-register
-                        // edges in a lazy binding) precede the degree assertions that
-                        // count them.
-                        p.assertKeyWith("read") { want ->
-                            val m = want.jsonObject
-                            for (id in m.keys.sorted()) {
+                    }
+                    // Order matches the reference runner: reads (which re-register
+                    // edges in a lazy binding) precede the degree assertions that
+                    // count them.
+                    p.sub("read") { m ->
+                        for (id in m.keys.sorted()) {
+                            m.assertKeyWith(id) { want ->
                                 val got = readOrError(model, id)
-                                check("after_publish.read.$id", got, m[id])
+                                check("after_publish.read.$id", got, want)
                                 report.observation.afterPublishReads[id] = got
                             }
                         }
-                        p.assertKeyWith("dependents_of") { want ->
-                            val m = want.jsonObject
-                            for (id in m.keys.sorted()) {
-                                check("after_publish.dependents_of.$id", model.dependentsOf(id), m[id])
+                    }
+                    p.sub("dependents_of") { m ->
+                        for (id in m.keys.sorted()) {
+                            m.assertKeyWith(id) { want ->
+                                check("after_publish.dependents_of.$id", model.dependentsOf(id), want)
                             }
                         }
-                    } else {
-                        // No `op` means there is no publish to make, so nothing in
-                        // this block has an observation to compare against. Said out
-                        // loud per key instead of a silent `consume`.
-                        for (key in listOf("observed_by", "read", "dependents_of")) {
-                            if (p.has(key)) {
-                                p.excuseKey(
-                                    key,
-                                    "`after_publish` carries no `op`, so this replay never " +
-                                        "performs the publish these keys describe",
-                                )
-                            }
+                    }
+                } else {
+                    // No `op` means there is no publish to make, so nothing in
+                    // this block has an observation to compare against. Said out
+                    // loud per key instead of a silent `consume`.
+                    for (key in listOf("observed_by", "read", "dependents_of")) {
+                        if (p.has(key)) {
+                            p.excuseKey(
+                                key,
+                                "`after_publish` carries no `op`, so this replay never " +
+                                    "performs the publish these keys describe",
+                            )
                         }
                     }
                 }

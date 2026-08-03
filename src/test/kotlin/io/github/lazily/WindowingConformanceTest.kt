@@ -2,7 +2,6 @@ package io.github.lazily
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -31,11 +30,22 @@ class WindowingConformanceTest {
 
     private fun expOut(step: JsonObject) = step["expected"]!!.jsonObject["output"]!!.jsonPrimitive.longOrNull
 
-    private fun inval(step: JsonObject) =
-        step["expected"]!!
-            .jsonObject["invalidates"]!!
-            .jsonObject["output"]!!
-            .jsonPrimitive.boolean
+    /**
+     * Assert the step's `invalidates` sub-block by its KEY SET, not just the one
+     * reader this runner observes (#lzsubblockkeyset): a reader kind added
+     * upstream would otherwise be compared by nothing. The nested tracker owns
+     * the whole sub-block, so an unobserved reader fails as an unconsumed key.
+     */
+    private fun checkInval(
+        step: JsonObject,
+        invalidated: Boolean,
+    ) = step["expected"]!!
+        .jsonObject
+        .getValue("invalidates")
+        .jsonObject
+        .consumingNested("windowing expected.invalidates") { inv ->
+            inv.assertBoolean("output") { invalidated }
+        }
 
     private fun observe(
         ctx: Context,
@@ -55,7 +65,7 @@ class WindowingConformanceTest {
         assertEquals(expOut(step), out, "output")
         val wasCached = ctx.isSet(obs)
         ctx.get(obs)
-        assertEquals(inval(step), !wasCached, "invalidation")
+        checkInval(step, !wasCached)
     }
 
     @Test

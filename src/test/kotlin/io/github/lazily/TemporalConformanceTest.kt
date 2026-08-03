@@ -38,10 +38,22 @@ class TemporalConformanceTest {
 
     private fun expected(step: JsonObject) = step["expected"]!!.jsonObject
 
-    private fun invalidates(
+    /**
+     * Assert the step's `invalidates` sub-block by its KEY SET, not just the one
+     * reader this call names (#lzsubblockkeyset): a reader kind added upstream
+     * would otherwise be compared by nothing. The nested tracker owns the whole
+     * sub-block, so an unobserved reader fails as an unconsumed key.
+     */
+    private fun checkInval(
         step: JsonObject,
         reader: String,
-    ) = expected(step)["invalidates"]!!.jsonObject[reader]!!.jsonPrimitive.boolean
+        invalidated: Boolean,
+    ) = expected(step)
+        .getValue("invalidates")
+        .jsonObject
+        .consumingNested("temporal expected.invalidates[$reader]") { inv ->
+            inv.assertBoolean(reader) { invalidated }
+        }
 
     @Test
     fun timerSingleShot() {
@@ -77,7 +89,7 @@ class TemporalConformanceTest {
 
             val wasCached = ctx.isSet(observed)
             ctx.get(observed)
-            assertEquals(invalidates(step, "fired"), !wasCached, "invalidation")
+            checkInval(step, "fired", !wasCached)
         }
     }
 
@@ -99,7 +111,7 @@ class TemporalConformanceTest {
 
             val wasCached = ctx.isSet(observed)
             ctx.get(observed)
-            assertEquals(invalidates(step, "count"), !wasCached, "invalidation")
+            checkInval(step, "count", !wasCached)
         }
     }
 
@@ -123,7 +135,7 @@ class TemporalConformanceTest {
 
             val wasCached = ctx.isSet(observed)
             ctx.get(observed)
-            assertEquals(invalidates(step, "count"), !wasCached, "invalidation")
+            checkInval(step, "count", !wasCached)
         }
     }
 
@@ -148,7 +160,7 @@ class TemporalConformanceTest {
 
             val wasCached = ctx.isSet(observed)
             ctx.get(observed)
-            assertEquals(invalidates(step, "state"), !wasCached, "invalidation")
+            checkInval(step, "state", !wasCached)
         }
     }
 }

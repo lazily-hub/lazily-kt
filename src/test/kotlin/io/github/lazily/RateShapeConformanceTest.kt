@@ -2,7 +2,6 @@ package io.github.lazily
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.double
 import kotlinx.serialization.json.jsonArray
@@ -41,11 +40,22 @@ class RateShapeConformanceTest {
 
     private fun expOutput(step: JsonObject) = step["expected"]!!.jsonObject["output"]!!.jsonPrimitive.contentOrNull
 
-    private fun expInval(step: JsonObject) =
-        step["expected"]!!
-            .jsonObject["invalidates"]!!
-            .jsonObject["output"]!!
-            .jsonPrimitive.boolean
+    /**
+     * Assert the step's `invalidates` sub-block by its KEY SET, not just the one
+     * reader this runner observes (#lzsubblockkeyset): a reader kind added
+     * upstream would otherwise be compared by nothing. The nested tracker owns
+     * the whole sub-block, so an unobserved reader fails as an unconsumed key.
+     */
+    private fun checkInval(
+        step: JsonObject,
+        invalidated: Boolean,
+    ) = step["expected"]!!
+        .jsonObject
+        .getValue("invalidates")
+        .jsonObject
+        .consumingNested("rateshape expected.invalidates") { inv ->
+            inv.assertBoolean("output") { invalidated }
+        }
 
     /** Replay a fixture given a per-step driver returning the emitted value. */
     private fun run(
@@ -63,7 +73,7 @@ class RateShapeConformanceTest {
             assertEquals(expOutput(step), readOutput(), "output")
             val wasCached = ctx.isSet(observed)
             ctx.get(observed)
-            assertEquals(expInval(step), !wasCached, "invalidation")
+            checkInval(step, !wasCached)
         }
     }
 

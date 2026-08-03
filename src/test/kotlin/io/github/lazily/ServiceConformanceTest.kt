@@ -26,14 +26,6 @@ class ServiceConformanceTest {
 
     private fun steps(fx: JsonObject) = fx["steps"]!!.jsonArray
 
-    private fun inval(
-        step: JsonObject,
-        reader: String,
-    ) = step["expected"]!!
-        .jsonObject["invalidates"]!!
-        .jsonObject[reader]!!
-        .jsonPrimitive.boolean
-
     private inline fun <reified T : Any> observe(
         ctx: Context,
         cell: Source<T>,
@@ -51,7 +43,18 @@ class ServiceConformanceTest {
     ) {
         val wasCached = ctx.isSet(obs)
         ctx.get(obs)
-        assertEquals(inval(step, reader), !wasCached, "$reader invalidation")
+        // `invalidates` is an OBJECT, so its KEY SET is the assertion, not just
+        // the one reader this call names: a reader added upstream would
+        // otherwise be compared by nothing (#lzsubblockkeyset). The nested
+        // tracker owns the whole sub-block, so an unobserved reader kind fails
+        // as an unconsumed key.
+        step["expected"]!!
+            .jsonObject
+            .getValue("invalidates")
+            .jsonObject
+            .consumingNested("expected.invalidates[$reader]") { inv ->
+                inv.assertBoolean(reader) { !wasCached }
+            }
     }
 
     private fun wantMap(

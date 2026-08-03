@@ -119,10 +119,16 @@ class MaterializationConformanceTest {
                 assertEquals(strings(want).toSet(), eager.presentKeys().toSet(), "eager_present")
             }
             // observe_canonical / eager_lazy_observationally_equivalent.
-            a.assertKeyWith("observe") { want ->
-                for ((k, v) in want.jsonObject) {
-                    assertEquals(v.jsonPrimitive.int, eager.get(ctx, k), "eager observe $k")
-                    assertEquals(v.jsonPrimitive.int, lazy.getOrInsertWith(ctx, k) { lookup(it) }, "lazy observe $k")
+            // Descended, so the child tracker owns the key set: an entry added
+            // to `observe` upstream is an unconsumed key rather than a value
+            // compared by nothing (#lzsubblockkeyset).
+            a.sub("observe") { o ->
+                for (k in o.keys) {
+                    o.assertKeyWith(k) { want ->
+                        val w = want.jsonPrimitive.int
+                        assertEquals(w, eager.get(ctx, k), "eager observe $k")
+                        assertEquals(w, lazy.getOrInsertWith(ctx, k) { lookup(it) }, "lazy observe $k")
+                    }
                 }
             }
             a.assertKeyWith("lazy_present_after_reads") { want ->
@@ -179,10 +185,13 @@ class MaterializationConformanceTest {
             }
             // Deferral is not deallocation: every key observes the same value
             // through the lazy map as through the eager one.
-            a.assertKeyWith("observe") { want ->
-                for ((k, v) in want.jsonObject) {
-                    assertEquals(v.jsonPrimitive.int, eager.get(eagerCtx, k), "eager observe $k")
-                    assertEquals(v.jsonPrimitive.int, lazy.getOrInsertWith(ctx, k) { lookup(it) }, "lazy observe $k")
+            a.sub("observe") { o ->
+                for (k in o.keys) {
+                    o.assertKeyWith(k) { want ->
+                        val w = want.jsonPrimitive.int
+                        assertEquals(w, eager.get(eagerCtx, k), "eager observe $k")
+                        assertEquals(w, lazy.getOrInsertWith(ctx, k) { lookup(it) }, "lazy observe $k")
+                    }
                 }
             }
         }
@@ -280,15 +289,17 @@ class MaterializationConformanceTest {
                 assertEquals(strings(it).toSet(), lazyAfter, "lazy_present_after_reads")
             }
             // Observational transparency across kinds.
-            a.assertKeyWith("observe") { want ->
-                for ((k, v) in want.jsonObject) {
-                    val w = v.jsonPrimitive.int
-                    if (k in cellKeys) {
-                        assertEquals(w, eagerCells.get(k), "eager cell observe $k")
-                        assertEquals(w, lazyCells.get(k), "lazy cell observe $k")
-                    } else {
-                        assertEquals(w, eagerSlots.get(ctx, k), "eager slot observe $k")
-                        assertEquals(w, lazySlots.getOrInsertWith(lazyCtx, k) { lookup(it) }, "lazy slot observe $k")
+            a.sub("observe") { o ->
+                for (k in o.keys) {
+                    o.assertKeyWith(k) { want ->
+                        val w = want.jsonPrimitive.int
+                        if (k in cellKeys) {
+                            assertEquals(w, eagerCells.get(k), "eager cell observe $k")
+                            assertEquals(w, lazyCells.get(k), "lazy cell observe $k")
+                        } else {
+                            assertEquals(w, eagerSlots.get(ctx, k), "eager slot observe $k")
+                            assertEquals(w, lazySlots.getOrInsertWith(lazyCtx, k) { lookup(it) }, "lazy slot observe $k")
+                        }
                     }
                 }
             }

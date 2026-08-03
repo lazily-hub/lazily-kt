@@ -67,7 +67,8 @@ class ShmBlobArenaTest {
         )
 
         // Assertion metadata mirrors the descriptor + header layout.
-        fixture.getValue("assertions").jsonObject.consuming("arena_blob.json assertions") { a ->
+        val assertions = fixture.getValue("assertions").jsonObject
+        assertions.consuming("arena_blob.json assertions") { a ->
             a.assertInt("capacity") { arena.capacity() }
             a.assertLong("epoch") { descriptor.epoch }
             a.assertInt("header_len") { SHM_BLOB_HEADER_LEN }
@@ -85,26 +86,36 @@ class ShmBlobArenaTest {
             // `expected.descriptor` was ever read, so this one could disagree with
             // it — and with the binding — and nothing would notice
             // (#lzassertunknownkeys).
-            a.assertKeyWith("descriptor") { want ->
-                val d = want.jsonObject
-                assertEquals(d.getValue("offset").jsonPrimitive.long, descriptor.offset, "assertions.descriptor.offset")
-                assertEquals(d.getValue("len").jsonPrimitive.long, descriptor.len, "assertions.descriptor.len")
-                assertEquals(
-                    d.getValue("generation").jsonPrimitive.long,
-                    descriptor.generation,
-                    "assertions.descriptor.generation",
-                )
-                assertEquals(d.getValue("epoch").jsonPrimitive.long, descriptor.epoch, "assertions.descriptor.epoch")
-                assertEquals(
-                    d
-                        .getValue("checksum")
-                        .jsonPrimitive.content
-                        .toULong(),
-                    descriptor.checksum.toULong(),
-                    "assertions.descriptor.checksum",
-                )
-                assertEquals(expectedDescriptor, d, "assertions.descriptor must agree with expected.descriptor")
+            //
+            // DESCEND rather than assertKeyWith (#lzsubblockkeyset). The old arm
+            // compared five named sub-fields and stopped, so a sixth field added
+            // to the fixture's descriptor upstream was compared by nothing while
+            // every scalar sibling of `descriptor` stayed guarded. The child
+            // tracker owns the unread/unasserted checks for everything beneath,
+            // so a planted sub-key fails exactly the way a planted top-level key
+            // does.
+            a.sub("descriptor") { d ->
+                d.assertLong("offset") { descriptor.offset }
+                d.assertLong("len") { descriptor.len }
+                d.assertLong("generation") { descriptor.generation }
+                d.assertLong("epoch") { descriptor.epoch }
+                // u64 on the wire, wider than Long — compare in unsigned space.
+                d.assertKeyWith("checksum") { want ->
+                    assertEquals(
+                        want.jsonPrimitive.content.toULong(),
+                        descriptor.checksum.toULong(),
+                        "assertions.descriptor.checksum",
+                    )
+                }
             }
+            // The two copies must also agree with each OTHER: a fixture that
+            // contradicts itself is a corpus bug no per-field comparison against
+            // the binding can see.
+            assertEquals(
+                expectedDescriptor,
+                assertions.getValue("descriptor").jsonObject,
+                "assertions.descriptor must agree with expected.descriptor",
+            )
         }
 
         // 40-byte LZSH header byte-identical across bindings.
