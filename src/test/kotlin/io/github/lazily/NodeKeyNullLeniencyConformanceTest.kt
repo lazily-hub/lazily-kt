@@ -84,17 +84,25 @@ class NodeKeyNullLeniencyConformanceTest {
         val keyForms = linkedSetOf<String>()
     }
 
-    private fun decode(scenario: JsonObject, seen: Replayed): IpcMessage =
+    private fun decode(
+        scenario: JsonObject,
+        keys: AssertionKeys,
+        seen: Replayed,
+    ): IpcMessage =
         when (val codec = scenario.getValue("codec").jsonPrimitive.content) {
             "json" -> {
                 seen.codecs += "json"
-                IpcMessage.decodeJson(scenario.getValue("wire_json").jsonPrimitive.content)
+                val raw = scenario.getValue("wire_json").jsonPrimitive.content
+                keys.assertString("wire_input_fnv1a64") {
+                    wireInputFnv1a64Hex(raw.toByteArray(Charsets.UTF_8))
+                }
+                IpcMessage.decodeJson(raw)
             }
             "msgpack" -> {
                 seen.codecs += "msgpack"
-                IpcMessage.decodeMsgpack(
-                    hexToBytes(scenario.getValue("wire_msgpack_hex").jsonPrimitive.content),
-                )
+                val raw = hexToBytes(scenario.getValue("wire_msgpack_hex").jsonPrimitive.content)
+                keys.assertString("wire_input_fnv1a64") { wireInputFnv1a64Hex(raw) }
+                IpcMessage.decodeMsgpack(raw)
             }
             else -> error("unknown codec: $codec")
         }
@@ -387,7 +395,7 @@ class NodeKeyNullLeniencyConformanceTest {
                     "by the decoded and re-encoded values asserted below",
             )
 
-            val message = decode(scenario, seen)
+            val message = decode(scenario, keys, seen)
             sc.assertString("variant") { variantOf(message) }
             sc.requireAllSatisfied()
 
@@ -488,15 +496,11 @@ class NodeKeyNullLeniencyConformanceTest {
             listOf("key_form", "decoded_key", "fields"),
         )
         meta.proseKey(
-            // PROXY. The paragraph is a claim about how the CORPUS carries its
-            // bytes — raw text and lowercase hex rather than a pre-parsed object
-            // — and no assertion a run makes observes that choice directly. The
-            // honest proxy is the raw-wire control: had the carriage collapsed
-            // an absent map entry into an explicit nil, the three-way `key_form`
-            // split could not have survived into this runner at all, in either
-            // codec.
+            // Executable proof that the exact raw text / decoded-hex byte
+            // buffer reaches the library decoder rather than a reconstructed
+            // proxy.
             "wire_encoding",
-            listOf("key_form", "key_forms", "codecs"),
+            listOf("wire_input_fnv1a64"),
         )
         meta.proseKey(
             // its own words: "`expect.reencoded_key_field_present` is the half

@@ -64,6 +64,7 @@ class NodeIdExactRangeConformanceTest {
      */
     private fun decode(
         scenario: JsonObject,
+        keys: AssertionKeys,
         /** Records the codec entry point this call really dispatched into. */
         driven: MutableSet<String>,
     ): IpcMessage? =
@@ -74,13 +75,17 @@ class NodeIdExactRangeConformanceTest {
                 // under test rather than in the runner.
                 "json" -> {
                     driven += "json"
-                    IpcMessage.decodeJson(scenario.getValue("wire_json").jsonPrimitive.content)
+                    val raw = scenario.getValue("wire_json").jsonPrimitive.content
+                    keys.assertString("wire_input_fnv1a64") {
+                        wireInputFnv1a64Hex(raw.toByteArray(Charsets.UTF_8))
+                    }
+                    IpcMessage.decodeJson(raw)
                 }
                 "msgpack" -> {
                     driven += "msgpack"
-                    IpcMessage.decodeMsgpack(
-                        hexToBytes(scenario.getValue("wire_msgpack_hex").jsonPrimitive.content),
-                    )
+                    val raw = hexToBytes(scenario.getValue("wire_msgpack_hex").jsonPrimitive.content)
+                    keys.assertString("wire_input_fnv1a64") { wireInputFnv1a64Hex(raw) }
+                    IpcMessage.decodeMsgpack(raw)
                 }
                 else -> error("unknown codec: $codec")
             }
@@ -148,7 +153,7 @@ class NodeIdExactRangeConformanceTest {
                 observedOutcomes += outcome
             }
 
-            val message = decode(scenario, observedCodecs)
+            val message = decode(scenario, keys, observedCodecs)
 
             if (message == null) {
                 assertTrue(
@@ -248,10 +253,11 @@ class NodeIdExactRangeConformanceTest {
             listOf("node_id_decimal", "outcome"),
         )
         meta.proseKey(
-            // its own words: a runner "MUST compare the decoded identifier by
-            // its decimal rendering", through the codec under test, in both.
+            // Executable proof that the exact raw text / decoded-hex byte
+            // buffer reaches the library decoder rather than a reconstructed
+            // proxy.
             "wire_encoding",
-            listOf("node_id_decimal", "codecs"),
+            listOf("wire_input_fnv1a64"),
         )
         meta.proseKey(
             // its own words: "the two `exact` scenarios are the control" — the

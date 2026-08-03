@@ -133,6 +133,7 @@ class BlobBackendDiscriminatorConformanceTest {
      */
     private fun decode(
         scenario: JsonObject,
+        keys: AssertionKeys,
         /**
          * Records the codec entry point this call really dispatched into.
          *
@@ -147,11 +148,17 @@ class BlobBackendDiscriminatorConformanceTest {
         when (val codec = scenario.getValue("codec").jsonPrimitive.content) {
             "json" -> {
                 driven += "json"
-                IpcMessage.decodeJson(rawWire(scenario))
+                val raw = rawWire(scenario)
+                keys.assertString("wire_input_fnv1a64") {
+                    wireInputFnv1a64Hex(raw.toByteArray(Charsets.UTF_8))
+                }
+                IpcMessage.decodeJson(raw)
             }
             "msgpack" -> {
                 driven += "msgpack"
-                IpcMessage.decodeMsgpack(hexToBytes(rawWire(scenario)))
+                val raw = hexToBytes(rawWire(scenario))
+                keys.assertString("wire_input_fnv1a64") { wireInputFnv1a64Hex(raw) }
+                IpcMessage.decodeMsgpack(raw)
             }
             else -> error("unknown codec: $codec")
         }
@@ -269,7 +276,7 @@ class BlobBackendDiscriminatorConformanceTest {
             )
         }
 
-        val attempt = runCatching { decode(scenario, tally.codecs) }
+        val attempt = runCatching { decode(scenario, keys, tally.codecs) }
 
         // Decode ONCE, then assert the label against the real verdict — before
         // the label is allowed to select anything (`#lznullformblind`). A label
@@ -457,11 +464,11 @@ class BlobBackendDiscriminatorConformanceTest {
             listOf("decoded_backend", "rejected", "rejection_is_decode_error", "error_names_token"),
         )
         meta.proseKey(
-            // the raw-text / raw-hex carriage is what lets every declared wire
-            // form — including the two that are not tokens — reach the decoder
-            // in both codecs at all.
+            // Executable proof that the exact raw text / decoded-hex byte
+            // buffer reaches the library decoder rather than a reconstructed
+            // proxy.
             "wire_encoding",
-            listOf("codecs", "backend_forms"),
+            listOf("wire_input_fnv1a64"),
         )
         meta.proseKey(
             // its own words: "a runner MUST check that every backend in

@@ -11,6 +11,17 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import kotlin.test.assertEquals
 
+/** Lowercase, zero-padded FNV-1a 64 over the exact wire bytes a runner decodes. */
+fun wireInputFnv1a64Hex(bytes: ByteArray): String {
+    var hash = 0xcbf29ce484222325UL.toLong()
+    val prime = 0x100000001b3L
+    for (byte in bytes) {
+        hash = hash xor (byte.toLong() and 0xff)
+        hash *= prime
+    }
+    return java.lang.Long.toUnsignedString(hash, 16).padStart(16, '0')
+}
+
 /**
  * Fixture-scoped ledger of prose-key discharges (`#lzprosekeyconvention`).
  *
