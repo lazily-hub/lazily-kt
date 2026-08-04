@@ -13,6 +13,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFails
 
 /**
  * Cross-language conformance tests for the full Harel state-chart spec
@@ -118,6 +119,19 @@ class StateChartConformanceTest {
     @Test fun conformance_history_deep() = runFixture("history_deep.json")
 
     @Test fun conformance_entry_exit_actions() = runFixture("entry_exit_actions.json")
+
+    @Test
+    fun malformed_statechart_corpus_is_rejected() {
+        val fixture = loadFixture("malformed_rejected.json")
+        val cases = fixture.getValue("cases").jsonArray
+        check(cases.isNotEmpty()) { "malformed corpus must contain cases" }
+        for (caseElement in cases) {
+            val case = caseElement.jsonObject
+            assertFails("malformed statechart case ${case.getValue("name")} was accepted") {
+                ChartDef.fromJson(case.getValue("chart"))
+            }
+        }
+    }
 
     @Test fun `all statechart fixtures replay identically`() {
         listOf(

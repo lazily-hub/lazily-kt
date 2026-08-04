@@ -207,14 +207,18 @@ class WireDispatchFailClosedTest {
         assertEquals(Kind.Final, def.states.getValue("a").kind)
     }
 
-    /**
-     * FAIL CLOSED. `kind` is a closed discriminator whose only defined value is
-     * `"final"`. An unrecognised value used to fall through to Compound/Atomic, which
-     * runs a different chart than the author wrote with no diagnostic anywhere.
-     */
+    /** FAIL CLOSED. Unknown and structurally contradictory kinds are rejected. */
     @Test
     fun unknownStateKindIsRejected() {
-        for (bogus in listOf("atomic", "compound", "parallel", "history", "")) {
+        val unknown =
+            assertFailsWith<IllegalStateException> {
+                ChartDef.fromJson(
+                    chart("""{"root":{"initial":"a"},"a":{"parent":"root","kind":""}}"""),
+                )
+            }
+        assertTrue(unknown.message!!.contains("unknown state kind"))
+
+        for (bogus in listOf("compound", "parallel", "history")) {
             val e =
                 assertFailsWith<IllegalStateException> {
                     ChartDef.fromJson(
@@ -222,7 +226,7 @@ class WireDispatchFailClosedTest {
                     )
                 }
             assertTrue(
-                e.message!!.contains("unknown state kind") && e.message!!.contains(bogus),
+                e.message!!.contains("contradicts") && e.message!!.contains(bogus),
                 "message must name the offending value, got: ${e.message}",
             )
         }

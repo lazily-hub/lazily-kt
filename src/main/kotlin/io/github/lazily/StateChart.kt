@@ -99,8 +99,11 @@ class ChartDef internal constructor(
                     ?: error("chart must be a JSON object")
             // Validates chart.initial is present; descent uses each compound's
             // own `initial` from the root, so the value itself is not stored.
-            obj["initial"]?.jsonPrimitive?.contentOrNull
-                ?: error("chart.initial is required")
+            val topInitial =
+                obj["initial"]?.let {
+                    (it as? JsonPrimitive)?.takeIf { primitive -> primitive.isString }?.content
+                }
+                    ?: error("chart.initial is required")
 
             val statesObj =
                 obj["states"] as? JsonObject
@@ -111,6 +114,9 @@ class ChartDef internal constructor(
             for ((idx, entry) in statesObj.entries.withIndex()) {
                 order[entry.key] = idx
                 states[entry.key] = parseState(entry.key, entry.value)
+            }
+            check(topInitial in states) {
+                "chart.initial names undeclared state `$topInitial`"
             }
 
             return fromStates(states, order)
@@ -127,6 +133,26 @@ class ChartDef internal constructor(
             states: Map<String, StateDef>,
             order: Map<String, Int>,
         ): ChartDef {
+            for ((id, def) in states) {
+                for (
+                (field, target) in
+                listOf(
+                    "parent" to def.parent,
+                    "initial" to def.initial,
+                    "default" to def.default,
+                )
+                ) {
+                    check(target == null || target in states) {
+                        "state $id: $field names undeclared state `$target`"
+                    }
+                }
+                for ((event, transition) in def.transitions) {
+                    check(transition.target in states) {
+                        "state $id: transition $event targets undeclared state `${transition.target}`"
+                    }
+                }
+            }
+
             val children = LinkedHashMap<String, MutableList<String>>()
             var root: String? = null
             for ((id, def) in states) {
@@ -149,7 +175,7 @@ class ChartDef internal constructor(
         }
     }
 
-    internal fun kind(id: String): Kind = states[id]?.kind ?: Kind.Atomic
+    internal fun kind(id: String): Kind = states[id]?.kind ?: error("unknown state in this chart: $id")
 
     /** Ancestors of [id] inclusive, `[id, …, root]`. */
     internal fun ancestorsInclusive(id: String): List<String> {
@@ -186,44 +212,76 @@ private fun parseState(
     raw: JsonElement,
 ): StateDef {
     val obj = raw as? JsonObject ?: error("state $id must be an object")
-    val parent = obj["parent"]?.jsonPrimitive?.contentOrNull
-    val initial = obj["initial"]?.jsonPrimitive?.contentOrNull
-    val default = obj["default"]?.jsonPrimitive?.contentOrNull
+    fun optionalString(field: String): String? =
+        obj[field]?.let {
+            (it as? JsonPrimitive)?.takeIf { primitive -> primitive.isString }?.content
+                ?: error("state $id: $field must be a string")
+        }
+
+    val parent = optionalString("parent")
+    val initial = optionalString("initial")
+    val default = optionalString("default")
 
     if (obj["run"] != null) {
         error("state $id uses `run` actions, which are not supported (rejecting explicitly per spec)")
     }
 
-    // `kind` is a CLOSED discriminator on this schema: `"final"` is its only
-    // defined value. History, parallel and compound states are signalled through
-    // their own keys (`history`, `parallel`, `initial`) and never through `kind`.
-    //
-    // Absent `kind` is the normal case and is inferred structurally below — that
-    // fallback is deliberate and is what makes a leaf state a plain `{}`.
-    //
-    // A `kind` that is PRESENT but unrecognised is not forward-compat, it is a
-    // chart this decoder does not understand, so it is rejected. Reading it as
-    // `== "final"` and falling through to Compound/Atomic would silently run a
-    // *different* chart than the author wrote, with no diagnostic at any layer.
-    val declaredKind = obj["kind"]
+    val declaredKind =
+        obj["kind"]?.let {
+            (it as? JsonPrimitive)?.takeIf { primitive -> primitive.isString }?.content
+                ?: error("state $id: kind must be a string")
+        }
     if (declaredKind != null &&
-        (declaredKind as? JsonPrimitive)?.takeIf { it.isString }?.content != "final"
+        declaredKind !in setOf("atomic", "compound", "parallel", "history", "final")
     ) {
-        error("state $id: unknown state kind $declaredKind (the only defined value is \"final\")")
+        error("state $id: unknown state kind $declaredKind")
     }
+    val history =
+        obj["history"]?.let {
+            (it as? JsonPrimitive)?.takeIf { primitive -> primitive.isString }?.content
+                ?: error("state $id: history must be a string")
+        }
+    val parallel =
+        obj["parallel"]?.let {
+            (it as? JsonPrimitive)?.takeIf { flag -> !flag.isString }?.booleanOrNull
+                ?: error("state $id: parallel must be a boolean")
+        }
 
-    val kind: Kind =
+    val inferred: Kind =
         when {
-            obj["history"]?.jsonPrimitive?.contentOrNull != null ->
-                when (obj.getValue("history").jsonPrimitive.content) {
+            history != null ->
+                when (history) {
                     "shallow" -> Kind.History(deep = false)
                     "deep" -> Kind.History(deep = true)
                     else -> error("state $id: unknown history kind")
                 }
-            obj["parallel"]?.jsonPrimitive?.booleanOrNull == true -> Kind.Parallel
-            declaredKind != null -> Kind.Final
-            obj.contains("initial") -> Kind.Compound
+            parallel == true -> Kind.Parallel
+            initial != null -> Kind.Compound
             else -> Kind.Atomic
+        }
+    val inferredName =
+        when (inferred) {
+            Kind.Atomic -> "atomic"
+            Kind.Compound -> "compound"
+            Kind.Parallel -> "parallel"
+            Kind.Final -> "final"
+            is Kind.History -> "history"
+        }
+    val kind =
+        when {
+            declaredKind == null -> inferred
+            declaredKind == "final" -> {
+                check(inferredName == "atomic") {
+                    "state $id: declared kind final contradicts $inferredName"
+                }
+                Kind.Final
+            }
+            else -> {
+                check(declaredKind == inferredName) {
+                    "state $id: declared kind $declaredKind contradicts $inferredName"
+                }
+                inferred
+            }
         }
 
     val entry = parseActionList(obj["entry"])
