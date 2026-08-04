@@ -518,9 +518,6 @@ class BlobBackendDiscriminatorConformanceTest {
             "theorem",
             listOf("rejected", "decoded_backend"),
         )
-        // NOT prose: `generator` names an upstream script, not an obligation,
-        // and the corpus does not declare it.
-        meta.excuseKey("generator", "names the upstream script that mints the fixture, not an obligation")
         meta.requireAllSatisfied()
 
         // Anti-vacuity. A runner that refused everything would satisfy all four

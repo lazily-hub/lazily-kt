@@ -266,9 +266,6 @@ class NodeIdExactRangeConformanceTest {
             "anti_vacuity",
             listOf("outcome", "node_id_decimal", "outcomes", "scenario_count"),
         )
-        // NOT prose: `generator` names an upstream script, not an obligation,
-        // and the corpus does not declare it.
-        meta.excuseKey("generator", "names the upstream script that mints the fixture, not an obligation")
         meta.requireAllSatisfied()
 
         // The runner-side floors go LAST (`#lznullformblind`). A hardcoded count
