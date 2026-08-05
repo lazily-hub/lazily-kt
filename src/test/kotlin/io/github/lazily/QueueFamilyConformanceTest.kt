@@ -1015,7 +1015,7 @@ class QueueFamilyConformanceTest {
         flavor: Flavor,
     ): Int {
         val fixture = fixture(name)
-        workHarness(flavor, fixture.getValue("config").jsonObject).use { queue ->
+        workHarness(flavor, fixture.getValue("initial").jsonObject).use { queue ->
             queue.prime()
             val steps = fixture.getValue("steps").jsonArray
             assertTrue(steps.isNotEmpty(), "$flavor $name has no steps")

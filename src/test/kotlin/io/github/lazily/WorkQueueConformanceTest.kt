@@ -87,13 +87,13 @@ class WorkQueueConformanceTest {
 
     private fun runFixture(name: String) {
         val fixture = loadFixture(name)
-        val config = fixture.getValue("config").jsonObject
+        val initial = fixture.getValue("initial").jsonObject
         val ctx = Context()
         val queue =
             WorkQueueCell<String>(
                 ctx,
-                visibilityTimeout = config.getValue("visibility_timeout").jsonPrimitive.long,
-                maxDeliveries = config.getValue("max_deliveries").jsonPrimitive.int,
+                visibilityTimeout = initial.getValue("visibility_timeout").jsonPrimitive.long,
+                maxDeliveries = initial.getValue("max_deliveries").jsonPrimitive.int,
             )
 
         fixture.getValue("steps").jsonArray.forEach { rawStep ->
