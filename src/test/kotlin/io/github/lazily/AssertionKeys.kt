@@ -504,8 +504,8 @@ class AssertionKeys(
     ) {
         guardNotProse(key, "asserting")
         val want = this[key] ?: return
-        markAsserted(key)
         check(want)
+        markAsserted(key)
     }
 
     /**
