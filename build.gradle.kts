@@ -7,6 +7,7 @@ plugins {
     // the ktlint version it drives is pinned separately below — see the spotless
     // block for why both pins are needed rather than either alone.
     id("com.diffplug.spotless") version "6.25.0"
+    id("com.google.protobuf") version "0.9.5"
     `maven-publish`
 }
 
@@ -75,8 +76,31 @@ dependencies {
     implementation("net.java.dev.jna:jna:5.15.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    implementation("com.google.protobuf:protobuf-kotlin:4.31.1")
     testImplementation("org.jetbrains.kotlin:kotlin-test")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+}
+
+sourceSets {
+    main {
+        proto {
+            srcDir("../lazily-spec/proto")
+            include("lazily/graph_boundary/v1/graph_boundary.proto")
+        }
+    }
+}
+
+protobuf {
+    protoc {
+        artifact = "com.google.protobuf:protoc:4.31.1"
+    }
+    generateProtoTasks {
+        all().configureEach {
+            builtins {
+                create("kotlin")
+            }
+        }
+    }
 }
 
 tasks.test {

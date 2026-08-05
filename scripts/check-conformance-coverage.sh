@@ -85,6 +85,8 @@ KNOWN_UNCOVERED=(
   # reason.
   "reliable-sync/coalesce_bounds_outbox.json"
   "reliable-sync/liveness_lease_eviction.json"
+  # The canonical journal-decoder trace has no Kotlin replay runner yet.
+  "reliable-sync/outbox_journal_decode.json"
 )
 
 # --- rung 4: per-SCENARIO accounting (#lzscenariocoverage) -------------------
