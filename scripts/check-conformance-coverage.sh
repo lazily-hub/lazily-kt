@@ -161,8 +161,9 @@ REQUIRED_AREAS=(
   crdt-tree
   distributed
   familysync
-  ingress
-  lossless-tree
+ingress
+ipc
+lossless-tree
   materialization
   membership
   message-passing
@@ -192,17 +193,20 @@ OPENED="$(sort -u "$MANIFEST")"
 missing=0
 
 for area in "${REQUIRED_AREAS[@]}"; do
-  if [ -z "$(find "$SPEC_DIR/$area" -name '*.json' -print -quit 2>/dev/null)" ]; then
-    echo "ERROR: canonical corpus has no fixtures under area '$area'." >&2
-    echo "       The lazily-spec checkout at $SPEC_DIR is stale or partial; coverage" >&2
-    echo "       computed against it would silently understate the real corpus." >&2
-    missing=$((missing + 1))
-  fi
-done
-if [ -z "$(find "$SPEC_DIR" -maxdepth 1 -name '*.json' -print -quit 2>/dev/null)" ]; then
-  echo "ERROR: canonical corpus has no root-level IPC fixtures (snapshot_*/delta_*/arena_blob)." >&2
-  missing=$((missing + 1))
+if [ "$area" = "ipc" ]; then
+area_fixture="$(find "$SPEC_DIR" -maxdepth 1 -type f \
+  \( -name 'arena_blob.json' -o -name 'snapshot_*.json' -o -name 'delta_*.json' \) \
+  -print -quit 2>/dev/null)"
+else
+area_fixture="$(find "$SPEC_DIR/$area" -name '*.json' -print -quit 2>/dev/null)"
 fi
+if [ -z "$area_fixture" ]; then
+echo "ERROR: canonical corpus has no fixtures under area '$area'." >&2
+echo "       The lazily-spec checkout at $SPEC_DIR is stale or partial; coverage" >&2
+echo "       computed against it would silently understate the real corpus." >&2
+missing=$((missing + 1))
+fi
+done
 
 total=0
 covered=0
@@ -221,10 +225,11 @@ while IFS= read -r fixture; do
   # missing.
   if grep -qxF "$fixture" <<< "$OPENED"; then
     covered=$((covered + 1))
-    case "$fixture" in
-      */*) COVERED_AREA_LIST+="${fixture%%/*}"$'\n' ;;
-      *) COVERED_AREA_LIST+='(root)'$'\n' ;;
-    esac
+case "$fixture" in
+*/*) COVERED_AREA_LIST+="${fixture%%/*}"$'\n' ;;
+arena_blob.json|snapshot_*.json|delta_*.json) COVERED_AREA_LIST+='ipc'$'\n' ;;
+*) COVERED_AREA_LIST+='(unknown-root)'$'\n' ;;
+esac
     continue
   fi
   excused=0
@@ -503,9 +508,8 @@ if [ "$covered" -eq 0 ]; then
 fi
 
 # Distinct top-level areas witnessed by a fixture the corpus lists AND the run
-# opened. Root-level fixtures (snapshot_*/delta_*/arena_blob) form their own
-# pseudo-area `(root)`, so a run that read only those does not pass for a corpus
-# area's worth of depth.
+# opened. Root-level fixtures (snapshot_*/delta_*/arena_blob) form the explicit
+# `ipc` area. An unknown future root fixture is deliberately not credited to it.
 OPENED_AREAS="$(sort -u <<< "$COVERED_AREA_LIST" | grep . || true)"
 opened_area_count=0
 [ -n "$OPENED_AREAS" ] && opened_area_count="$(grep -c . <<< "$OPENED_AREAS")"
@@ -519,13 +523,9 @@ for area in "${REQUIRED_AREAS[@]}"; do
     missing=$((missing + 1))
   fi
 done
-if ! grep -qxF '(root)' <<< "$OPENED_AREAS"; then
-  echo "ERROR: the suite OPENED no root-level IPC fixture (snapshot_*/delta_*/arena_blob)." >&2
-  missing=$((missing + 1))
-fi
 
-# Calibrated 2026-08-02 against the real corpus: 25 distinct areas opened (the 24
-# REQUIRED_AREAS plus `(root)`). The floor sits a little below that so a genuine
+# Calibrated 2026-08-02 against the real corpus: 25 distinct REQUIRED_AREAS,
+# including the root-level `ipc` area. The floor sits a little below that so a genuine
 # upstream area rename is a one-line corpus edit rather than a forced number
 # change, while still being far above the zero an empty or half-cloned checkout
 # produces.
