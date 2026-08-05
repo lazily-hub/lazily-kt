@@ -73,6 +73,11 @@ fi
 # EXPECTED_SKIPS answers "having read it, did we assert on it". EXPECTED_SKIPS is
 # already rot-proof via exact set equality in the test; do not merge the two.
 KNOWN_UNCOVERED=(
+  # Reactive egress is currently Rust-only; Kotlin has no egress replay runner.
+  "egress/egress_generation_fence.json"
+  "egress/egress_inflight_window.json"
+  "egress/egress_ordered_ack.json"
+  "egress/egress_retry_budget.json"
   # codec/frame_roundtrip_msgpack.json was excused here while lazily-kt spoke
   # only the `json` half of the frame-codec obligation. It is now REPLAYED
   # (#lzmsgpackseven, MsgpackCodec.kt + CodecConformanceTest.kt), so the entry
