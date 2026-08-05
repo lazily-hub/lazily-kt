@@ -41,8 +41,12 @@ class AsyncSourceMap<K : Any, V : Any> : ReactiveMap<K, V> {
         default: (K) -> V,
     ): AsyncContext.AsyncSource<V> {
         lock.withLock { keyed.get(key)?.let { return it } }
-        val handle = ctx.source(default(key))
-        val (stored, mutation) = lock.withLock { keyed.insert(key, handle) }
+        val initial = default(key)
+        val (stored, mutation) =
+            lock.withLock {
+                keyed.get(key)?.let { return it }
+                keyed.insert(key, ctx.source(initial))
+            }
         // Bump off the map lock: a set can drive a dependent recompute that
         // re-enters this map.
         if (mutation.changed) bumpMembership(ctx)
