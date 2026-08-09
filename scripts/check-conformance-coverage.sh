@@ -73,6 +73,10 @@ fi
 # EXPECTED_SKIPS answers "having read it, did we assert on it". EXPECTED_SKIPS is
 # already rot-proof via exact set equality in the test; do not merge the two.
 KNOWN_UNCOVERED=(
+  # Register CRDTs (LWW / MV / PnCounter + the CellCrdt projection bit) are
+  # implemented here, but this binding has no canonical replay for the new
+  # registers corpus yet; the Registers coverage row is `~` until it does.
+  "collections/registers_convergence.json"
   # Reactive egress is currently Rust-only; Kotlin has no egress replay runner.
   "egress/egress_generation_fence.json"
   "egress/egress_inflight_window.json"
