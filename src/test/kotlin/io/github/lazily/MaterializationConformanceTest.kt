@@ -70,23 +70,54 @@ class MaterializationConformanceTest {
             .mapValues { (_, v) -> v.jsonPrimitive.int }
 
     /**
-     * The one `expected` key with nothing in lazily-kt to compare against.
+     * `default_mode_eager` — asserted, not excused (`#lzdefaultmodeuniform`).
      *
-     * `assertEquals("eager", ...default_mode)` compared the fixture to a literal
-     * in the runner, so the binding never entered the comparison and the arm
-     * asserted nothing (#lzconsumednotasserted). lazily-kt exposes no
-     * default-mode selector to assert instead: both builds are explicit calls
-     * (`materializeAll` vs `getOrInsertWith`), so the key names which of them the
-     * corpus calls the default rather than a value the binding can report. It is
-     * declared as an excuse, and the two builds it names are asserted by
-     * `eager_present` / `lazy_present_after_reads` below.
+     * lazily-kt has no mode flag to read back: eager vs lazy is which call the
+     * caller makes (`materializeAll` pre-mint vs `getOrInsertWith` mint-on-access).
+     * That is not a reason to skip the key. The fixture's value **selects the
+     * build**, and the behavioural fact asserted is the clause itself — *a map
+     * built the way the fixture names its default is fully materialized at build
+     * time*. So the string is read, dispatched on, the named build is constructed
+     * fresh, and its present-at-build set is compared against every key the
+     * fixture declares.
+     *
+     * Both directions therefore bite. Flipping the corpus to `"lazy"` builds the
+     * deferring map, whose build-time present set is missing the derived keys, and
+     * the arm fails. Breaking `materializeAll` so the eager build materializes
+     * nothing (or drops a key) also fails it — the direction the earlier excuse
+     * could not see. An unknown string is a hard error, never a skip.
+     *
+     * The two rejected shapes: `assertEquals("eager", …)` compares the fixture to
+     * a literal in the runner, so the binding never enters the comparison
+     * (`#lzconsumednotasserted`); and "lazily-kt exposes no default-mode selector"
+     * is disproved by lazily-cpp and lazily-cs, which have no mode flag either and
+     * both assert the behaviour.
+     *
+     * [declaredKeys] is every key the fixture declares; [buildEager] / [buildLazy]
+     * each construct that strategy's map from scratch (fresh [Context], untouched
+     * by the reads other arms perform) and return its present-at-build key set.
      */
-    private fun excuseDefaultMode(a: AssertionKeys) {
-        a.excuseKey(
-            "default_mode",
-            "lazily-kt exposes no default-mode selector — both builds are explicit calls; " +
-                "eager_present / lazy_present_after_reads assert the two strategies themselves",
-        )
+    private fun assertDefaultModeMaterializesAtBuild(
+        a: AssertionKeys,
+        declaredKeys: Set<String>,
+        buildEager: () -> Set<String>,
+        buildLazy: () -> Set<String>,
+    ) {
+        a.assertKeyWith("default_mode") { want ->
+            val mode = want.jsonPrimitive.content
+            val presentAtBuild =
+                when (mode) {
+                    "eager" -> buildEager()
+                    "lazy" -> buildLazy()
+                    else -> error("unknown default_mode \"$mode\"")
+                }
+            assertEquals(
+                declaredKeys,
+                presentAtBuild,
+                "a map built the fixture's default way ($mode) is materialized at build " +
+                    "(default_mode_eager)",
+            )
+        }
     }
 
     @Test
@@ -114,7 +145,17 @@ class MaterializationConformanceTest {
         for (k in strArray(fixture, "reads")) lazy2.getOrInsertWith(ctx2, k) { lookup(it) }
 
         expected.consuming("materialization/observational_transparency.json expected") { a ->
-            excuseDefaultMode(a)
+            assertDefaultModeMaterializesAtBuild(
+                a,
+                declaredKeys = vals.keys,
+                buildEager = {
+                    val c = Context()
+                    val m = ComputedMap<String, Int>()
+                    m.materializeAll(c, vals.keys) { lookup(it) }
+                    m.presentKeys().toSet()
+                },
+                buildLazy = { ComputedMap<String, Int>().presentKeys().toSet() },
+            )
             a.assertKeyWith("eager_present") { want ->
                 assertEquals(strings(want).toSet(), eager.presentKeys().toSet(), "eager_present")
             }
@@ -162,7 +203,17 @@ class MaterializationConformanceTest {
         eager.materializeAll(eagerCtx, vals.keys) { lookup(it) }
 
         expected.consuming("materialization/deferral_not_deallocation.json expected") { a ->
-            excuseDefaultMode(a)
+            assertDefaultModeMaterializesAtBuild(
+                a,
+                declaredKeys = vals.keys,
+                buildEager = {
+                    val c = Context()
+                    val m = ComputedMap<String, Int>()
+                    m.materializeAll(c, vals.keys) { lookup(it) }
+                    m.presentKeys().toSet()
+                },
+                buildLazy = { ComputedMap<String, Int>().presentKeys().toSet() },
+            )
             a.assertKeyWith("present_after_each_read") { want ->
                 assertEquals(
                     want.jsonArray.map { it.jsonPrimitive.int },
@@ -280,7 +331,28 @@ class MaterializationConformanceTest {
         val lazyAfter = (lazyCells.presentKeys() + lazySlots.presentKeys()).toSet()
 
         expected.consuming("materialization/entry_kind_orthogonal_to_mode.json expected") { a ->
-            excuseDefaultMode(a)
+            // Same shape with the entry-kind split: source entries are present at
+            // build under EVERY strategy, computed entries only under eager. So the
+            // eager build holds all four declared entries and the lazy build only
+            // the two sources — which is what makes the corpus flip fail here too.
+            assertDefaultModeMaterializesAtBuild(
+                a,
+                declaredKeys = (cellKeys + slotKeys).toSet(),
+                buildEager = {
+                    val c = Context()
+                    val cells = SourceMap<String, Int>(c)
+                    for (k in cellKeys) cells.insert(k, lookup(k))
+                    val slots = ComputedMap<String, Int>()
+                    slots.materializeAll(c, slotKeys) { lookup(it) }
+                    (cells.presentKeys() + slots.presentKeys()).toSet()
+                },
+                buildLazy = {
+                    val c = Context()
+                    val cells = SourceMap<String, Int>(c)
+                    for (k in cellKeys) cells.insert(k, lookup(k))
+                    (cells.presentKeys() + ComputedMap<String, Int>().presentKeys()).toSet()
+                },
+            )
             a.assertKeyWith("eager_present") { assertEquals(strings(it).toSet(), eagerPresent, "eager_present") }
             a.assertKeyWith("lazy_present_at_build") {
                 assertEquals(strings(it).toSet(), lazyAtBuild, "lazy_present_at_build")
