@@ -927,7 +927,22 @@ class ReactiveGraphConformanceTest {
 
     private fun scenariosOf(fx: JsonObject): List<JsonObject> = fx["scenarios"]!!.jsonArray.map { it.jsonObject }
 
-    private fun opsOf(fx: JsonObject): Set<String> {
+    /**
+     * Op vocabulary of [fx], named [name] so an unrecognised shape says WHICH
+     * fixture carries it.
+     *
+     * This runs BEFORE the replay dispatch below, so it — not the dispatch — is
+     * where a corpus carrying a third shape actually lands. An anonymous
+     * `unknown fixture shape 'x'` here reaches the caller as a collected
+     * failure that names no file, and the positive `replayed > 0` assertion
+     * then fires first and buries it under "ZERO fixtures replayed"
+     * (#lzledgeragreementaudit). Fail closed, and name both the fixture and the
+     * reason.
+     */
+    private fun opsOf(
+        name: String,
+        fx: JsonObject,
+    ): Set<String> {
         val out = sortedSetOf<String>()
 
         fun collect(o: JsonObject) {
@@ -936,7 +951,14 @@ class ReactiveGraphConformanceTest {
         when (val shape = fx["shape"]?.jsonPrimitive?.content) {
             "steps" -> collect(fx)
             "scenarios" -> for (sc in scenariosOf(fx)) collect(sc)
-            else -> error("unknown fixture shape '$shape'")
+            else ->
+                error(
+                    "$name: unknown fixture shape '$shape' — this runner dispatches on `shape` " +
+                        "and knows only 'steps' and 'scenarios'. A fixture carrying a new shape " +
+                        "must gain a replay arm (and, if it introduces ops, a SUPPORTED_OPS " +
+                        "entry) before it can be replayed. Never widen this to a skip " +
+                        "(#lzspecconf).",
+                )
         }
         return out
     }
@@ -1392,7 +1414,7 @@ class ReactiveGraphConformanceTest {
             // read from the file rather than assumed. That is what keeps the
             // coverage manifest (and the positive assertions) honest.
             val fx = json.parseToJsonElement(ConformanceFixtures.read("$area/$name")).jsonObject
-            val unsupported = (opsOf(fx) - SUPPORTED_OPS).sorted()
+            val unsupported = (opsOf(name, fx) - SUPPORTED_OPS).sorted()
             val reasons = mutableListOf<String>()
             if (unsupported.isNotEmpty()) reasons.add(unsupported.joinToString(", "))
             PARKED[name]?.let { reasons.add(it) }
@@ -1579,6 +1601,22 @@ class ReactiveGraphConformanceTest {
         // expected product is over the replayable set, not the whole corpus.
         val replayable = FIXTURES.size - EXPECTED_SKIPS.size
         val expected = replayable * models.size
+
+        // Collected findings are reported FIRST, ahead of the positive
+        // assertions (#lzledgeragreementaudit). A failure that aborts every
+        // model — an unrecognised fixture shape, say — leaves `replayed` at
+        // zero, so asserting `replayed > 0` first replaces the specific,
+        // fixture-naming cause with the generic "ZERO fixtures replayed"
+        // symptom and throws the diagnostic away. Both checks still run; only
+        // the order changed, so a run that replays nothing for NO collected
+        // reason still fails below.
+        if (failures.isNotEmpty()) {
+            fail(
+                "reactive-graph conformance FAILURES (findings against lazily-kt, not the " +
+                    "fixtures):\n" + failures.joinToString("\n"),
+            )
+        }
+
         assertTrue(
             replayed > 0,
             "ZERO reactive-graph fixtures replayed. The runner executed nothing — this is the " +
@@ -1597,12 +1635,6 @@ class ReactiveGraphConformanceTest {
                 "fixtures skipped), $ops ops, $checks assertions",
         )
 
-        if (failures.isNotEmpty()) {
-            fail(
-                "reactive-graph conformance FAILURES (findings against lazily-kt, not the " +
-                    "fixtures):\n" + failures.joinToString("\n"),
-            )
-        }
         assertEquals(expected, replayed, "not every fixture replayed against every context.")
     }
 }
