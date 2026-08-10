@@ -1,3 +1,4 @@
+import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 
 plugins {
@@ -120,6 +121,35 @@ tasks.test {
         events("failed")
         exceptionFormat = TestExceptionFormat.FULL
     }
+
+    // The conformance corpus is a real INPUT of this task (#lzktcorpusnotgradleinput).
+    //
+    // Without this, editing a fixture left `test` UP-TO-DATE: Gradle saw no
+    // declared input change, skipped the task, and the run reported GREEN having
+    // replayed NOTHING. That is the worst possible failure for a corpus guard,
+    // because every rung above it reasons about fixtures the suite opened — and a
+    // suite that never ran opened none, so nothing else can contradict it. It also
+    // silently defeats corpus-perturbation probes, whose entire method is "change a
+    // fixture, expect red".
+    //
+    // `optional(true)` because a checkout without the `lazily-spec` sibling is a
+    // legitimate local state that the tests already skip on; a MISSING corpus must
+    // not fail configuration, only a STALE result must not be reused.
+    val specDir = providers.environmentVariable("LAZILY_SPEC_DIR").orElse("../lazily-spec")
+    inputs.dir(layout.projectDirectory.dir(specDir.map { "$it/conformance" }))
+        .withPropertyName("conformanceCorpus")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+        .optional(true)
+
+    // Pass the corpus location EXPLICITLY rather than letting it be inherited.
+    //
+    // A Gradle test JVM inherits the DAEMON's environment, and the daemon outlives
+    // the shell that started it. So a daemon launched before `LAZILY_SPEC_DIR` was
+    // exported keeps serving the OLD path to every later run, and the only defence
+    // was remembering `--no-daemon`. Declaring it here also makes the variable part
+    // of the task's input fingerprint, so pointing at a different corpus re-runs
+    // the tests instead of reusing a result computed against another one.
+    environment("LAZILY_SPEC_DIR", specDir.get())
 }
 
 tasks.register<JavaExec>("interopPeer") {
