@@ -528,12 +528,28 @@ for area in "${REQUIRED_AREAS[@]}"; do
   fi
 done
 
-# Calibrated 2026-08-02 against the real corpus: 25 distinct REQUIRED_AREAS,
-# including the root-level `ipc` area. The floor sits a little below that so a genuine
-# upstream area rename is a one-line corpus edit rather than a forced number
-# change, while still being far above the zero an empty or half-cloned checkout
-# produces.
-MIN_OPENED_AREAS="${MIN_OPENED_AREAS:-22}"
+# This floor tracks WHAT THE RUN ACTUALLY OPENS, exactly — no margin, no slack.
+# Pinned 2026-08-09 at 26 distinct opened areas, re-derived from a full
+# `./gradlew test --no-daemon --rerun-tasks` plus this guard on the commit CI run
+# 31343632650 was green over (that run reported the same 142/150 fixtures,
+# 153/153 scenarios and 18/18 assertion blocks, so it examined the same corpus).
+#
+# It previously sat at 22 against 26, on the theory that slack makes an upstream
+# area rename a one-line corpus edit rather than a forced number change. That
+# reasoning does not hold: a rename ALSO fails the REQUIRED_AREAS loop directly
+# above, so the list has to be edited either way — the slack bought nothing and
+# let four areas go entirely dark with this guard still green. Do not restore it,
+# and do not raise this floor "by however many areas a change adds" while leaving
+# an old margin in place; that convention is what let the fixture and scenario
+# floors in the sibling bindings rot to 40 replays behind reality
+# (#lzscenariofloordrift). Set it to the count the `area coverage OK` line below
+# reports from a COMPLETED CI run, which examines the published corpus rather
+# than a working tree (#lzspecpushbeforebindings).
+#
+# Note the number is necessarily >= the 25 REQUIRED_AREAS, since each of those
+# must contribute an opened fixture; the extra is an area the run opens without
+# requiring. Do not lower this to fix a red run — the shrink is the finding.
+MIN_OPENED_AREAS="${MIN_OPENED_AREAS:-26}"
 if [ "$opened_area_count" -lt "$MIN_OPENED_AREAS" ]; then
   echo "ERROR: the suite OPENED fixtures in only $opened_area_count corpus area(s)," >&2
   echo "       expected >= $MIN_OPENED_AREAS. The corpus is a partial checkout, or the" >&2
@@ -605,3 +621,8 @@ echo "scenario coverage OK: $sc_replayed/$sc_total scenarios across $sc_fixtures
 echo "assertion-block coverage OK: $blocks_total/$blocks_total fixture-level \`assertions\`" \
      "block(s) opened by the suite were BOUND to a tracker (runtime ledger — a block" \
      "nobody binds is silent to every other rung)"
+# Printed so MIN_OPENED_AREAS can be re-pinned from a CI log instead of being
+# guessed or probed locally — a floor nobody can read the real number for is a
+# floor that drifts.
+echo "area coverage OK: $opened_area_count corpus area(s) OPENED by the suite" \
+     "(${#REQUIRED_AREAS[@]} required; floor $MIN_OPENED_AREAS)"
