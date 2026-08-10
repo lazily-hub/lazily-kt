@@ -85,6 +85,32 @@ private class SeqHlc(
         return SeqStamp(lastWall, lastLogical, peer)
     }
 
+    /**
+     * Fork this clock for a NEW [peer], keeping the causal position.
+     *
+     * Two independent things, and both matter (`#lzzigforkhlcpeer`):
+     *
+     * The causal position CARRIES. A fork has already observed everything the
+     * source holds, so a clock that restarted at zero would let an ordinary
+     * skewed `nowMicros` — below the source's [lastWall], which is the entire
+     * reason hybrid logical clocks exist — mint a stamp causally *behind* state
+     * the fork already carries. [SeqLww] adopts only on `>`, so that write is
+     * silently dropped by the fork's own register.
+     *
+     * The peer does NOT carry. It is the stamp's final tiebreaker, so two
+     * replicas stamping under one id can mint the identical
+     * `(wall, logical, peer)`. Again LWW adopts only on `>` — a tie means
+     * *neither* side adopts and the replicas diverge permanently, the one
+     * outcome a CRDT exists to make impossible. lazily-zig shipped exactly that
+     * while fixing the carry.
+     */
+    fun forkAs(peer: SeqPeer): SeqHlc {
+        val out = SeqHlc(peer)
+        out.lastWall = lastWall
+        out.lastLogical = lastLogical
+        return out
+    }
+
     /** Observe a remote [stamp] at wall time [nowMicros], advancing past it. */
     fun recv(
         remote: SeqStamp,
@@ -324,10 +350,21 @@ class SeqCrdt<Id, V> private constructor(
         return changed
     }
 
-    /** Fork this replica's state to a new owning [peer] (deep copy, new identity). */
-    fun cloneStateAs(peer: SeqPeer): SeqCrdt<Id, V> = SeqCrdt(LinkedHashMap(entries.mapValues { cloneEntry(it.value) }), SeqHlc(peer), peer)
+    /**
+     * Fork this replica's state to a new owning [peer] (deep copy, new
+     * identity). The fork's clock keeps this replica's causal POSITION and
+     * takes the new PEER — see [SeqHlc.forkAs] for why a fresh `SeqHlc(peer)`
+     * here silently dropped the fork's first skewed local write
+     * (`#lzzigforkhlcpeer`).
+     */
+    fun cloneStateAs(peer: SeqPeer): SeqCrdt<Id, V> =
+        SeqCrdt(LinkedHashMap(entries.mapValues { cloneEntry(it.value) }), hlc.forkAs(peer), peer)
 
-    /** Clone state keeping the same peer identity. */
+    /**
+     * Clone state keeping the same peer identity. Delegating to [cloneStateAs]
+     * with our own peer is the one case where carrying the peer is right: this
+     * is the same logical replica, not a second writer.
+     */
     fun cloneState(): SeqCrdt<Id, V> = cloneStateAs(peer)
 
     private fun cloneEntry(e: SeqEntry<V>): SeqEntry<V> =
