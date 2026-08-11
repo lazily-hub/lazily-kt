@@ -84,7 +84,7 @@ read -r -a CORPUS_ROOT_SCAN_DIRS <<< "${LAZILY_CORPUS_ROOT_SCAN_DIRS:-src}"
 # The floor exists because the clause below reasons about files the walk FOUND,
 # so it is vacuously satisfied by an empty file list: a scan that examined
 # nothing reports no offenders and would print OK. That is the vacuous green the
-# rest of this file refuses (#lzvacuousrun). Pinned below the real tree (139
+# rest of this file refuses (#lzvacuousrun). Pinned below the real tree (141
 # sources) with headroom; a drop this far means the walk is pointed somewhere
 # wrong, not that the repo shrank.
 MIN_SCANNED_SOURCES="${MIN_SCANNED_SOURCES:-100}"

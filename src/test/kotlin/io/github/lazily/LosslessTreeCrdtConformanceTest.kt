@@ -1,9 +1,7 @@
 package io.github.lazily
 
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -20,6 +18,11 @@ import kotlin.test.assertEquals
  * ops / forks / anti-entropy syncs across named replicas, and asserts exact
  * rendered text, live-node counts, and convergence across delivery orders. The
  * lossless invariant `render(tree) == source_text` is what every assertion checks.
+ *
+ * The step interpreter lives in [LosslessTreeReplayWorld] so that
+ * [LosslessTreeDeliverOrderTest] can pin the parts of it no fixture can see —
+ * chiefly that a `deliver.order` sequence reaches `applyUpdate` UNSORTED and in
+ * ONE call.
  */
 class LosslessTreeCrdtConformanceTest {
     private val json = Json
@@ -29,118 +32,8 @@ class LosslessTreeCrdtConformanceTest {
         return json.parseToJsonElement(text).jsonObject
     }
 
-    private class World {
-        val replicas = HashMap<String, LosslessTreeCrdt>()
-        val ids = HashMap<String, TreeNodeId>()
-
-        fun id(label: String): TreeNodeId = ids[label] ?: error("unknown node label `$label`")
-
-        fun afterOf(op: JsonObject): TreeNodeId? =
-            when (val after = op["after"]) {
-                null, JsonNull -> null
-                is JsonPrimitive -> id(after.content)
-                else -> error("bad `after`: $after")
-            }
-
-        fun buildChildren(
-            spec: JsonObject,
-            parent: TreeNodeId,
-        ) {
-            val children = spec["children"]?.jsonArray ?: return
-            var prev: TreeNodeId? = null
-            for (childEl in children) {
-                val child = childEl.jsonObject
-                val label = child.getValue("label").jsonPrimitive.content
-                val id = replicas.getValue("a").createNode(parent, prev, nodeSeed(child))
-                ids[label] = id
-                buildChildren(child, id)
-                prev = id
-            }
-        }
-    }
-
-    private fun applyStep(
-        world: World,
-        step: JsonObject,
-    ) {
-        val fork = step["fork"]?.jsonPrimitive?.content
-        val clone = step["clone"]?.jsonPrimitive?.content
-        val sync = step["sync"]?.jsonObject
-        val deliver = step["deliver"]?.jsonObject
-        val on = step["on"]?.jsonPrimitive?.content
-        when {
-            fork != null -> {
-                val peer = step.getValue("peer").jsonPrimitive.long
-                world.replicas[fork] = world.replicas.getValue("a").fork(peer)
-            }
-            clone != null -> {
-                val from = step.getValue("from").jsonPrimitive.content
-                // No public clone(): a same-peer fork reproduces the state deep-copy.
-                error("clone step unused by fixtures; from=$from")
-            }
-            sync != null -> {
-                val from = sync.getValue("from").jsonPrimitive.content
-                val to = sync.getValue("to").jsonPrimitive.content
-                val update = world.replicas.getValue(from).diff(world.replicas.getValue(to).frontier())
-                world.replicas.getValue(to).applyUpdate(update)
-            }
-            deliver != null -> {
-                val from = deliver.getValue("from").jsonPrimitive.content
-                val to = deliver.getValue("to").jsonPrimitive.content
-                val full = world.replicas.getValue(from).diff(world.replicas.getValue(to).frontier())
-                val only = deliver.getValue("only").jsonArray.map { it.jsonPrimitive.int }
-                world.replicas.getValue(to).applyUpdate(TreeUpdate(only.map { full.ops[it] }))
-            }
-            on != null -> applyOp(world, on, step)
-            else -> error("unrecognized step: $step")
-        }
-    }
-
-    private fun applyOp(
-        world: World,
-        on: String,
-        op: JsonObject,
-    ) {
-        val replica = world.replicas.getValue(on)
-        when (val kind = op.getValue("op").jsonPrimitive.content) {
-            "create" -> {
-                val parent = world.id(op.getValue("parent").jsonPrimitive.content)
-                val after = world.afterOf(op)
-                val label = op.getValue("label").jsonPrimitive.content
-                world.ids[label] = replica.createNode(parent, after, nodeSeed(op))
-            }
-            "edit_leaf" -> {
-                val node = world.id(op.getValue("node").jsonPrimitive.content)
-                val at = op.getValue("at_byte").jsonPrimitive.int
-                val del = op["delete_bytes"]?.jsonPrimitive?.int ?: 0
-                val insert = op["insert"]?.jsonPrimitive?.content ?: ""
-                replica.editLeaf(node, at, del, insert)
-            }
-            "split" -> {
-                val node = world.id(op.getValue("node").jsonPrimitive.content)
-                val at = op.getValue("at_byte").jsonPrimitive.int
-                val label = op.getValue("new_label").jsonPrimitive.content
-                world.ids[label] = replica.splitLeaf(node, at)
-            }
-            "merge_leaves" -> {
-                val left = world.id(op.getValue("left").jsonPrimitive.content)
-                val right = world.id(op.getValue("right").jsonPrimitive.content)
-                replica.mergeAdjacentLeaves(left, right)
-            }
-            "reorder" -> {
-                val node = world.id(op.getValue("node").jsonPrimitive.content)
-                replica.reorderChild(node, world.afterOf(op))
-            }
-            "tombstone" -> {
-                val node = world.id(op.getValue("node").jsonPrimitive.content)
-                replica.tombstoneNode(node)
-            }
-            else -> error("unknown op: $kind")
-        }
-    }
-
     private fun assertExpect(
-        world: World,
+        world: LosslessTreeReplayWorld,
         expect: JsonObject,
         scenario: String,
     ) {
@@ -168,10 +61,10 @@ class LosslessTreeCrdtConformanceTest {
             val label = "$name[${ConformanceScenarios.idOf(scenario, i).value}]"
             val seed = scenario.getValue("seed").jsonObject
             val peer = seed.getValue("peer").jsonPrimitive.long
-            val world = World()
+            val world = LosslessTreeReplayWorld()
             world.replicas["a"] = LosslessTreeCrdt(peer)
             world.buildChildren(seed.getValue("tree").jsonObject, TreeNodeId.ROOT)
-            scenario["steps"]?.jsonArray?.forEach { applyStep(world, it.jsonObject) }
+            scenario["steps"]?.jsonArray?.forEach { world.applyStep(it.jsonObject) }
             assertExpect(world, scenario.getValue("expect").jsonObject, label)
         }
     }
@@ -193,20 +86,24 @@ class LosslessTreeCrdtConformanceTest {
     @Test fun `conformance invalid source roundtrip`() = runFixture("invalid_source_roundtrip.json")
 
     @Test fun `conformance concurrent conflict preserves text`() = runFixture("concurrent_conflict_preserves_text.json")
-}
 
-private fun leafKind(s: String): LeafKind =
-    when (s) {
-        "token" -> LeafKind.Token
-        "trivia" -> LeafKind.Trivia
-        "raw" -> LeafKind.Raw
-        "error" -> LeafKind.Error
-        else -> error("unknown leaf kind: $s")
-    }
+    /**
+     * `apply_update` advances the Lamport counter past every op it OBSERVES,
+     * unconditionally and BEFORE the idempotence skip, so a write minted after a
+     * sync outranks everything that sync delivered. Every other fixture here is
+     * fork → concurrent edits → sync and never mutates a replica AFTER a sync
+     * into it, so none of them can see this. Note both replicas still CONVERGE
+     * when the advance is missing — `render_on` is the load-bearing assertion,
+     * not `converged`.
+     */
+    @Test fun `conformance apply update advances counter`() = runFixture("apply_update_advances_counter.json")
 
-private fun nodeSeed(spec: JsonObject): NodeSeed {
-    val element = spec["element"]?.jsonPrimitive?.content
-    if (element != null) return NodeSeed.Element(element)
-    val leaf = spec["leaf"]?.jsonObject ?: error("node spec has neither element nor leaf: $spec")
-    return NodeSeed.Leaf(leafKind(leaf.getValue("kind").jsonPrimitive.content), leaf.getValue("text").jsonPrimitive.content)
+    /**
+     * `apply_update` BUFFERS an op whose dependency has not arrived and retries
+     * it as the rest of the same batch lands, rather than dropping it while
+     * recording its dot. Dropping is PERMANENT — the following full `sync`
+     * returns nothing, because both frontiers already hold every op — which is
+     * why the fixture syncs a second time and still asserts convergence.
+     */
+    @Test fun `conformance out of order delivery buffers`() = runFixture("out_of_order_delivery_buffers.json")
 }
