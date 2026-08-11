@@ -197,36 +197,56 @@ tasks.test {
     // the daemon outlives the shell that exported the variable, so the fingerprint and
     // the JVM must be fed from one place or Gradle reuses a result computed against a
     // different schemas tree.
+    //
+    // A missing schemas tree is a HARD FAILURE at task validation, exactly like a
+    // missing corpus. This input used to carry `optional(true)`; it was inert and is
+    // gone (#lzktgradleinputfingerprint). `optional` excuses an absent provider VALUE,
+    // not a nonexistent DIRECTORY, and this provider always has a value (`orElse`).
+    // Measured with the flag still on: `LAZILY_SPEC_SCHEMAS_DIR=/nope ./gradlew test
+    // --no-daemon` printed `> Task :test FAILED` and "property 'specSchemas' specifies
+    // directory '/nope' which doesn't exist" — same as the corpus, flag or no flag.
     val schemasDir =
         providers.environmentVariable("LAZILY_SPEC_SCHEMAS_DIR")
             .orElse(specDir.map { "$it/schemas" })
     inputs.dir(layout.projectDirectory.dir(schemasDir))
         .withPropertyName("specSchemas")
         .withPathSensitivity(PathSensitivity.RELATIVE)
-        .optional(true)
 
-    // The resolved LOCATION is an input too, not just the bytes under it.
+    // The resolved LOCATIONS are inputs too, not just the bytes under them.
     //
-    // `inputs.dir` alone fingerprints content at RELATIVE paths, and a Test task's
-    // `environment` is NOT tracked, so two cases reuse a stale verdict:
-    //   - a byte-identical scratch copy fingerprints the same as the default, so the
-    //     run that was supposed to prove the override took effect reports
-    //     `test UP-TO-DATE` and never starts a JVM;
-    //   - a MISSING directory under an explicit override fingerprints the same as
-    //     "no lazily-spec sibling at all" (both absent, because the input is
-    //     `optional`), so a probe pointed at a nonexistent tree could be answered
-    //     from a cached GREEN instead of the loud failure it must produce.
-    // Naming the path itself makes "which schemas tree" part of the verdict.
+    // `inputs.dir` alone fingerprints CONTENT at RELATIVE paths, so a byte-identical
+    // copy of a tree fingerprints the same as the original wherever it sits. Nothing
+    // else closes the gap: a Test task's `environment` is UNTRACKED, so forwarding
+    // the variable below feeds the test JVM and contributes NOTHING to the fingerprint.
+    // The consequence is that the run meant to PROVE an override took effect is the
+    // one Gradle is most confident it can skip.
+    //
+    // Measured on the corpus before this landed (#lzktgradleinputfingerprint), against
+    // a `cp -a` copy of `../lazily-spec/conformance`:
+    //   LAZILY_SPEC_CONFORMANCE_DIR=<copy> ./gradlew test --no-daemon
+    //     -> `> Task :test UP-TO-DATE`, "11 actionable tasks: 11 up-to-date"
+    // No JVM started, 0 fixtures replayed, BUILD SUCCESSFUL. With the property below:
+    //     -> `> Task :test`, "1 executed, 10 up-to-date", 448 tests replayed.
+    // The schemas seam was fixed first (#lzspecschemasoverride) and the corpus was
+    // left behind for four commits on a comment that claimed `environment(...)` had
+    // already handled it.
+    //
+    // Naming the paths themselves makes "which tree" part of the verdict.
+    inputs.property("conformanceCorpusDir", corpusDir)
     inputs.property("specSchemasDir", schemasDir)
 
-    // Pass the corpus location EXPLICITLY rather than letting it be inherited.
+    // Pass the locations EXPLICITLY rather than letting them be inherited.
     //
     // A Gradle test JVM inherits the DAEMON's environment, and the daemon outlives
     // the shell that started it. So a daemon launched before `LAZILY_SPEC_DIR` was
     // exported keeps serving the OLD path to every later run, and the only defence
-    // was remembering `--no-daemon`. Declaring it here also makes the variable part
-    // of the task's input fingerprint, so pointing at a different corpus re-runs
-    // the tests instead of reusing a result computed against another one.
+    // was remembering `--no-daemon`.
+    //
+    // That is ALL this does. A Test task's `environment` is untracked, so these three
+    // calls are invisible to up-to-date checking; the `inputs.property` lines above are
+    // what make the chosen path part of the fingerprint. Keeping both in one place is
+    // the point — the fingerprint and the JVM must be fed from the same providers, or
+    // Gradle reuses a verdict computed against a tree the JVM never read.
     environment("LAZILY_SPEC_DIR", specDir.get())
     environment("LAZILY_SPEC_CONFORMANCE_DIR", corpusDir.get())
     environment("LAZILY_SPEC_SCHEMAS_DIR", schemasDir.get())
