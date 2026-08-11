@@ -24,7 +24,6 @@ import kotlin.test.assertFails
 class StateChartConformanceTest {
     private val json = Json
 
-
     private fun loadFixture(name: String): JsonObject {
         val text = ConformanceFixtures.read("statechart/$name")
         return json.parseToJsonElement(text).jsonObject
