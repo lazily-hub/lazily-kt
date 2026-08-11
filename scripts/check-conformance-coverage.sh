@@ -34,8 +34,306 @@
 # in it replayed" are different questions, and the first cannot answer the second:
 # one scenario is enough to open a file. See the rung-4 block below.
 #
+# Ahead of all of that, a source-hygiene rung asserts only the seam SPELLS the
+# default corpus root (#lzcorpusrootguards). Every ledger below reasons about
+# fixtures that WERE opened, and a runner holding a hardcoded
+# "../lazily-spec/conformance/<area>" opens real fixtures — it is invisible here
+# and it is unfalsifiable, because LAZILY_SPEC_CONFORMANCE_DIR cannot reach it.
+#
 # Usage: scripts/check-conformance-coverage.sh [manifest-path] [scenario-ledger-path]
 set -euo pipefail
+
+# ---- RUNG: only the seam may SPELL the corpus root (#lzcorpusrootguards) ----
+#
+# `LAZILY_SPEC_CONFORMANCE_DIR` is what makes a conformance replay falsifiable:
+# copy the corpus, perturb one fixture, confirm the suite reddens. A runner that
+# builds its own "../lazily-spec/conformance/<area>" instead of asking
+# ConformanceFixtures never sees the override — and the failure is SILENT,
+# because a runner reading the DEFAULT corpus while believing it was redirected
+# is green either way. Nothing else in this file can see it: every rung below
+# audits fixtures that WERE opened, and a hardcoded root opens real fixtures.
+#
+# The measurement is what makes this worth a guard rather than a convention.
+# lazily-kt was MEASURED BROKEN this round for the sibling reason —
+# `ConformanceFixtures` read only `LAZILY_SPEC_DIR` while this script read
+# `LAZILY_SPEC_CONFORMANCE_DIR` first, so a scratch corpus holding a truncated
+# fixture produced 447 passing tests and exit 0 (fixed in ba7f41d). That same
+# commit removed `StateChartConformanceTest.specDir`, a dead field spelling
+# "../lazily-spec/conformance/statechart" verbatim. It bypassed nothing — the
+# file reads through the seam — but it sat in the tree through every green run.
+# That is the standing proof that nothing here guards against re-spelling the
+# default root, and this rung is that guard.
+#
+# It runs FIRST, before the corpus is even located: it is a source-hygiene check
+# with no dependency on a sibling checkout, and the absent-corpus skip further
+# down must not be able to swallow it.
+#
+# SCOPE: `src/**/*.kt` only. `build.gradle.kts:88` has
+# `srcDir("../lazily-spec/proto")` — protobuf source generation, not a corpus
+# path — and lines 143-145 DECLARE the corpus default as the Gradle task input,
+# which is the build-level seam. Scoping the walk to `src` means the scanner
+# never sees either, so neither needs a special case.
+#
+# `ConformanceFixtures.kt` is the one legitimate mention in `src`: it DECLARES
+# the default (`"../lazily-spec"` + `.resolve("conformance")`) after reading both
+# environment variables. Every other file naming the path does so in KDoc, which
+# the scanner skips on purpose.
+CORPUS_ROOT_ALLOW="src/test/kotlin/io/github/lazily/ConformanceFixtures.kt"
+read -r -a CORPUS_ROOT_SCAN_DIRS <<< "${LAZILY_CORPUS_ROOT_SCAN_DIRS:-src}"
+
+# The floor exists because the clause below reasons about files the walk FOUND,
+# so it is vacuously satisfied by an empty file list: a scan that examined
+# nothing reports no offenders and would print OK. That is the vacuous green the
+# rest of this file refuses (#lzvacuousrun). Pinned below the real tree (139
+# sources) with headroom; a drop this far means the walk is pointed somewhere
+# wrong, not that the repo shrank.
+MIN_SCANNED_SOURCES="${MIN_SCANNED_SOURCES:-100}"
+
+collect_kt_sources() {
+  for d in "${CORPUS_ROOT_SCAN_DIRS[@]}"; do
+    [ -d "$d" ] || continue
+    find "$d" -type f -name '*.kt' -not -path '*/build/*'
+  done | sort
+}
+
+CORPUS_ROOT_PY="$(cat <<'PY'
+import re
+import sys
+
+NEEDLE = "../lazily-spec/conformance"
+NEEDLE_SQUASHED = re.sub(r"[\\/\s]", "", NEEDLE)
+WINDOW_LITERALS = 12
+WINDOW_LINES = 10
+
+
+def _read_raw(text, i, line):
+    """Kotlin raw string: \"\"\" ... \"\"\", no escapes, interpolation allowed."""
+    n = len(text)
+    i += 3
+    start = i
+    while i < n:
+        if text[i] == '"' and text[i:i + 3] == '"""':
+            body = text[start:i]
+            # A run of more than three quotes closes on the LAST three.
+            j = i
+            while j < n and text[j] == '"':
+                j += 1
+            body = text[start:j - 3]
+            return j, body, line + text[start:j].count("\n")
+        i += 1
+    body = text[start:]
+    return n, body, line + body.count("\n")
+
+
+def _read_regular(text, i, line):
+    """Kotlin escaped string: "..." with backslash escapes and $ interpolation."""
+    n = len(text)
+    i += 1
+    out = []
+    while i < n:
+        c = text[i]
+        if c == "\\" and i + 1 < n:
+            nxt = text[i + 1]
+            out.append("\\" if nxt == "\\" else nxt)
+            i += 2
+            continue
+        if c == '"':
+            return i + 1, "".join(out), line
+        if c == "$" and i + 1 < n and text[i + 1] == "{":
+            # Drop the interpolation hole, including any nested string literal,
+            # so a quote inside `${x ?: "y"}` cannot desync the scan — and so
+            # "../lazily-spec${sep}conformance" still reads as the root.
+            depth = 1
+            i += 2
+            while i < n and depth > 0:
+                d = text[i]
+                if d == "{":
+                    depth += 1
+                elif d == "}":
+                    depth -= 1
+                elif d == '"':
+                    i, _, line = _read_regular(text, i, line)
+                    continue
+                elif d == "\n":
+                    line += 1
+                i += 1
+            continue
+        if c == "\n":
+            # Unterminated in valid Kotlin; tolerate rather than desync.
+            line += 1
+        out.append(c)
+        i += 1
+    return n, "".join(out), line
+
+
+def literals(text):
+    """Every string-literal VALUE in source order, with its opening line.
+
+    Comments and KDoc are skipped: several files here legitimately quote the
+    corpus root while explaining it, and lint-forcing an explanation to stop
+    describing the thing it explains trades real documentation for a guard that
+    is trivial to satisfy. Kotlin block comments NEST, so the depth counter is
+    not optional.
+    """
+    out = []
+    i = 0
+    n = len(text)
+    line = 1
+    while i < n:
+        c = text[i]
+        if c == "\n":
+            line += 1
+            i += 1
+            continue
+        if c == "/" and text[i:i + 2] == "//":
+            while i < n and text[i] != "\n":
+                i += 1
+            continue
+        if c == "/" and text[i:i + 2] == "/*":
+            depth = 1
+            i += 2
+            while i < n and depth > 0:
+                if text[i:i + 2] == "/*":
+                    depth += 1
+                    i += 2
+                    continue
+                if text[i:i + 2] == "*/":
+                    depth -= 1
+                    i += 2
+                    continue
+                if text[i] == "\n":
+                    line += 1
+                i += 1
+            continue
+        if c == "`":
+            # Backtick-quoted identifier (`fun \`a name\`()`).
+            i += 1
+            while i < n and text[i] != "`":
+                if text[i] == "\n":
+                    line += 1
+                i += 1
+            i += 1
+            continue
+        if c == "'":
+            i += 1
+            while i < n and text[i] != "'":
+                if text[i] == "\\":
+                    i += 1
+                if i < n and text[i] == "\n":
+                    line += 1
+                i += 1
+            i += 1
+            continue
+        if c == '"':
+            start = line
+            if text[i:i + 3] == '"""':
+                i, val, line = _read_raw(text, i, line)
+            else:
+                i, val, line = _read_regular(text, i, line)
+            out.append((start, val))
+            continue
+        i += 1
+    return out
+
+
+def squash(s):
+    return re.sub(r"[\\/\s]", "", s)
+
+
+def offenders(text):
+    found = []
+    lits = literals(text)
+    flagged = set()
+    # Pass 1 — the single-literal form.
+    for idx, (line, val) in enumerate(lits):
+        if NEEDLE in val.replace("\\", "/"):
+            found.append((line, "single literal", val))
+            flagged.add(idx)
+    # Pass 2 — the JOINED-SEGMENT form: Path.of("..", "lazily-spec",
+    # "conformance", area) or "../lazily-spec" + "/conformance". No single piece
+    # carries the root, so the match runs over a short run of ADJACENT literals
+    # with the separators squashed out. This is the form the lazily-go and
+    # lazily-js guards missed and were proven evadable on.
+    for idx, (line, val) in enumerate(lits):
+        if idx in flagged:
+            continue
+        joined = squash(val)
+        for j in range(idx + 1, min(idx + WINDOW_LITERALS, len(lits))):
+            if j in flagged:
+                break
+            nline, nval = lits[j]
+            if nline - line > WINDOW_LINES:
+                break
+            joined += squash(nval)
+            if NEEDLE_SQUASHED in joined:
+                found.append((line, "joined segments", " + ".join(
+                    repr(v) for _, v in lits[idx:j + 1])))
+                flagged.update(range(idx, j + 1))
+                break
+    found.sort()
+    return found
+
+
+def main(argv):
+    allow = set(argv[1].split(",")) if argv[1] else set()
+    paths = [p for p in sys.stdin.read().split("\n") if p]
+    examined = 0
+    hits = []
+    for p in paths:
+        rel = p[2:] if p.startswith("./") else p
+        if rel in allow:
+            continue
+        try:
+            with open(p, "r", encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except OSError as exc:
+            print("ERROR: cannot read %s: %s" % (p, exc), file=sys.stderr)
+            return 2
+        examined += 1
+        for line, form, detail in offenders(text):
+            hits.append((rel, line, form, detail))
+    print("EXAMINED %d" % examined)
+    for rel, line, form, detail in hits:
+        print("HIT %s:%d\t%s\t%s" % (rel, line, form, detail))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
+PY
+)"
+
+corpus_root_report="$(collect_kt_sources | python3 -c "$CORPUS_ROOT_PY" "$CORPUS_ROOT_ALLOW")"
+scanned="$(sed -n 's/^EXAMINED //p' <<< "$corpus_root_report")"
+
+if [ -z "$scanned" ]; then
+  echo "ERROR: the corpus-root scanner produced no verdict at all." >&2
+  echo "       That is missing EVIDENCE, not a clean tree." >&2
+  exit 1
+fi
+if [ "$scanned" -lt "$MIN_SCANNED_SOURCES" ]; then
+  echo "ERROR: corpus-root scan examined only $scanned Kotlin sources, expected >= $MIN_SCANNED_SOURCES." >&2
+  echo "       Searched: ${CORPUS_ROOT_SCAN_DIRS[*]} (from \$PWD=$PWD)." >&2
+  echo "       Reporting OK here would be a pass over nothing: no files means no" >&2
+  echo "       offenders, which is not the same finding as no offenders in the" >&2
+  echo "       tree (#lzvacuousrun)." >&2
+  exit 1
+fi
+if grep -q '^HIT ' <<< "$corpus_root_report"; then
+  echo "ERROR: these sources SPELL the canonical corpus root instead of resolving it" >&2
+  echo "       through ConformanceFixtures:" >&2
+  grep '^HIT ' <<< "$corpus_root_report" | sed 's/^HIT /         /' >&2
+  echo "       LAZILY_SPEC_CONFORMANCE_DIR does not reach a hardcoded path, so those" >&2
+  echo "       fixtures are replayed unfalsifiably — a perturbation probe cannot" >&2
+  echo "       redden them and the runner looks green either way. Resolve the corpus" >&2
+  echo "       with ConformanceFixtures.root / ConformanceFixtures.read()" >&2
+  echo "       (#lzcorpusrootguards)." >&2
+  exit 1
+fi
+
+echo "corpus-root guard OK: $scanned Kotlin sources examined, none spell '../lazily-spec/conformance'" \
+     "(single-literal AND joined-segment forms; comments and KDoc skipped; 1 allowlisted seam)"
+
 
 SPEC_DIR="${LAZILY_SPEC_CONFORMANCE_DIR:-${LAZILY_SPEC_DIR:-../lazily-spec}/conformance}"
 
