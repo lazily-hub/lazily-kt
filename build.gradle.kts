@@ -135,8 +135,16 @@ tasks.test {
     // `optional(true)` because a checkout without the `lazily-spec` sibling is a
     // legitimate local state that the tests already skip on; a MISSING corpus must
     // not fail configuration, only a STALE result must not be reused.
+    // `LAZILY_SPEC_CONFORMANCE_DIR` names the CORPUS directly and wins over
+    // `LAZILY_SPEC_DIR`, which names the sibling checkout. Both must be declared:
+    // the input fingerprint and the test JVM have to agree on which corpus is in
+    // play, or Gradle reuses a result computed against a different one
+    // (`#lzoverrideallrunnersaudit`).
     val specDir = providers.environmentVariable("LAZILY_SPEC_DIR").orElse("../lazily-spec")
-    inputs.dir(layout.projectDirectory.dir(specDir.map { "$it/conformance" }))
+    val corpusDir =
+        providers.environmentVariable("LAZILY_SPEC_CONFORMANCE_DIR")
+            .orElse(specDir.map { "$it/conformance" })
+    inputs.dir(layout.projectDirectory.dir(corpusDir))
         .withPropertyName("conformanceCorpus")
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .optional(true)
@@ -150,6 +158,7 @@ tasks.test {
     // of the task's input fingerprint, so pointing at a different corpus re-runs
     // the tests instead of reusing a result computed against another one.
     environment("LAZILY_SPEC_DIR", specDir.get())
+    environment("LAZILY_SPEC_CONFORMANCE_DIR", corpusDir.get())
 }
 
 tasks.register<JavaExec>("interopPeer") {

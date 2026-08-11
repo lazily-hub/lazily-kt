@@ -31,7 +31,10 @@ import kotlin.test.assertTrue
 class AgentDocStateConformanceTest {
     private val json = Json
 
-    private val schemaPath: Path = ConformanceFixtures.root.resolveSibling("schemas/agent-doc-state.json")
+    // Off `specRoot`, not `resolveSibling(root)`: a `LAZILY_SPEC_CONFORMANCE_DIR`
+    // override names an arbitrary corpus directory whose sibling is not a spec
+    // checkout, and a scratch corpus carries no `schemas/` at all.
+    private val schemaPath: Path = ConformanceFixtures.specRoot.resolve("schemas/agent-doc-state.json")
 
     private fun loadFixture(name: String): JsonObject {
         val text = ConformanceFixtures.read("agent-doc/$name")

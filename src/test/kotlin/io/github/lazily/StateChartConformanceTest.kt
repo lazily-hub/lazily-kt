@@ -10,7 +10,6 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFails
@@ -25,7 +24,6 @@ import kotlin.test.assertFails
 class StateChartConformanceTest {
     private val json = Json
 
-    private val specDir: Path = Path.of("../lazily-spec/conformance/statechart")
 
     private fun loadFixture(name: String): JsonObject {
         val text = ConformanceFixtures.read("statechart/$name")

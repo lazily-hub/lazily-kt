@@ -29,11 +29,28 @@ import java.util.concurrent.ConcurrentSkipListSet
  * assert which fixtures actually ran.
  */
 object ConformanceFixtures {
-    /** Canonical conformance root — the lazily-spec sibling, never a bundled copy. */
+    /** The lazily-spec sibling checkout — corpus, schemas, and proto all hang off it. */
+    val specRoot: Path = Path.of(System.getenv("LAZILY_SPEC_DIR") ?: "../lazily-spec")
+
+    /**
+     * Canonical conformance root — the lazily-spec sibling, never a bundled copy.
+     *
+     * `LAZILY_SPEC_CONFORMANCE_DIR` names the CORPUS directly and wins, matching
+     * every sibling binding and this repo's own `scripts/check-conformance-coverage.sh`,
+     * which has read it first all along. The test JVM did not, so the two disagreed:
+     * pointing only that variable at a scratch corpus left the suite replaying the
+     * DEFAULT one, green, having proved nothing about the bytes you named
+     * (`#lzoverrideallrunnersaudit`). Measured — a truncated fixture under
+     * `LAZILY_SPEC_CONFORMANCE_DIR` alone produced 447 passing tests and exit 0.
+     *
+     * That is the `#lzzigingressspecdir` failure by a different cause: not a
+     * hardcoded path, but a variable name the reader never looked at. It is worse
+     * than an unsupported override, because the caller has every reason to think it
+     * took effect.
+     */
     val root: Path =
-        Path
-            .of(System.getenv("LAZILY_SPEC_DIR") ?: "../lazily-spec")
-            .resolve("conformance")
+        System.getenv("LAZILY_SPEC_CONFORMANCE_DIR")?.takeIf { it.isNotEmpty() }?.let(Path::of)
+            ?: specRoot.resolve("conformance")
 
     /** Where the positive "these fixtures actually ran" manifest is written. */
     val manifestPath: Path =
