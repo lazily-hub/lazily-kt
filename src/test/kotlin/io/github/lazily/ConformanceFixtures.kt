@@ -52,6 +52,41 @@ object ConformanceFixtures {
         System.getenv("LAZILY_SPEC_CONFORMANCE_DIR")?.takeIf { it.isNotEmpty() }?.let(Path::of)
             ?: specRoot.resolve("conformance")
 
+    /**
+     * The raw `LAZILY_SPEC_SCHEMAS_DIR` value, kept so [requireSchemasRoot] can
+     * tell "the caller named a schemas tree" from "nobody overrode anything".
+     */
+    private val schemasOverride: String? =
+        System.getenv("LAZILY_SPEC_SCHEMAS_DIR")?.takeIf { it.isNotEmpty() }
+
+    /**
+     * Canonical JSON Schema root — `specRoot/schemas` unless
+     * `LAZILY_SPEC_SCHEMAS_DIR` names another tree (`#lzspecschemasoverride`).
+     *
+     * [root] redirects the CORPUS and nothing else, so a probe that needed to
+     * perturb a SCHEMA had nowhere to point: its only option was editing the
+     * shared `../lazily-spec` checkout, which reddens all ten bindings at once
+     * and dirties a repo other sessions are reading. The schemas seam therefore
+     * gets its own variable rather than riding on the corpus one — a scratch
+     * corpus carries no `schemas/` at all, and a scratch schemas tree carries no
+     * corpus, so the two overrides have to be independent to be useful.
+     *
+     * Unset, this resolves exactly where it always did, so an ordinary run is
+     * unaffected.
+     */
+    val schemasRoot: Path = schemasOverride?.let(Path::of) ?: specRoot.resolve("schemas")
+
+    /**
+     * True when [schemasRoot] is somewhere other than `specRoot/schemas`.
+     *
+     * Not simply `schemasOverride != null`: the Gradle `test` task forwards the
+     * variable UNCONDITIONALLY — it has to, so the input fingerprint and the test
+     * JVM cannot disagree — so the variable being set proves nothing about whether
+     * anyone redirected anything. The PATH is the evidence.
+     */
+    private val schemasRedirected: Boolean =
+        schemasRoot.normalize() != specRoot.resolve("schemas").normalize()
+
     /** Where the positive "these fixtures actually ran" manifest is written. */
     val manifestPath: Path =
         Path.of(
@@ -113,6 +148,48 @@ object ConformanceFixtures {
     }
 
     fun path(rel: String): Path = root.resolve(rel)
+
+    /**
+     * Hard-fail when [schemasRoot] is not a readable directory.
+     *
+     * Fails CLOSED on an explicit `LAZILY_SPEC_SCHEMAS_DIR` that cannot be read:
+     * a typo'd or unbuilt scratch tree is a BROKEN PROBE, and the two outcomes
+     * that must never happen are a skip and a silent fall back to the default
+     * schemas — either one reports green having proved nothing about the bytes
+     * the caller named, which is the `#lzoverrideallrunnersaudit` failure
+     * (447 tests, exit 0, DEFAULT corpus) in a second seam.
+     */
+    fun requireSchemasRoot() {
+        if (Files.isDirectory(schemasRoot)) return
+        check(!schemasRedirected) {
+            "LAZILY_SPEC_SCHEMAS_DIR names '$schemasOverride' " +
+                "(${schemasRoot.toAbsolutePath()}), which is not a readable directory. " +
+                "Refusing to fall back to ${specRoot.resolve("schemas").toAbsolutePath()}: " +
+                "validating against the DEFAULT schemas under an explicit override reports " +
+                "green about bytes nobody tested (#lzspecschemasoverride)."
+        }
+        error(
+            "canonical schemas directory missing at ${schemasRoot.toAbsolutePath()} — " +
+                "clone lazily-spec as a sibling (git clone --depth 1 " +
+                "https://github.com/lazily-hub/lazily-spec.git ../lazily-spec) or set " +
+                "LAZILY_SPEC_DIR / LAZILY_SPEC_SCHEMAS_DIR (#lzspecschemasoverride).",
+        )
+    }
+
+    /** Resolve a schema by schemas-relative path, e.g. `agent-doc-state.json`. */
+    fun schemaPath(rel: String): Path = schemasRoot.resolve(rel)
+
+    /** Read a canonical JSON Schema by schemas-relative path. Absence is loud, never a skip. */
+    fun readSchema(rel: String): String {
+        requireSchemasRoot()
+        val p = schemaPath(rel)
+        check(Files.exists(p)) {
+            "missing canonical schema '$rel' (looked in ${p.toAbsolutePath()}). " +
+                "The spec may have renamed or removed it — update the reader, do not pin a copy " +
+                "in source (#lzspecschemasoverride)."
+        }
+        return Files.readString(p)
+    }
 
     /** Read a canonical fixture by spec-relative path, e.g. `collections/mergecell_algebra.json`. */
     fun read(rel: String): String {

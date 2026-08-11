@@ -7,8 +7,6 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import java.nio.file.Files
-import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -31,10 +29,13 @@ import kotlin.test.assertTrue
 class AgentDocStateConformanceTest {
     private val json = Json
 
-    // Off `specRoot`, not `resolveSibling(root)`: a `LAZILY_SPEC_CONFORMANCE_DIR`
-    // override names an arbitrary corpus directory whose sibling is not a spec
-    // checkout, and a scratch corpus carries no `schemas/` at all.
-    private val schemaPath: Path = ConformanceFixtures.specRoot.resolve("schemas/agent-doc-state.json")
+    // Through the schemas seam, not `specRoot.resolve(...)` and never
+    // `resolveSibling(root)`: a `LAZILY_SPEC_CONFORMANCE_DIR` override names an
+    // arbitrary corpus directory whose sibling is not a spec checkout, and a
+    // scratch corpus carries no `schemas/` at all. `LAZILY_SPEC_SCHEMAS_DIR`
+    // redirects this file independently, so perturbing a schema no longer means
+    // dirtying the shared lazily-spec checkout (#lzspecschemasoverride).
+    private val schemaRel = "agent-doc-state.json"
 
     private fun loadFixture(name: String): JsonObject {
         val text = ConformanceFixtures.read("agent-doc/$name")
@@ -50,11 +51,7 @@ class AgentDocStateConformanceTest {
      * exactly the way the bundled fixtures did (#lzspecconf).
      */
     private fun typeTagVocabulary(): Set<String> {
-        check(Files.exists(schemaPath)) {
-            "canonical agent-doc-state schema missing at ${schemaPath.toAbsolutePath()} — " +
-                "clone lazily-spec as a sibling or set LAZILY_SPEC_DIR"
-        }
-        val schema = json.parseToJsonElement(Files.readString(schemaPath)).jsonObject
+        val schema = json.parseToJsonElement(ConformanceFixtures.readSchema(schemaRel)).jsonObject
         val enum =
             schema
                 .getValue("\$defs")

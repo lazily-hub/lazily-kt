@@ -149,6 +149,47 @@ tasks.test {
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .optional(true)
 
+    // The lazily-spec JSON SCHEMAS are a second, independent input
+    // (#lzspecschemasoverride).
+    //
+    // `LAZILY_SPEC_CONFORMANCE_DIR` redirects the corpus and nothing else, so a
+    // probe that had to perturb a SCHEMA — AgentDocStateConformanceTest reads the
+    // `type_tag` vocabulary straight out of `schemas/agent-doc-state.json` — could
+    // only do it by editing the shared `../lazily-spec` checkout, reddening all ten
+    // bindings at once and dirtying a repo other sessions read.
+    // `LAZILY_SPEC_SCHEMAS_DIR` gives that seam its own knob, and it is deliberately
+    // independent of the corpus one: a scratch corpus carries no `schemas/`, and a
+    // scratch schemas tree carries no corpus.
+    //
+    // Declared as an input for the same reason the corpus is: without it, flipping a
+    // field in the schema leaves `test` UP-TO-DATE and the perturbation probe reports
+    // GREEN having replayed nothing (#lzktcorpusnotgradleinput). Forwarded explicitly
+    // for the same reason too — the test JVM inherits the DAEMON's environment, and
+    // the daemon outlives the shell that exported the variable, so the fingerprint and
+    // the JVM must be fed from one place or Gradle reuses a result computed against a
+    // different schemas tree.
+    val schemasDir =
+        providers.environmentVariable("LAZILY_SPEC_SCHEMAS_DIR")
+            .orElse(specDir.map { "$it/schemas" })
+    inputs.dir(layout.projectDirectory.dir(schemasDir))
+        .withPropertyName("specSchemas")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+        .optional(true)
+
+    // The resolved LOCATION is an input too, not just the bytes under it.
+    //
+    // `inputs.dir` alone fingerprints content at RELATIVE paths, and a Test task's
+    // `environment` is NOT tracked, so two cases reuse a stale verdict:
+    //   - a byte-identical scratch copy fingerprints the same as the default, so the
+    //     run that was supposed to prove the override took effect reports
+    //     `test UP-TO-DATE` and never starts a JVM;
+    //   - a MISSING directory under an explicit override fingerprints the same as
+    //     "no lazily-spec sibling at all" (both absent, because the input is
+    //     `optional`), so a probe pointed at a nonexistent tree could be answered
+    //     from a cached GREEN instead of the loud failure it must produce.
+    // Naming the path itself makes "which schemas tree" part of the verdict.
+    inputs.property("specSchemasDir", schemasDir)
+
     // Pass the corpus location EXPLICITLY rather than letting it be inherited.
     //
     // A Gradle test JVM inherits the DAEMON's environment, and the daemon outlives
@@ -159,6 +200,7 @@ tasks.test {
     // the tests instead of reusing a result computed against another one.
     environment("LAZILY_SPEC_DIR", specDir.get())
     environment("LAZILY_SPEC_CONFORMANCE_DIR", corpusDir.get())
+    environment("LAZILY_SPEC_SCHEMAS_DIR", schemasDir.get())
 }
 
 tasks.register<JavaExec>("interopPeer") {
