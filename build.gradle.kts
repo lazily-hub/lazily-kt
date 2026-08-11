@@ -132,9 +132,39 @@ tasks.test {
     // silently defeats corpus-perturbation probes, whose entire method is "change a
     // fixture, expect red".
     //
-    // `optional(true)` because a checkout without the `lazily-spec` sibling is a
-    // legitimate local state that the tests already skip on; a MISSING corpus must
-    // not fail configuration, only a STALE result must not be reused.
+    // A MISSING corpus is a HARD FAILURE, and it happens here at task validation,
+    // before any test JVM starts (#lzcorpusabsencehandling).
+    //
+    // This comment used to carry an `optional(true)` and claim the opposite: that a
+    // checkout without the `lazily-spec` sibling is "a legitimate local state that
+    // the tests already skip on", so a missing corpus "must not fail configuration".
+    // Both halves were false, and the flag bought nothing either way:
+    //   - `optional` excuses an absent provider VALUE, not a nonexistent DIRECTORY,
+    //     and this provider always has a value (`orElse`), so the flag was inert.
+    //     `LAZILY_SPEC_DIR=/nope ./gradlew test` failed with "property
+    //     'conformanceCorpus' specifies directory '...' which doesn't exist" —
+    //     the exact outcome the comment promised could not happen.
+    //   - nothing skips. `ConformanceFixtures.requireRoot()` throws, deliberately:
+    //     "Absence is therefore a loud, explicit failure — never a silent skip".
+    //     A conformance suite that quietly replays nothing is the vacuous green
+    //     this whole evidence ladder exists to refuse.
+    //   - and a sibling-less checkout never reached either of them. `main`'s proto
+    //     source set is `srcDir("../lazily-spec/proto")`, so without the sibling
+    //     `compileKotlin` fails first, on 28 unresolved references. There is no
+    //     state in which this repo builds without lazily-spec for the corpus input
+    //     to be lenient about.
+    // So the behaviour stays and the false promise goes. A sibling-less checkout
+    // cannot run `./gradlew test`, by design — and failing at configuration is the
+    // cheapest honest way to say so, ahead of a compile and ~450 red replays that
+    // all report the same one thing. `make test` guards the same absence one step
+    // earlier with an actionable message ("clone lazily-spec as a sibling or set
+    // LAZILY_SPEC_DIR"), and CI clones the sibling and guards it again, so the
+    // legible failure is already on the path every caller is told to use.
+    //
+    // The shell coverage guard's local SKIP is not a counterexample: it audits
+    // whether replays happened, so with no corpus it has no population and makes no
+    // claim. This task IS the replay, so it has nothing to be silent about.
+    //
     // `LAZILY_SPEC_CONFORMANCE_DIR` names the CORPUS directly and wins over
     // `LAZILY_SPEC_DIR`, which names the sibling checkout. Both must be declared:
     // the input fingerprint and the test JVM have to agree on which corpus is in
@@ -147,7 +177,6 @@ tasks.test {
     inputs.dir(layout.projectDirectory.dir(corpusDir))
         .withPropertyName("conformanceCorpus")
         .withPathSensitivity(PathSensitivity.RELATIVE)
-        .optional(true)
 
     // The lazily-spec JSON SCHEMAS are a second, independent input
     // (#lzspecschemasoverride).
