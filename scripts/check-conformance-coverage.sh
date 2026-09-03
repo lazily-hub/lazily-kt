@@ -375,7 +375,9 @@ KNOWN_UNCOVERED=(
   # implemented here, but this binding has no canonical replay for the new
   # registers corpus yet; the Registers coverage row is `~` until it does.
   "collections/registers_convergence.json"
-  # Reactive egress is currently Rust-only; Kotlin has no egress replay runner.
+  # The latest-durable per-key projection is replayed by
+  # LatestDurableProjectionConformanceTest. These older FIFO-stream fixtures
+  # describe a distinct egress contract that Kotlin does not yet implement.
   "egress/egress_generation_fence.json"
   "egress/egress_inflight_window.json"
   "egress/egress_ordered_ack.json"
@@ -462,6 +464,7 @@ REQUIRED_AREAS=(
   coordination
   crdt-tree
   distributed
+  egress
   familysync
 ingress
 ipc
@@ -844,10 +847,10 @@ done
 # reports from a COMPLETED CI run, which examines the published corpus rather
 # than a working tree (#lzspecpushbeforebindings).
 #
-# Note the number is necessarily >= the 25 REQUIRED_AREAS, since each of those
+# Note the number is necessarily >= the 26 REQUIRED_AREAS, since each of those
 # must contribute an opened fixture; the extra is an area the run opens without
 # requiring. Do not lower this to fix a red run — the shrink is the finding.
-MIN_OPENED_AREAS="${MIN_OPENED_AREAS:-26}"
+MIN_OPENED_AREAS="${MIN_OPENED_AREAS:-27}"
 if [ "$opened_area_count" -lt "$MIN_OPENED_AREAS" ]; then
   echo "ERROR: the suite OPENED fixtures in only $opened_area_count corpus area(s)," >&2
   echo "       expected >= $MIN_OPENED_AREAS. The corpus is a partial checkout, or the" >&2
