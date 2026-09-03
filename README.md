@@ -7,7 +7,7 @@ IPC wire types, a reactive full-Harel state chart, an `AsyncContext` async
 reactive graph, a lock-backed `ThreadSafeContext`, an in-process `ShmBlobArena`
 blob host, and an agent-doc state-projection consumer.
 
-`io.github.lazily:lazily` · Kotlin 2.0.21 · JVM 21 · v0.40.0
+`io.github.lazily:lazily` · Kotlin 2.0.21 · JVM 21 · v0.41.0
 
 ## Feature Set
 
@@ -96,6 +96,21 @@ lightweight ids over the shared node table.
   recompute (no stale subscriptions); cycles are detected and throw.
 
 ## Usage
+
+### Latest-durable projection egress
+
+`LatestDurableProjectionCore<K, V>` implements the lazily-spec latest-state
+projection contract for durable sinks. `upsertDesired` accepts monotone per-key
+epochs, `claim` moves one desired value into the single-flight slot, and
+`ackApplied` or `failRetryable` completes that fenced attempt. `reconnect`
+advances the connection generation and requeues only flights that were not
+superseded by newer desired state. Stale generation or epoch acknowledgements
+cannot clear newer work.
+
+Use `LatestDurableProjection`, `ThreadSafeLatestDurableProjection`, or
+`AsyncLatestDurableProjection` when callers also need reactive `entry(key)` and
+`generation()` views. Sink side effects remain outside the graph: serialize the
+four mutation operations and the actual sink write on the same per-key lane.
 
 ```kotlin
 import io.github.lazily.Context
