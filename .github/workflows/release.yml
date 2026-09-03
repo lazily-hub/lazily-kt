@@ -27,6 +27,9 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Fetch canonical lazily-spec protobuf sources
+        run: git clone --depth 1 https://github.com/lazily-hub/lazily-spec.git ../lazily-spec
+
       - name: Publish
         env:
           GITHUB_ACTOR: ${{ github.actor }}
