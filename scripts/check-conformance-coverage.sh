@@ -371,13 +371,14 @@ fi
 # EXPECTED_SKIPS answers "having read it, did we assert on it". EXPECTED_SKIPS is
 # already rot-proof via exact set equality in the test; do not merge the two.
 KNOWN_UNCOVERED=(
-  # Replay-equivalence proof (`lazily-spec/docs/replay-equivalence.md`) is an
-  # optional (MAY) coverage row and lazily-py is the reference implementation;
-  # this binding has no harness yet, so it opens none of the three. Building one
-  # is what removes these entries — they are not permanent carve-outs.
-  "replay/canonical_encoding_equality.json"
-  "replay/divergence_localization.json"
-  "replay/fingerprint_log_binding.json"
+  # The three replay-equivalence fixtures were excused here while this binding had
+  # no harness. They are now REPLAYED (#lzreplaykt, src/main/kotlin/io/github/lazily/
+  # Replay.kt + ReplayConformanceTest.kt), so the entries are gone rather than kept
+  # as stale excuses — this script fails an excuse for a fixture the same run opens,
+  # which is exactly what should happen to a gap that has been closed. `replay` is a
+  # REQUIRED_AREA below for the same reason `codec` is: the replay exists, so
+  # deleting the runner must turn something red.
+  #
   # Register CRDTs (LWW / MV / PnCounter + the CellCrdt projection bit) are
   # implemented here, but this binding has no canonical replay for the new
   # registers corpus yet; the Registers coverage row is `~` until it does.
@@ -484,6 +485,7 @@ lossless-tree
   reactive-graph
   receipts
   reliable-sync
+  replay
   resilience
   service
   signaling
@@ -854,10 +856,14 @@ done
 # reports from a COMPLETED CI run, which examines the published corpus rather
 # than a working tree (#lzspecpushbeforebindings).
 #
-# Note the number is necessarily >= the 26 REQUIRED_AREAS, since each of those
+# Raised to 28 on 2026-09-11 with the replay-equivalence harness (#lzreplaykt):
+# `replay` is a 28th area this run now opens, and it is REQUIRED above, so the
+# floor moves with it rather than keeping a margin the new area could hide in.
+#
+# Note the number is necessarily >= the 27 REQUIRED_AREAS, since each of those
 # must contribute an opened fixture; the extra is an area the run opens without
 # requiring. Do not lower this to fix a red run — the shrink is the finding.
-MIN_OPENED_AREAS="${MIN_OPENED_AREAS:-27}"
+MIN_OPENED_AREAS="${MIN_OPENED_AREAS:-28}"
 if [ "$opened_area_count" -lt "$MIN_OPENED_AREAS" ]; then
   echo "ERROR: the suite OPENED fixtures in only $opened_area_count corpus area(s)," >&2
   echo "       expected >= $MIN_OPENED_AREAS. The corpus is a partial checkout, or the" >&2

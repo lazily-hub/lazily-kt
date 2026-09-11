@@ -330,6 +330,12 @@ lazily-kt replays the shared [`lazily-spec`][spec] conformance fixtures:
 - The C-ABI FFI host boundary (`LazilyFfiBytes` / `LazilyFfiStatus` /
   `LazilyFfiMessageKind` incl. `CrdtSync = 3`, decode→`IpcMessage`→canonical
   JSON re-encode, panic-guarded) is covered by `LazilyFfiBoundaryTest`.
+- The replay-equivalence proof replays `conformance/replay/` — the log-binding,
+  divergence-localization, and canonical-encoding fixtures
+  (`ReplayConformanceTest`), driving the corpus's own `accumulator` /
+  `drifting_accumulator` subjects. Each `record` step also cross-checks that the
+  recorded `sum` digest IS the digest of the subject's final sum, so a harness
+  that fingerprinted some other value cannot pass.
 
 Not yet implemented: the `ffi = host` symbol export is provided as a JVM
 embeddable channel + C header + JNI-ready native entry table ([`src/main/resources/native/lazily_ffi.h`](src/main/resources/native/lazily_ffi.h)); real `extern "C"` symbol export ships via a Graal native-image build of the artifact.
@@ -409,6 +415,67 @@ protocol while `OutboxStore` supplies ordered byte persistence. The default
 small `RoomOutboxDao` boundary and wrap it in `RoomStore`; Room annotations and
 database ownership stay in the application, so the portable JVM artifact does
 not acquire an Android dependency.
+
+## Replay-equivalence proof
+
+`ReplayHarness` / `ReplayLog` / `ReplayFingerprint` (`Replay.kt`) make replay
+equivalence **provable** rather than assumed, per
+[`lazily-spec/docs/replay-equivalence.md`][replay-spec]: given the same event
+log, a rebuilt graph observes the same values at every checkpoint, and any
+deviation is a defect in the graph rather than a tolerance.
+
+```kotlin
+class Projection : ReplayGraph {
+    private var sum = 0L
+
+    override fun apply(event: ReplayEvent) {
+        sum += event.payload as Long
+    }
+
+    override fun observe(): Map<String, Any?> = mapOf("sum" to sum)
+}
+
+val log = ReplayLog.fromRecords(listOf("add" to 1L, "add" to 2L, "add" to 3L))
+val harness = ReplayHarness(::Projection)
+
+val fingerprint = harness.record(log) // pin it, or commit `toWire()`
+harness.verify(log, fingerprint)      // throws unless the replay is identical
+harness.prove(log)                    // record + re-replay, no fingerprint needed
+```
+
+- **The fingerprint is bound to its log.** `verify` compares the log digest
+  *before* any observed value, so a fingerprint recorded against a different log
+  throws `ReplayLogMismatchException` and is never compared. It matters because
+  `[+1,+2,+3]` and `[+3,+2,+1]` settle to the same sum: a value-only comparison
+  would pass and certify nothing about the log in front of it. `check`, the
+  non-raising reporting form, refuses a stale fingerprint too.
+- **Divergence is localized.** Every event is checkpointed (`stride = 1`), and
+  `ReplayDivergenceException.first` names the first diverging checkpoint's `seq`
+  and the cell label that differed, not merely the end state where the defect is
+  still visible. `stride` is itself part of the fingerprint, so one sampled at
+  stride 2 is refused by a stride-1 harness (`ReplayStrideMismatchException`).
+  Each fault is a distinct exception type, so a driver routes on the type rather
+  than on a message string.
+- **The encoding is canonical, or it fails.** `canonicalBytes` is type-tagged and
+  length-framed, with mapping and set members ordered by their own encoded bytes:
+  `{a:1,b:2}` equals `{b:2,a:1}`, `[1,2]` does not equal `[2,1]`, and `1`, `"1"`,
+  `1.0`, `true` and the byte string `1` are five different values. A value the
+  encoding does not define raises `ReplayEncodingException` instead of falling
+  back on `toString()`, whose JVM default embeds an identity hash and would
+  report a false divergence on every run. A host type opts in by implementing
+  `ReplayCanonical`.
+- **Hashing is SHA-256** from `java.security.MessageDigest`. The spec leaves both
+  hash and byte layout binding-chosen — fingerprints are pinned next to a test in
+  one language, never exchanged between bindings — so matching lazily-py's
+  BLAKE2b-256 digests would buy a new dependency for nothing.
+- **The outbox is the intended log source.** `DurableOutbox.replayFrom` already
+  *is* a replay source; `replayLogFromOutbox(outbox, cursor = 0)` makes it a
+  fingerprinted one, with outbox epochs as event seqs so a truncated prefix shows
+  up in the log digest instead of silently shifting every event.
+
+Checkpoint **values** only: sibling effect order is deliberately free across the
+family, so the sequence of effects a replay fires is not a stable thing to
+fingerprint and this contract does not ask a binding to.
 
 ## Keyed cell collections
 
@@ -730,5 +797,6 @@ Per-binding feature parity is tracked in the `coverage.json`-generated matrix in
 [zig]: https://github.com/lazily-hub/lazily-zig
 [dart]: https://github.com/lazily-hub/lazily-dart
 [react]: https://github.com/lazily-hub/lazily-react
+[replay-spec]: https://github.com/lazily-hub/lazily-spec/blob/main/docs/replay-equivalence.md
 [spec]: https://github.com/lazily-hub/lazily-spec
 [formal]: https://github.com/lazily-hub/lazily-formal
