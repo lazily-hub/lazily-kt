@@ -262,12 +262,17 @@ private fun canonical(
  * | Sequence order | `[1,2]` and `[2,1]` are different values |
  * | Type tagging | `1`, `"1"`, `1.0`, `true` and the byte string `1` are five different values |
  * | Member framing | `["a","bc"]` and `["ab","c"]` are different values |
+ * | Container framing | `[["a"],"b"]` and `[["a","b"]]` are different values |
  *
- * The last row is the one that is easy to get wrong: concatenating member
- * encodings without a length makes those two sequences identical, and a harness
- * that cannot tell them apart certifies a graph that reshaped its own output.
- * Every frame here is `tag` + decimal length + `:` + body, so no concatenation
- * of members can be confused for another.
+ * The last two rows are the ones that are easy to get wrong, and they are two
+ * separate obligations. Concatenating MEMBER encodings without a length makes
+ * `["a","sbc"]` and `["as","bc"]` identical, because a member's content can spell
+ * the tag of the member after it. Concatenating CONTAINER encodings without a
+ * length makes `[["a"],"b"]` and `[["a","b"]]` identical, because a container
+ * boundary has no tag to hide behind at all. A harness that cannot tell either
+ * pair apart certifies a graph that reshaped its own output. Every frame here is
+ * `tag` + decimal length + `:` + body — leaves and containers alike — so no
+ * concatenation can be confused for another.
  *
  * @throws ReplayEncodingException for a value the encoding does not define.
  */

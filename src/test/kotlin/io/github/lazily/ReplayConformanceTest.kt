@@ -255,7 +255,10 @@ class ReplayConformanceTest {
         assertEquals("CanonicalEncoding", fx.getValue("model").jsonPrimitive.content)
         val values = fx.getValue("config").jsonObject.getValue("values").jsonObject
         val steps = fx.getValue("steps").jsonArray
-        assertTrue(steps.size >= 11, "$rel carries ${steps.size} steps, fewer than the 11 expected")
+        // 14 = every step a CI clone of published lazily-spec carries today (three of
+        // them the member/container-framing rows added by #lzreplayframing). Exact, not
+        // a margin: a floor with slack lets a row stop replaying in the dark.
+        assertTrue(steps.size >= 14, "$rel carries ${steps.size} steps, fewer than the 14 expected")
         val outcomes = mutableSetOf<Boolean>()
         var replayed = 0
 

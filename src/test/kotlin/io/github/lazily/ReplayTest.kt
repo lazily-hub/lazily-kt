@@ -170,13 +170,27 @@ class ReplayTest {
     fun `members are length-framed so a concatenation is unambiguous`() {
         assertNotEquals(canonicalDigest(listOf("a", "bc")), canonicalDigest(listOf("ab", "c")))
         assertNotEquals(canonicalDigest(listOf(1L, 2L)), canonicalDigest(listOf(12L)))
-        // The corpus's own member-framing pair is not enough to pin the LENGTH: with a
-        // type tag in front of every member, `s|a s|bc` and `s|ab s|c` already differ
-        // as strings, so an encoder that dropped the length still passes it. These two
-        // collide the moment the length goes away — the member content spells the tag
-        // of the member after it — so this is the pair that actually requires framing.
+        // Two DIFFERENT framing properties are at stake here, and a pair that pins one
+        // says nothing about the other.
+        //
+        // 1. MEMBER length — the length inside each leaf frame. The corpus's plain pair
+        //    above is not enough to pin it: with a type tag in front of every member,
+        //    `s|a s|bc` and `s|ab s|c` already differ as strings, so an encoder that
+        //    dropped the length still passes it. These two collide the moment the member
+        //    length goes away, because the member content spells the TAG of the member
+        //    after it (`s`) — the collision is specific to this layout's string tag, so
+        //    a binding whose tags differ must carry its own colliding pair.
         assertNotEquals(canonicalDigest(listOf("a", "sbc")), canonicalDigest(listOf("as", "bc")))
         assertNotEquals(canonicalDigest(mapOf("a" to "sb")), canonicalDigest(mapOf("as" to "b")))
+        // 2. CONTAINER length — the length on the container's own frame, which the pairs
+        //    above leave completely free: every one of them is a flat two-member sequence
+        //    or a one-entry mapping, so both sides carry the same container framing and an
+        //    encoder that emitted `l` with no length at all still tells them apart. A
+        //    nested container is what pins it, because a container boundary has no tag to
+        //    hide behind: drop the nested container's length and both sides concatenate to
+        //    the identical `l l s1:a s1:b`. This collides in EVERY layout, not just one
+        //    whose string tag is `s`.
+        assertNotEquals(canonicalDigest(listOf(listOf("a"), "b")), canonicalDigest(listOf(listOf("a", "b"))))
     }
 
     @Test
