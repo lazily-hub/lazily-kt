@@ -12,7 +12,6 @@ import kotlinx.serialization.json.long
 import java.math.BigInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 
 /**
  * Replays the canonical replay-equivalence corpus against `Replay.kt` (`#lzreplaykt`).
@@ -52,18 +51,15 @@ class ReplayConformanceTest {
 
     @Test
     fun `canonical fingerprint log binding`() {
-        driveHarnessFixture("fingerprint_log_binding.json", minimumSteps = 8)
+        driveHarnessFixture("fingerprint_log_binding.json")
     }
 
     @Test
     fun `canonical divergence localization`() {
-        driveHarnessFixture("divergence_localization.json", minimumSteps = 7)
+        driveHarnessFixture("divergence_localization.json")
     }
 
-    private fun driveHarnessFixture(
-        name: String,
-        minimumSteps: Int,
-    ) {
+    private fun driveHarnessFixture(name: String) {
         val rel = "replay/$name"
         val fx = Json.parseToJsonElement(ConformanceFixtures.read(rel)).jsonObject
         assertEquals("Replay", fx.getValue("kind").jsonPrimitive.content)
@@ -72,10 +68,15 @@ class ReplayConformanceTest {
         val logs = config.getValue("logs").jsonObject.mapValues { (_, entries) -> logOf(entries.jsonArray) }
         val fingerprints = mutableMapOf<String, ReplayFingerprint>()
         val steps = fx.getValue("steps").jsonArray
-        assertTrue(
-            steps.size >= minimumSteps,
-            "$rel carries ${steps.size} steps, fewer than the $minimumSteps this runner was written against",
-        )
+        // No minimum-steps number lives here any more (#lzcorpusfloorguard). A
+        // hard-coded floor only ever caught the corpus SHRINKING, and it bought that
+        // by letting the corpus GROW into its slack unnoticed — three steps were
+        // added to canonical_encoding_equality.json and eight of nine bindings sat
+        // inside a stale floor and reported green without executing them. The shrink
+        // is now caught at the one place it can happen, against a committed manifest:
+        // lazily-spec `corpus-counts.json` + `scripts/check-corpus-floors.mjs`. What
+        // stays here is the constant-free half — every step LOADED was EXECUTED
+        // (asserted below) and an unrecognized op is a hard failure, never a skip.
         var replayed = 0
 
         for ((index, element) in steps.withIndex()) {
@@ -201,7 +202,8 @@ class ReplayConformanceTest {
         assertEquals(
             steps.size,
             replayed,
-            "$rel: every step must replay — a skipped step is a fixture that proves less than it claims",
+            "$rel: loaded ${steps.size} steps but executed $replayed — " +
+                "a step that loads without executing is a fixture that proves less than it claims",
         )
     }
 
@@ -255,10 +257,13 @@ class ReplayConformanceTest {
         assertEquals("CanonicalEncoding", fx.getValue("model").jsonPrimitive.content)
         val values = fx.getValue("config").jsonObject.getValue("values").jsonObject
         val steps = fx.getValue("steps").jsonArray
-        // 14 = every step a CI clone of published lazily-spec carries today (three of
-        // them the member/container-framing rows added by #lzreplayframing). Exact, not
-        // a margin: a floor with slack lets a row stop replaying in the dark.
-        assertTrue(steps.size >= 14, "$rel carries ${steps.size} steps, fewer than the 14 expected")
+        // The `>= 14` floor that used to stand here is gone (#lzcorpusfloorguard).
+        // This fixture is the one the incident happened to: #lzreplayframing took it
+        // from 11 to 14 steps and every binding still pinned at 11 passed WITHOUT
+        // replaying the three new rows. Re-pinning the number by hand just restarts
+        // that drift clock. Growth is now closed permanently by the executed-vs-loaded
+        // assertion at the end of this loop, and shrinkage by lazily-spec
+        // `corpus-counts.json` + `scripts/check-corpus-floors.mjs`.
         val outcomes = mutableSetOf<Boolean>()
         var replayed = 0
 
@@ -297,7 +302,12 @@ class ReplayConformanceTest {
             replayed++
         }
 
-        assertEquals(steps.size, replayed, "$rel: every step must replay")
+        assertEquals(
+            steps.size,
+            replayed,
+            "$rel: loaded ${steps.size} steps but executed $replayed — " +
+                "a step that loads without executing is a fixture that proves less than it claims",
+        )
         // Both outcomes really occurred: a runner that only ever saw `false` would
         // pass every inequality claim with a thoroughly broken encoding.
         assertEquals(setOf(true, false), outcomes, "$rel: the equality probe never produced both outcomes")

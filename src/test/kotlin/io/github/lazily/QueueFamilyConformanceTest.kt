@@ -69,6 +69,15 @@ class QueueFamilyConformanceTest {
 
     private fun fixture(name: String): JsonObject = Json.parseToJsonElement(ConformanceFixtures.read("collections/$name")).jsonObject
 
+    /**
+     * Steps the corpus DECLARES, read back from the fixtures rather than written down
+     * here (`#lzcorpusfloorguard`). Paired with the per-replay executed-vs-loaded check
+     * this pins that every row a fixture carries actually ran, with no number to rot;
+     * a shrinking corpus is caught in lazily-spec by `corpus-counts.json` /
+     * `scripts/check-corpus-floors.mjs`, not by a floor in this file.
+     */
+    private fun declaredSteps(names: List<String>): Int = names.sumOf { fixture(it).getValue("steps").jsonArray.size }
+
     @Test
     fun `capability and skip ledger is exact and non-vacuous`() {
         val declared = shipped + skipped.keys
@@ -348,6 +357,7 @@ class QueueFamilyConformanceTest {
             queue.primeReaders()
             val steps = fixture.getValue("steps").jsonArray
             assertTrue(steps.isNotEmpty(), "$flavor $name has no steps")
+            var executed = 0
             steps.forEachIndexed { index, raw ->
                 val step = raw.jsonObject
                 assertFalse(step.containsKey("invalidates"), "$name step $index uses step.invalidates")
@@ -415,8 +425,10 @@ class QueueFamilyConformanceTest {
                 expected["is_full"]?.jsonPrimitive?.let { assertEquals(it.boolean, queue.isFull()) }
                 expected["closed"]?.jsonPrimitive?.let { assertEquals(it.boolean, queue.isClosed()) }
                 queue.primeReaders()
+                executed++
             }
-            return steps.size
+            check(executed == steps.size) { "$flavor $name: loaded ${steps.size} steps but executed $executed" }
+            return executed
         }
     }
 
@@ -425,6 +437,7 @@ class QueueFamilyConformanceTest {
         for (flavor in Flavor.entries) {
             val steps = queueFixtures.sumOf { replayQueue(it, flavor) }
             assertTrue(steps > 0, "$flavor replayed zero QueueCell steps")
+            assertEquals(declaredSteps(queueFixtures), steps, "every declared QueueCell step must run against $flavor")
         }
     }
 
@@ -671,6 +684,7 @@ class QueueFamilyConformanceTest {
             initialIds.mapNotNull(topic::handle).forEach(topic::prime)
             val steps = fixture.getValue("steps").jsonArray
             assertTrue(steps.isNotEmpty(), "$flavor $name has no steps")
+            var executed = 0
             steps.forEachIndexed { index, raw ->
                 val step = raw.jsonObject
                 assertFalse(step.containsKey("invalidates"), "$name step $index uses step.invalidates")
@@ -743,8 +757,10 @@ class QueueFamilyConformanceTest {
                     )
                 }
                 expectedSubs.keys.mapNotNull(topic::handle).forEach(topic::prime)
+                executed++
             }
-            return steps.size
+            check(executed == steps.size) { "$flavor $name: loaded ${steps.size} steps but executed $executed" }
+            return executed
         }
     }
 
@@ -753,6 +769,7 @@ class QueueFamilyConformanceTest {
         for (flavor in Flavor.entries) {
             val steps = topicFixtures.sumOf { replayTopic(it, flavor) }
             assertTrue(steps > 0, "$flavor replayed zero TopicCell steps")
+            assertEquals(declaredSteps(topicFixtures), steps, "every declared TopicCell step must run against $flavor")
         }
     }
 
@@ -1019,6 +1036,7 @@ class QueueFamilyConformanceTest {
             queue.prime()
             val steps = fixture.getValue("steps").jsonArray
             assertTrue(steps.isNotEmpty(), "$flavor $name has no steps")
+            var executed = 0
             steps.forEachIndexed { index, raw ->
                 val step = raw.jsonObject
                 assertFalse(step.containsKey("invalidates"), "$name step $index uses step.invalidates")
@@ -1092,8 +1110,10 @@ class QueueFamilyConformanceTest {
                     )
                 }
                 queue.prime()
+                executed++
             }
-            return steps.size
+            check(executed == steps.size) { "$flavor $name: loaded ${steps.size} steps but executed $executed" }
+            return executed
         }
     }
 
@@ -1102,6 +1122,7 @@ class QueueFamilyConformanceTest {
         for (flavor in Flavor.entries) {
             val steps = workFixtures.sumOf { replayWork(it, flavor) }
             assertTrue(steps > 0, "$flavor replayed zero WorkQueueCell steps")
+            assertEquals(declaredSteps(workFixtures), steps, "every declared WorkQueueCell step must run against $flavor")
         }
     }
 

@@ -571,6 +571,10 @@ class IngressFamilyConformanceTest {
             json.getValue("poll_interval").jsonPrimitive.long,
         ).use { model ->
             materialize(model, keyList)
+            // Counted INSIDE the dispatch loop, so the value returned is what actually
+            // ran — `return steps.size` would have handed the caller the LOADED length
+            // back and made `assertEquals(total, steps)` compare a number to itself.
+            var executed = 0
             steps.forEachIndexed { index, raw ->
                 val step = raw.jsonObject
                 val op = step.getValue("op").jsonObject
@@ -653,8 +657,12 @@ class IngressFamilyConformanceTest {
                 assertState(model, step.getValue("expected").jsonObject, where)
                 assertInvalidation(step.getValue("expected").jsonObject, before, after, where)
                 materialize(model, keyList)
+                executed++
             }
-            return steps.size
+            check(executed == steps.size) {
+                "ingress/$name ($flavor): loaded ${steps.size} steps but executed $executed"
+            }
+            return executed
         }
     }
 
@@ -798,10 +806,19 @@ class IngressFamilyConformanceTest {
                 "missing canonical ingress fixture $name",
             )
         }
-        val total = expectedStepTotal()
+        // A `total >= 30` floor used to stand here (#lzcorpusfloorguard). It is
+        // deleted rather than re-pinned: a hard-coded corpus-size number only catches
+        // the corpus SHRINKING, and it pays for that by letting the corpus GROW into
+        // its slack in the dark — exactly how three new steps in
+        // `replay/canonical_encoding_equality.json` replayed in no binding at all.
+        // Growth is closed constant-free by `every flavor replays the whole ingress
+        // corpus` below (every step LOADED is EXECUTED, counted in the dispatch loop)
+        // together with the `else -> error` arm that makes an unrecognized op a hard
+        // failure. Shrinkage is caught at its single source, against a committed
+        // manifest: lazily-spec `corpus-counts.json` + `scripts/check-corpus-floors.mjs`.
         assertTrue(
-            total >= 30,
-            "the ingress corpus replays only $total steps; that is not the named schedule set",
+            expectedStepTotal() > 0,
+            "the ingress corpus declares no steps at all",
         )
     }
 
