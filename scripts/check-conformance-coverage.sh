@@ -1365,18 +1365,29 @@ fi
 #   distinct claim. A digest count absorbs a DELETION of a block whose bytes
 #   recur elsewhere. Both come off the one walk below; neither is a floor.
 #
-# NOTE on this binding's walk specifically. lazily-kt inventories the TOP-LEVEL
-# `assertions` OBJECT and nothing else — one candidate block per fixture, no
-# recursion, no `expect`/`expected`/`assert`/`asserts` aliases, no array
-# elements. Against the same 148 opened fixtures, `{assertions,expect,expected}`
-# objects at every depth carry 725 sites / 616 distinct digests (743/634 with the
-# other two names and array elements), so this rung's population is ~2.5% of the
-# blocks those fixtures actually carry. That gap is the finding, not the
-# expectation: the numbers below are derived under the walk this binding runs
-# TODAY, so they pin it against detaching, and they will move on their own the
-# day the walk widens. Widening it is SEPARATE work, tracked on its own — do not
-# "fix" a red here by narrowing the walk to match, and do not hand-edit a number
-# into this block: there is no number in it to edit.
+# NOTE on this binding's walk, and on reading it against lazily-spec. The walk
+# below is now the widest in the family's vocabulary: all FIVE tracked names at
+# every depth, objects AND plain-object array elements
+# (#lzktblockwalk, #lzarrayelementsites). `lazily-spec/scripts/check-corpus-
+# floors.mjs --report-blocks` prints that as the third row per binding, and for
+# lazily-kt it reads sites=743 distinct-digests=634 over 147 fixtures.
+#
+# This script derives 749 / 640 over 148, and the six-site difference is NOT
+# drift. The spec's opened set for kt is corpus-minus-KNOWN_UNCOVERED narrowed
+# again by REQUIRED_AREAS, and REQUIRED_AREAS scopes the AUDIT rather than the
+# set the suite opens — check-corpus-floors.mjs says so itself and declines to
+# derive a floor for kt for exactly that reason, calling its opened count a lower
+# bound. The one fixture in the gap is `protobuf/graph_boundary_traces.json`,
+# whose area is not required but which ProtobufGraphBoundaryConformanceTest
+# opens; it carries 6 sites / 6 digests and no array-valued tracked key, so both
+# derivations move by the SAME +12 / +12 when the walk widens. Pairing
+# REQUIRED_AREAS with an enforced EXCUSED_AREAS complement, as lazily-cpp does,
+# is what would close that gap; it is separate work.
+#
+# The numbers here stay DERIVED either way. They are computed under the walk this
+# binding runs, so they pin it against detaching and they move on their own when
+# the rule moves — do not "fix" a red by narrowing the walk to match, and there
+# is no number in this block to hand-edit.
 BLOCK_MAGNITUDE_PY="$(cat <<'PY'
 import hashlib
 import json
@@ -1454,10 +1465,16 @@ def walk_for_blocks(fixture_id, element, path, sites, digests):
     """The twin of ConformanceFixtures.walkForBlocks.
 
     A tracked NAME whose value is a JSON OBJECT is a site, emitted and NOT
-    descended into. An ARRAY-valued tracked key is NOT a site but IS descended
-    into: a runner binds such an array's ELEMENTS and never the array, so
-    counting it would declare a site unbindable by construction, while refusing
-    to descend would lose every `steps[3].expect` in the corpus.
+    descended into. An ARRAY-valued tracked key emits one site per plain-OBJECT
+    ELEMENT, labelled `<path>[<index>]` (`#lzarrayelementsites`): a runner binds
+    such an array's ELEMENTS and never the array, and until this widened the
+    parenthetical pointed at a site nobody emitted — all 12 elements of
+    `signaling/anti_spoof_session.json`'s eight `expect` arrays were invisible.
+
+    ONE level, PLAIN OBJECTS, TRUE indexes: the element pass is entered only from
+    the tracked-key branch, so `expect[0][1]` is not a site; a scalar, null or
+    array element emits nothing but is still descended into; and the index is the
+    element's real position, so `[{...}, 3, {...}]` gives `[0]` and `[2]`.
     """
     if isinstance(element, dict):
         for key, value in element.items():
@@ -1465,6 +1482,14 @@ def walk_for_blocks(fixture_id, element, path, sites, digests):
             if key in BLOCK_NAMES and isinstance(value, dict):
                 sites.add(fixture_id + "|" + child_path)
                 digests.add(block_digest(value))
+            elif key in BLOCK_NAMES and isinstance(value, list):
+                for index, item in enumerate(value):
+                    item_path = "%s[%d]" % (child_path, index)
+                    if isinstance(item, dict):
+                        sites.add(fixture_id + "|" + item_path)
+                        digests.add(block_digest(item))
+                    else:
+                        walk_for_blocks(fixture_id, item, item_path, sites, digests)
             else:
                 walk_for_blocks(fixture_id, value, child_path, sites, digests)
     elif isinstance(element, list):
@@ -1532,9 +1557,14 @@ for fixture_id in corpus:
         )
         sys.exit(1)
     # THE WALK. Keep this identical to ConformanceFixtures.walkForBlocks, which
-    # carries the full rationale for both weight-bearing clauses (#lzktblockwalk):
-    # an ARRAY-valued tracked key contributes NO site but IS descended into, and a
-    # site is EMITTED AND NOT DESCENDED INTO.
+    # carries the full rationale for the weight-bearing clauses (#lzktblockwalk,
+    # #lzarrayelementsites): an ARRAY-valued tracked key emits one site per
+    # plain-object ELEMENT at its true index, one level only, and a site is
+    # EMITTED AND NOT DESCENDED INTO. The two sides are pinned against each other
+    # by the equalities below — if either were the wider, a green run would be
+    # impossible, because a recorded site this walk does not enumerate fails as a
+    # corrupted evidence channel and an enumerated site nobody records fails as
+    # unbound.
     walk_for_blocks(fixture_id, document, "", expected_sites, expected_digests)
 
 # Positive-evidence floor on EACH dimension (#lzvacuousrun). A derivation of zero

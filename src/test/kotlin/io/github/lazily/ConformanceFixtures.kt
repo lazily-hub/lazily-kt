@@ -227,20 +227,37 @@ object ConformanceFixtures {
      * this same rule over the corpus on disk to derive the expected magnitude, so
      * the two must stay in lock step — the twin is marked THE WALK there too.
      *
-     * A tracked NAME in [BLOCK_NAMES] whose value is a JSON OBJECT is a site. Two
-     * clauses carry the weight and neither is a detail:
+     * A tracked NAME in [BLOCK_NAMES] is a site when its value is a JSON OBJECT,
+     * and one site PER PLAIN-OBJECT ELEMENT when its value is a JSON ARRAY. Three
+     * clauses carry the weight and none is a detail:
      *
-     *  - an ARRAY-valued tracked key contributes NO site, but IS descended into. A
-     *    runner binds the ELEMENTS of such an array, never the array itself, so
-     *    counting the array would declare a block unbindable by construction —
-     *    while refusing to descend would lose `steps[3].expect`, which is exactly
-     *    where most of this corpus keeps its per-step expectations.
+     *  - an ARRAY-valued tracked key emits one site per plain-object ELEMENT,
+     *    labelled `<path>[<index>]` (`#lzarrayelementsites`). "A runner binds the
+     *    elements, not the array" was always this rule's own parenthetical, and it
+     *    used to stop there — the array is not an object and its elements are list
+     *    items rather than tracked keys, so they were descended into and dropped.
+     *    `signaling/anti_spoof_session.json` holds its expected outbound signaling
+     *    frames that way, 12 elements across 8 steps, and every one was invisible
+     *    to rung 0 while [SignalingProtocolTest] read and asserted it. The SITE is
+     *    the element: a label per ARRAY would collapse a step's frames into one
+     *    name, so two individually falsifiable frames would stop being
+     *    individually nameable, which is the set-identity failure the site
+     *    dimension exists to catch.
+     *
+     *    ONE level, PLAIN OBJECTS, TRUE indexes. A nested element (`expect[0][1]`)
+     *    is not directly under a tracked key and gets no site — the element pass
+     *    is entered only from the tracked-key branch. A scalar, null or array
+     *    element emits nothing. And the index is the element's real position, so
+     *    `[{...}, 3, {...}]` is `expect[0]` and `expect[2]`, never `[0]`/`[1]`.
      *  - a site is EMITTED AND NOT DESCENDED INTO. Without that, a fixture's
      *    `expect` nested inside its own `assertions` becomes a second, separately
      *    bindable site that no tracker can reach without first unwrapping the
-     *    block above it — an unbindable-by-construction site again, in the other
-     *    direction. [AssertionKeys.sub] and `consumingNested` guard everything
-     *    beneath an emitted block, and deliberately do NOT book a rung-0 bind.
+     *    block above it — an unbindable-by-construction site, the same defect in
+     *    the other direction. [AssertionKeys.sub] and `consumingNested` guard
+     *    everything beneath an emitted block, and deliberately do NOT book a
+     *    rung-0 bind. An emitted array ELEMENT is covered by the same clause.
+     *  - an UNTRACKED key is not a block whatever its value, so `scenarios[0]`
+     *    and `steps[3]` are still not sites.
      */
     private fun declareAssertionBlocks(
         rel: String,
@@ -294,10 +311,24 @@ object ConformanceFixtures {
             is JsonObject ->
                 for ((key, value) in element) {
                     val childPath = if (path.isEmpty()) key else "$path.$key"
-                    if (key in BLOCK_NAMES && value is JsonObject) {
-                        sites["$rel|$childPath"] = value
-                    } else {
-                        walkForBlocks(rel, value, childPath, sites)
+                    when {
+                        key in BLOCK_NAMES && value is JsonObject ->
+                            sites["$rel|$childPath"] = value
+                        // The widening (`#lzarrayelementsites`). One site per
+                        // plain-object element, at its TRUE index; anything else in
+                        // the array is descended into as before, which is what keeps
+                        // the rule to one level — a nested array reaches this walk
+                        // through the JsonArray arm below, never through here.
+                        key in BLOCK_NAMES && value is JsonArray ->
+                            value.forEachIndexed { index, item ->
+                                val itemPath = "$childPath[$index]"
+                                if (item is JsonObject) {
+                                    sites["$rel|$itemPath"] = item
+                                } else {
+                                    walkForBlocks(rel, item, itemPath, sites)
+                                }
+                            }
+                        else -> walkForBlocks(rel, value, childPath, sites)
                     }
                 }
             is JsonArray ->

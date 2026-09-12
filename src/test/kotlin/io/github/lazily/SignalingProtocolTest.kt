@@ -226,13 +226,38 @@ class SignalingProtocolTest {
             assertEquals(expected.size, emits.size, "emit count mismatch at step $i")
             for ((j, expEl) in expected.withIndex()) {
                 val exp = expEl.jsonObject
-                val expConn = exp.getValue("to").jsonPrimitive.content
-                val expFrame = ServerMessage.fromJson(exp.getValue("frame"))
-                assertEquals(expConn, emits[j].to, "target conn mismatch at step $i emit $j")
-                // Compare on wire JSON so the anti-spoof `to`->`from` rewrite,
-                // roster-excludes-self, sorted roster, and unknown_target are all
-                // asserted byte-for-byte.
-                assertEquals(expFrame.toJson(), emits[j].frame.toJson(), "frame mismatch at step $i emit $j")
+                val emit = emits[j]
+                // The wire the room REALLY produced. Every comparison below runs
+                // against this one value, so nothing is compared against a model
+                // rebuilt out of the fixture's own bytes.
+                val actualWire = emit.frame.toJson()
+                // Rung 0 (`#lzarrayelementsites`). Each element of `expect` is its
+                // own assertion block, so each is bound and each carries the
+                // unread / unasserted / key-set rungs. Reading `to` and `frame` by
+                // hand left a THIRD key free to appear upstream and be compared by
+                // nothing, with every rung above reporting clean because this
+                // fixture's top-level `assertions` block was bound.
+                exp.consuming("signaling/anti_spoof_session.json steps[$i].expect[$j]") { e ->
+                    e.assertString("to") { emit.to }
+                    // Whole-element equality against the produced wire, which
+                    // subsumes the frame's KEY SET in both directions and asserts
+                    // the anti-spoof `to`->`from` rewrite, roster-excludes-self,
+                    // the sorted roster and `unknown_target` byte-for-byte. The
+                    // old comparison round-tripped the FIXTURE's frame through
+                    // `ServerMessage` first, so it only ever proved the two models
+                    // agreed — a field the corpus declares that the model does not
+                    // carry never reached a comparison.
+                    e.assertKeyValue("frame") { actualWire }
+                }
+                // The decode still has to ACCEPT the declared frame: `requireOnly`
+                // inside `ServerMessage.fromJson` is where an unknown wire field is
+                // refused, and the equality above would be satisfied by a binding
+                // that never parsed the fixture's frame at all.
+                assertEquals(
+                    actualWire,
+                    ServerMessage.fromJson(exp.getValue("frame")).toJson(),
+                    "frame decode mismatch at step $i emit $j",
+                )
             }
         }
 
