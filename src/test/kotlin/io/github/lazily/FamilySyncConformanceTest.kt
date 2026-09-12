@@ -3,14 +3,12 @@ package io.github.lazily
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
-import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNotEquals
 
 /**
  * Replays the canonical `lazily-spec/conformance/familysync/` fixture against the
@@ -71,60 +69,47 @@ class FamilySyncConformanceTest {
             val applied = target.ingest(frame)
             assert(applied > 0) { "[$name] ingest applied at least one op" }
 
-            if (s["reingest"]?.jsonPrimitive?.boolean == true) {
-                val reapplied = target.ingest(frame)
-                assertEquals(
-                    s
-                        .getValue("expect")
-                        .jsonObject
-                        .getValue("reingest_applied")
-                        .jsonPrimitive.int,
-                    reapplied,
-                    "[$name] re-ingest is idempotent",
-                )
-            }
-
+            // Rung 0 (#lzktbindpending). This block was read key-by-key by direct
+            // indexing, so nothing bound it and the rungs above were silent over
+            // it. Two real holes the tracker names, both now closed:
+            //
+            //  - `target_epoch_bumped` was read and then asserted only when it was
+            //    TRUE, so the day the corpus carries `false` the assertion would
+            //    vanish and the fixture would still report replayed
+            //    (#lzconsumednotasserted). Asserted in both directions now.
+            //  - `target_values` is object-valued and was iterated without a
+            //    key-set check, so a key the fixture declares and the run never
+            //    produces was compared by nothing (#lzsubblockkeyset). [sub] moves
+            //    that obligation onto the child tracker.
             val expect = s.getValue("expect").jsonObject
+            expect.consuming("familysync/materialize_on_ingest.json [$name] expect") { e ->
+                if (s["reingest"]?.jsonPrimitive?.boolean == true) {
+                    val reapplied = target.ingest(frame)
+                    e.assertInt("reingest_applied") { reapplied }
+                }
 
-            val gotKeys = target.familyKeys(namespace).map { suffixOf(it) }.sorted()
-            val wantKeys =
-                expect
-                    .getValue("target_keys")
-                    .jsonArray
-                    .map { it.jsonPrimitive.content }
-                    .sorted()
-            assertEquals(wantKeys, gotKeys, "[$name] materialized key set")
+                e.assertStrings("target_keys") {
+                    target.familyKeys(namespace).map { suffixOf(it) }.sorted()
+                }
+                e.assertInt("target_present_count") { target.familyKeys(namespace).size }
 
-            assertEquals(
-                expect.getValue("target_present_count").jsonPrimitive.int,
-                target.familyKeys(namespace).size,
-                "[$name] present count",
-            )
+                e.sub("target_values") { values ->
+                    for (key in values.keys) {
+                        values.assertBoolean(key) {
+                            target.familyValueLww<Boolean>(namespace, key) == true
+                        }
+                    }
+                }
 
-            for ((key, want) in expect.getValue("target_values").jsonObject) {
-                assertEquals(
-                    want.jsonPrimitive.boolean,
-                    target.familyValueLww<Boolean>(namespace, key),
-                    "[$name] value for $key",
-                )
-            }
+                e.assertInt("target_count_true") {
+                    target
+                        .familyKeys(namespace)
+                        .count { target.familyValueLww<Boolean>(namespace, suffixOf(it)) == true }
+                }
 
-            val countTrue =
-                target
-                    .familyKeys(namespace)
-                    .count { target.familyValueLww<Boolean>(namespace, suffixOf(it)) == true }
-            assertEquals(
-                expect.getValue("target_count_true").jsonPrimitive.int,
-                countTrue,
-                "[$name] derived count of true entries",
-            )
-
-            if (expect["target_epoch_bumped"]?.jsonPrimitive?.boolean == true) {
-                assertNotEquals(
-                    epochBefore,
-                    ctxT.getCellAny(epoch.id) as Long,
-                    "[$name] membership epoch bumped on materialize",
-                )
+                e.assertBoolean("target_epoch_bumped") {
+                    ctxT.getCellAny(epoch.id) as Long != epochBefore
+                }
             }
         }
     }

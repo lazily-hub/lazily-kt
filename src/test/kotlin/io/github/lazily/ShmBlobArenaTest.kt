@@ -1,6 +1,7 @@
 package io.github.lazily
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
@@ -27,6 +28,10 @@ class ShmBlobArenaTest {
         return json.parseToJsonElement(text).jsonObject
     }
 
+    /** Decode a JSON byte array handed in by a tracker, without re-reading the block. */
+    private fun byteList(element: JsonElement): List<Byte> =
+        element.jsonArray.map { it.jsonPrimitive.int.toByte() }
+
     private fun bytesOf(
         element: JsonObject,
         key: String,
@@ -51,20 +56,34 @@ class ShmBlobArenaTest {
         val arena = ShmBlobArena(capacity)
         val descriptor = arena.writeBlob(epoch, payload)
 
-        // Descriptor fields.
+        // Rung 0 (#lzktbindpending). `expected` is a second assertion-bearing
+        // block in this fixture and nothing bound it, so the rungs above were
+        // silent over it while its `assertions` sibling one screen down was fully
+        // guarded. Its three keys are read here through a tracker, and its
+        // object-valued `descriptor` DESCENDS rather than being indexed, so a
+        // sixth sub-field added upstream is an unconsumed key instead of a field
+        // compared by nothing (#lzsubblockkeyset).
+        //
+        // The block is consumed in two stages because `header_bytes` and
+        // `payload_region` can only be compared after the arena has been written
+        // and read back, so the tracker is held open across the round trip and
+        // finished at the end.
+        val expectedKeys = AssertionKeys("arena_blob.json expected", expected)
         val expectedDescriptor = expected.getValue("descriptor").jsonObject
-        assertEquals(expectedDescriptor.getValue("offset").jsonPrimitive.long, descriptor.offset)
-        assertEquals(expectedDescriptor.getValue("len").jsonPrimitive.long, descriptor.len)
-        assertEquals(expectedDescriptor.getValue("generation").jsonPrimitive.long, descriptor.generation)
-        assertEquals(expectedDescriptor.getValue("epoch").jsonPrimitive.long, descriptor.epoch)
-        // Checksum is a u64 on the wire; compare in unsigned space.
-        assertEquals(
-            expectedDescriptor
-                .getValue("checksum")
-                .jsonPrimitive.content
-                .toULong(),
-            descriptor.checksum.toULong(),
-        )
+        expectedKeys.sub("descriptor") { d ->
+            d.assertLong("offset") { descriptor.offset }
+            d.assertLong("len") { descriptor.len }
+            d.assertLong("generation") { descriptor.generation }
+            d.assertLong("epoch") { descriptor.epoch }
+            // u64 on the wire, wider than Long — compare in unsigned space.
+            d.assertKeyWith("checksum") { want ->
+                assertEquals(
+                    want.jsonPrimitive.content.toULong(),
+                    descriptor.checksum.toULong(),
+                    "expected.descriptor.checksum",
+                )
+            }
+        }
 
         // Assertion metadata mirrors the descriptor + header layout.
         val assertions = fixture.getValue("assertions").jsonObject
@@ -119,17 +138,33 @@ class ShmBlobArenaTest {
         }
 
         // 40-byte LZSH header byte-identical across bindings.
-        val expectedHeader = bytesOf(expected, "header_bytes")
-        val actualHeader = arena.bytes().copyOfRange(0, SHM_BLOB_HEADER_LEN)
-        assertEquals(expectedHeader.toList(), actualHeader.toList())
+        //
+        // The callback compares the value the TRACKER hands in, never a second
+        // read of the same key off `expected`. A callback that ignores its
+        // argument and re-fetches is the defect `assertKeyWith` exists to name —
+        // it looks like an assertion on the fixture's value while the path the
+        // tracker booked and the path the comparison used can drift apart — and
+        // lazily-spec's cross-binding ordering guard fails it by name.
+        expectedKeys.assertKeyWith("header_bytes") { want ->
+            assertEquals(
+                byteList(want),
+                arena.bytes().copyOfRange(0, SHM_BLOB_HEADER_LEN).toList(),
+                "expected.header_bytes",
+            )
+        }
 
         // Payload region immediately follows the header.
-        val expectedRegion = bytesOf(expected, "payload_region")
-        val actualRegion =
-            arena
-                .bytes()
-                .copyOfRange(SHM_BLOB_HEADER_LEN, SHM_BLOB_HEADER_LEN + payload.size)
-        assertEquals(expectedRegion.toList(), actualRegion.toList())
+        expectedKeys.assertKeyWith("payload_region") { want ->
+            assertEquals(
+                byteList(want),
+                arena
+                    .bytes()
+                    .copyOfRange(SHM_BLOB_HEADER_LEN, SHM_BLOB_HEADER_LEN + payload.size)
+                    .toList(),
+                "expected.payload_region",
+            )
+        }
+        expectedKeys.requireAllSatisfied()
 
         // Round-trip read validates the header + checksum and returns the payload.
         val readBack = arena.readBlob(descriptor)

@@ -42,10 +42,56 @@ class CommandConformanceTest {
 
     private fun frames(obj: JsonObject): List<JsonElement> = obj.getValue("frames").jsonArray
 
+    /**
+     * The frame indices a fresh projection IGNORED — folded without changing the
+     * projection image.
+     *
+     * Defined from the observable rather than from a status discriminator on
+     * purpose. The corpus spells `ignored_frame_indices` in two fixtures for two
+     * different reasons — a stale generation in one, a cancel arriving after the
+     * command already went terminal in the other — and a runner that pattern-matched
+     * one status would silently answer "none ignored" for the other, which is how
+     * this key read `[]` against an expected `[2]` the first time it was asserted
+     * both ways.
+     */
+    private fun ignoredFrames(frames: List<JsonElement>): List<Int> {
+        val projection = CommandProjection()
+        val ignored = mutableListOf<Int>()
+        frames.forEachIndexed { i, frame ->
+            val before = projection.toImage()
+            foldFrame(projection, frame)
+            if (projection.toImage() == before) ignored += i
+        }
+        return ignored
+    }
+
+    /**
+     * Bind [expect] as a rung-0 block and assert its `projection` key
+     * (#lzktbindpending).
+     *
+     * For the five fixtures whose `expect` carries nothing but `projection` this
+     * IS the whole block, so [AssertionKeys.requireAllSatisfied] runs here. The
+     * fixtures with extra keys pass their own tracker through [keys] instead, so
+     * one tracker owns the whole block rather than two trackers each owning part
+     * of it and neither seeing an unread key.
+     */
     private fun assertProjection(
         projection: CommandProjection,
         expect: JsonObject,
-    ) = assertImage(expect.getValue("projection"), projection.toImage(), "projection")
+        where: String,
+        keys: AssertionKeys? = null,
+    ) {
+        val tracker = keys ?: AssertionKeys(where, expect)
+        // assertKeyValue, not assertKeyWith: `projection` is OBJECT-valued, so it
+        // carries the block's own obligation one level down. Whole-element
+        // equality subsumes the key-set check, and it is what `assertImage`
+        // already does in its second comparison — the tracker just needs to be
+        // told, or the opaque path leaves a field added upstream compared by
+        // nothing (#lzsubblockkeyset).
+        assertImage(expect.getValue("projection"), projection.toImage(), "projection")
+        tracker.assertKeyValue("projection") { projection.toImage().toJson() }
+        if (keys == null) tracker.requireAllSatisfied()
+    }
 
     /**
      * Compare [got] against the fixture's projection image BOTH ways round.
@@ -146,7 +192,7 @@ class CommandConformanceTest {
         val fx = load("editor_route_submit.json")
         val p = CommandProjection()
         frames(fx).forEach { foldFrame(p, it) }
-        assertProjection(p, fx.getValue("expect").jsonObject)
+        assertProjection(p, fx.getValue("expect").jsonObject, "message-passing/editor_route_submit.json expect")
         assertNull(p.terminalFor("cmd-run-1"))
     }
 
@@ -155,61 +201,94 @@ class CommandConformanceTest {
         val fx = load("sync_tmux_layout_submit.json")
         val p = CommandProjection()
         frames(fx).forEach { foldFrame(p, it) }
-        assertProjection(p, fx.getValue("expect").jsonObject)
+        assertProjection(
+            p,
+            fx.getValue("expect").jsonObject,
+            "message-passing/sync_tmux_layout_submit.json expect",
+        )
     }
 
     @Test
     fun `accepted then applied receipt is terminal only at receipt`() {
         val fx = load("accepted_then_applied_receipt.json")
         val expect = fx.getValue("expect").jsonObject
-        val terminalAt =
-            expect
-                .getValue("terminal_after_frame_index")
-                .jsonPrimitive.content
-                .toInt()
-        val p = CommandProjection()
-        frames(fx).forEachIndexed { i, frame ->
-            foldFrame(p, frame)
-            val isTerminal = p.terminalFor("cmd-run-1") != null
-            if (i < terminalAt) {
-                assertFalse(isTerminal, "frame $i must be non-terminal")
-            } else {
-                assertTrue(isTerminal, "frame $i must be terminal")
+        expect.consuming("message-passing/accepted_then_applied_receipt.json expect") { e ->
+            val p = CommandProjection()
+            var firstTerminal = -1
+            frames(fx).forEachIndexed { i, frame ->
+                foldFrame(p, frame)
+                if (firstTerminal < 0 && p.terminalFor("cmd-run-1") != null) firstTerminal = i
             }
+            // Asserted as the INDEX the run first went terminal at, rather than by
+            // replaying the fixture's index back as a branch condition. The old
+            // shape read the key and then used it to decide which of two
+            // assertions to make, which is a read the fixture's own value steers
+            // rather than one it is compared against (#lzconsumednotasserted).
+            e.assertInt("terminal_after_frame_index") { firstTerminal }
+            assertProjection(p, expect, "", e)
         }
-        assertProjection(p, expect)
     }
 
     @Test
     fun `stale generation events and receipts are ignored`() {
         val fx = load("stale_generation_ignored.json")
         val expect = fx.getValue("expect").jsonObject
-        val ignored = expect.getValue("ignored_frame_indices").jsonArray.map { it.jsonPrimitive.content.toInt() }
-        val p = CommandProjection()
-        frames(fx).forEachIndexed { i, frame ->
-            val status = foldFrame(p, frame)
-            if (i in ignored) assertIs<CommandApplyStatus.StaleGeneration>(status)
+        expect.consuming("message-passing/stale_generation_ignored.json expect") { e ->
+            val p = CommandProjection()
+            // Asserted BOTH ways against the indices the run really ignored. The
+            // old shape only checked that the fixture's listed frames came back
+            // stale, so a frame the binding wrongly dropped was invisible — and
+            // the stale status itself is still asserted below, so widening the
+            // observable does not weaken the claim.
+            frames(fx).forEachIndexed { i, frame ->
+                val status = foldFrame(p, frame)
+                if (status is CommandApplyStatus.StaleGeneration) {
+                    assertTrue(
+                        i in ignoredFrames(frames(fx)),
+                        "frame $i folded stale but changed the projection",
+                    )
+                }
+            }
+            e.assertKeyWith("ignored_frame_indices") { want ->
+                assertEquals(
+                    want.jsonArray.map { it.jsonPrimitive.content.toInt() },
+                    ignoredFrames(frames(fx)),
+                    "ignored_frame_indices",
+                )
+            }
+            assertProjection(p, expect, "", e)
         }
-        assertProjection(p, expect)
     }
 
     @Test
     fun `terminal conflict fails closed fixture`() {
         val fx = load("terminal_conflict_fail_closed.json")
         val expect = fx.getValue("expect").jsonObject
-        val conflictAt =
-            expect
-                .getValue("conflict_after_frame_index")
-                .jsonPrimitive.content
-                .toInt()
-        val commandId = expect.getValue("conflict_command_id").jsonPrimitive.content
-        val p = CommandProjection()
-        frames(fx).forEachIndexed { i, frame ->
-            val status = foldFrame(p, frame)
-            if (i == conflictAt) assertIs<CommandApplyStatus.TerminalConflict>(status)
+        expect.consuming("message-passing/terminal_conflict_fail_closed.json expect") { e ->
+            val commandId = e.string("conflict_command_id") ?: error("conflict_command_id")
+            val p = CommandProjection()
+            var conflictAt = -1
+            frames(fx).forEachIndexed { i, frame ->
+                if (foldFrame(p, frame) is CommandApplyStatus.TerminalConflict && conflictAt < 0) {
+                    conflictAt = i
+                }
+            }
+            // `conflict` was NEVER READ. The block declares the trace must fail
+            // closed and no runner looked, so the one key carrying the headline
+            // claim of the fixture was silent — which is exactly what rung 0 is
+            // for: no grep finds an assertion nobody makes (#lzassertunknownkeys).
+            e.assertBoolean("conflict") { p.hasConflict(commandId) }
+            // The index the run first conflicted at, not a branch steered by the
+            // fixture's own value.
+            e.assertInt("conflict_after_frame_index") { conflictAt }
+            e.assertString("conflict_command_id") { commandId }
+            assertImage(
+                expect.getValue("projection_before_conflict"),
+                p.toImage(),
+                "projection_before_conflict",
+            )
+            e.assertKeyValue("projection_before_conflict") { p.toImage().toJson() }
         }
-        assertTrue(p.hasConflict(commandId))
-        assertImage(expect.getValue("projection_before_conflict"), p.toImage(), "projection_before_conflict")
     }
 
     @Test
@@ -218,7 +297,21 @@ class CommandConformanceTest {
         ConformanceScenarios.of("message-passing/cancel_preempts_nonterminal.json", fx).forEach { scenario ->
             val p = CommandProjection()
             scenario.getValue("frames").jsonArray.forEach { foldFrame(p, it) }
-            assertProjection(p, scenario.getValue("expect").jsonObject)
+            val expect = scenario.getValue("expect").jsonObject
+            val id = scenario["id"]?.jsonPrimitive?.content ?: "?"
+            expect.consuming("message-passing/cancel_preempts_nonterminal.json [$id] expect") { e ->
+                // Only the `cancel_after_applied_ignored` scenario carries
+                // `ignored_frame_indices`; the tracker sees the key only where the
+                // fixture puts it, so no excuse is needed for the other one.
+                e.assertKeyWith("ignored_frame_indices") { want ->
+                    assertEquals(
+                        want.jsonArray.map { it.jsonPrimitive.content.toInt() },
+                        ignoredFrames(scenario.getValue("frames").jsonArray),
+                        "ignored_frame_indices",
+                    )
+                }
+                assertProjection(p, expect, "", e)
+            }
         }
     }
 
@@ -227,29 +320,51 @@ class CommandConformanceTest {
         val fx = load("reconnect_command_projection.json")
         val p = CommandProjection()
         frames(fx).forEach { foldFrame(p, it) }
-        assertProjection(p, fx.getValue("expect").jsonObject)
+        assertProjection(
+            p,
+            fx.getValue("expect").jsonObject,
+            "message-passing/reconnect_command_projection.json expect",
+        )
     }
 
     @Test
     fun `rpc call waits for terminal`() {
         val fx = load("rpc_call_waits_for_terminal.json")
         val expect = fx.getValue("expect").jsonObject
-        val rpc = expect.getValue("rpc").jsonObject
-        val commandId = rpc.getValue("command_id").jsonPrimitive.content
-        val resolvesAt =
-            rpc
-                .getValue("resolves_after_frame_index")
-                .jsonPrimitive.content
-                .toInt()
-        val unresolved = rpc.getValue("unresolved_after_frame_indices").jsonArray.map { it.jsonPrimitive.content.toInt() }
-        val p = CommandProjection()
-        frames(fx).forEachIndexed { i, frame ->
-            foldFrame(p, frame)
-            val resolved = p.terminalFor(commandId) != null
-            if (i in unresolved) assertFalse(resolved, "frame $i must not resolve")
-            if (i == resolvesAt) assertTrue(resolved, "frame $i must resolve")
+        expect.consuming("message-passing/rpc_call_waits_for_terminal.json expect") { e ->
+            val p = CommandProjection()
+            e.sub("rpc") { rpc ->
+                val commandId = rpc.string("command_id") ?: error("command_id")
+                val resolvedAt = mutableListOf<Int>()
+                val unresolvedAt = mutableListOf<Int>()
+                frames(fx).forEachIndexed { i, frame ->
+                    foldFrame(p, frame)
+                    if (p.terminalFor(commandId) != null) resolvedAt += i else unresolvedAt += i
+                }
+                rpc.assertString("command_id") { commandId }
+                // Both derived from the run and compared both ways. The old shape
+                // used the fixture's indices to pick which frames to check, so a
+                // frame that resolved early outside the listed set passed.
+                rpc.assertInt("resolves_after_frame_index") { resolvedAt.firstOrNull() ?: -1 }
+                rpc.assertKeyWith("unresolved_after_frame_indices") { want ->
+                    assertEquals(
+                        want.jsonArray.map { it.jsonPrimitive.content.toInt() },
+                        unresolvedAt,
+                        "unresolved_after_frame_indices",
+                    )
+                }
+                // `terminal_status` was PRESENT IN THE FIXTURE AND NEVER READ.
+                // The block pins which terminal state the RPC resolves to — the
+                // difference between a call that applied and one that timed out —
+                // and no runner looked, so the fixture could have said anything
+                // (#lzassertunknownkeys). Nothing but rung 0 finds a key nobody
+                // reads: the evidence is the absence of a call.
+                rpc.assertString("terminal_status") {
+                    p.terminalFor(commandId)?.status?.wireName
+                }
+            }
+            assertProjection(p, expect, "", e)
         }
-        assertProjection(p, expect)
     }
 
     @Test

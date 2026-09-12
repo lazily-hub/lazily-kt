@@ -1003,12 +1003,15 @@ fi
 #                  what a ceiling alone would not force. It is a DEBT, so it may
 #                  only ever be re-pinned DOWNWARD.
 #
-# Pinned 2026-09-12 at 540, the count this widening surfaced across 18 areas:
-# every one of these blocks is reachable and its runner does assert its keys, by
+# Pinned 2026-09-12 at 540, the count the widening surfaced across 18 areas, and
+# re-pinned DOWNWARD to 512 the same day as the first migration pass
+# (#lzktbindpending) took ipc/root 1, familysync 3, protobuf 6, membership 9 and
+# message-passing 9 — 28 sites over five areas and four different block shapes.
+# Every remaining block here is reachable and its runner does assert its keys, by
 # direct indexing rather than through AssertionKeys. Re-pin DOWNWARD as each
 # area's runner migrates, never upward — a new area that cannot bind its blocks is
 # a finding to report, not a number to raise.
-MIN_BIND_PENDING="${MIN_BIND_PENDING:-540}"
+MIN_BIND_PENDING="${MIN_BIND_PENDING:-512}"
 # Overridable ONLY so the derivation itself can be probed against a doctored copy
 # of the map (a fixture removed, the map renamed). Never point it at anything but
 # the real runner in a real run.

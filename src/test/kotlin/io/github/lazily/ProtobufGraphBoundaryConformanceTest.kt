@@ -46,10 +46,26 @@ class ProtobufGraphBoundaryConformanceTest {
             val projection = ProtobufGraphBoundaryProjection()
             val decisions = mutableListOf<String>()
 
+            // An ORDINARY snapshot is a full snapshot carrying no explicit
+            // purpose. The proto says full snapshots "are legal only for
+            // bootstrap, explicit recovery, or compaction", so the corpus pins
+            // this count at zero for every trace — and the count has to come from
+            // the envelopes this run actually decoded. Counted here rather than
+            // inside `admit`, which REFUSES a purposeless snapshot outright: a
+            // number only reachable by throwing is not an observable.
+            var ordinarySnapshots = 0
+
             for (stepElement in scenario.getValue("steps").jsonArray) {
                 val step = stepElement.jsonObject
                 val encoded = envelope(step).toByteArray()
                 val decoded = ProtocolEnvelope.parseFrom(encoded)
+                if (decoded.bodyCase == ProtocolEnvelope.BodyCase.GRAPH_INPUT &&
+                    decoded.graphInput.inputCase == GraphInput.InputCase.BOOTSTRAP_SNAPSHOT &&
+                    decoded.graphInput.bootstrapSnapshot.purpose ==
+                    SnapshotPurpose.SNAPSHOT_PURPOSE_UNSPECIFIED
+                ) {
+                    ordinarySnapshots += 1
+                }
                 val decision = projection.admit(decoded)
                 if (decision == BoundaryDecision.Bootstrap) {
                     projection.installSnapshotCells(strings(step.getValue("cells").jsonObject))
@@ -57,23 +73,31 @@ class ProtobufGraphBoundaryConformanceTest {
                 decisions += decision.wireName()
             }
 
+            // Rung 0 (#lzktbindpending). Nothing bound this block, so the rungs
+            // above were silent over all six of them — and they were hiding a
+            // real defect, not just an absence:
+            //
+            //  - `ordinary_snapshot_count` was compared against the LITERAL 0.
+            //    The fixture's value reached the comparison and the RUN's never
+            //    did, so this key asserted the corpus against itself and a
+            //    binding that admitted a purposeless snapshot passed
+            //    (#lzconsumednotasserted). It is now compared against a count
+            //    this run derives from the decoded envelopes.
+            //  - `cells` is object-valued and was compared as a whole map, which
+            //    is fine, but through the tracker it needs to say so; it DESCENDS
+            //    so a cell the fixture names and the projection lacks is an
+            //    unconsumed key rather than a silent absence (#lzsubblockkeyset).
             val expected = scenario.getValue("expect").jsonObject
-            assertEquals(
-                strings(expected.getValue("cells").jsonObject),
-                projection.cells.mapValues { it.value.text },
-                id,
-            )
-            assertEquals(
-                expected.getValue("decisions").jsonArray.map { it.jsonPrimitive.content },
-                decisions,
-                id,
-            )
-            assertEquals(
-                expected.getValue("logical_projection").jsonPrimitive.content,
-                projection.logicalProjection(),
-                id,
-            )
-            assertEquals(0, expected.getValue("ordinary_snapshot_count").jsonPrimitive.content.toInt(), id)
+            expected.consuming("$path [$id] expect") { e ->
+                e.sub("cells") { cells ->
+                    for (cellId in cells.keys) {
+                        cells.assertString(cellId) { projection.cells[cellId]?.text }
+                    }
+                }
+                e.assertStrings("decisions") { decisions }
+                e.assertString("logical_projection") { projection.logicalProjection() }
+                e.assertInt("ordinary_snapshot_count") { ordinarySnapshots }
+            }
         }
     }
 

@@ -2,7 +2,6 @@ package io.github.lazily
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.double
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
@@ -41,7 +40,7 @@ class MembershipConformanceTest {
         val observed = ctx.computed { get(m.peerSetCell) }
         ctx.get(observed)
 
-        for (element in fx["steps"]!!.jsonArray) {
+        for ((i, element) in fx["steps"]!!.jsonArray.withIndex()) {
             val step = element.jsonObject
             val op = step["op"]!!.jsonObject
             val now = op["now"]!!.jsonPrimitive.long
@@ -53,20 +52,31 @@ class MembershipConformanceTest {
                 else -> error("unknown op")
             }
 
+            // Rung 0 (#lzktbindpending). Read key-by-key by direct indexing
+            // before, so nothing bound it and the rungs above saw none of these
+            // nine blocks. `states` is object-valued and was iterated without a
+            // key-set check, so a peer the fixture names and the run never
+            // tracked was compared by nothing (#lzsubblockkeyset) — it DESCENDS
+            // now, and the child tracker owns every peer beneath.
             val exp = step["expected"]!!.jsonObject
-            for ((peer, want) in exp["states"]!!.jsonObject) {
-                assertEquals(
-                    want.jsonPrimitive.content,
-                    m.state(peer.toLong())?.name,
-                    "state of peer $peer",
-                )
-            }
-            val wantSet = exp["alive_set"]!!.jsonArray.map { it.jsonPrimitive.long }.toSortedSet()
-            assertEquals(wantSet, m.peerSet().toSortedSet(), "alive_set")
+            exp.consuming("membership/membership_lifecycle.json steps[$i].expected") { e ->
+                e.sub("states") { states ->
+                    for (peer in states.keys) {
+                        states.assertString(peer) { m.state(peer.toLong())?.name }
+                    }
+                }
+                e.assertKeyWith("alive_set") { want ->
+                    assertEquals(
+                        want.jsonArray.map { it.jsonPrimitive.long }.toSortedSet(),
+                        m.peerSet().toSortedSet(),
+                        "alive_set",
+                    )
+                }
 
-            val wasCached = ctx.isSet(observed)
-            ctx.get(observed)
-            assertEquals(exp["invalidates"]!!.jsonPrimitive.boolean, !wasCached, "invalidation")
+                val wasCached = ctx.isSet(observed)
+                ctx.get(observed)
+                e.assertBoolean("invalidates") { !wasCached }
+            }
         }
     }
 }
