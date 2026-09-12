@@ -12,6 +12,24 @@ jobs:
     name: Kotlin / JVM 21
     runs-on: ubuntu-latest
 
+    # ONE run id per job invocation (#lzstalemanifest). The conformance evidence
+    # files are written by the Gradle test JVM and read by the separate
+    # `Guard — conformance fixtures actually replayed` step below, so the two are
+    # only connected by bytes on disk. Gradle caches `:test`, and this job leans
+    # on that: `./gradlew build` already runs the tests, so the `Test` step lands
+    # UP-TO-DATE. That is legitimate — the tests did run, in THIS job — and it is
+    # exactly why the id is per JOB rather than per gradle invocation. A stamp
+    # left behind by an earlier run, on the other hand, no longer passes for
+    # evidence: the guard requires it to equal this value and fails by name
+    # otherwise.
+    #
+    # This job does not go through the Makefile for the test steps, so it cannot
+    # inherit the id `make` generates — it sets its own. The guard REFUSES when
+    # the variable is unset rather than skipping, so forgetting this block is a
+    # red CI, not a silent hole.
+    env:
+      LAZILY_CONFORMANCE_RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4

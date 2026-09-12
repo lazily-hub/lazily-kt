@@ -250,6 +250,39 @@ tasks.test {
     environment("LAZILY_SPEC_DIR", specDir.get())
     environment("LAZILY_SPEC_CONFORMANCE_DIR", corpusDir.get())
     environment("LAZILY_SPEC_SCHEMAS_DIR", schemasDir.get())
+
+    // The per-invocation RUN ID the evidence files are stamped with
+    // (#lzstalemanifest).
+    //
+    // `make` generates one value per invocation; the test JVM writes it as the
+    // first line of build/conformance-fixtures-loaded.txt, -scenarios-replayed.txt
+    // and -assertion-blocks.txt, and check-conformance-coverage.sh refuses any of
+    // those whose stamp is not the current invocation's. Forwarded explicitly for
+    // the same reason the paths above are: the test JVM inherits the DAEMON's
+    // environment, and the daemon outlives the shell that exported the variable,
+    // so an inherited value would be whichever id the daemon happened to start
+    // with.
+    //
+    // Deliberately NOT an `inputs.property`, and this is the whole design.
+    //
+    // A Test task's `environment` is UNTRACKED — measured in this very file
+    // (#lzktgradleinputfingerprint) — so this call feeds the JVM and contributes
+    // NOTHING to the up-to-date fingerprint. That is exactly what is wanted here,
+    // and it is the opposite of what the corpus and schemas seams want. Declaring
+    // the id as an input would change the fingerprint on every invocation, `:test`
+    // could never be UP-TO-DATE again, and the stale-evidence path this stamp
+    // exists to catch would become unreachable — the cache bug would be masked by
+    // disabling the cache, and the guard against it would never once be exercised.
+    // Leaving it untracked means a cached `:test` writes no stamp, last run's id
+    // stays on disk, and the guard fails by name.
+    //
+    // Measured: a second `make check` with nothing changed prints
+    // `> Task :test UP-TO-DATE` both before and after this line, so the caching
+    // behaviour is unchanged and the refusal comes from the guard, not from a
+    // defeated cache.
+    val conformanceRunId =
+        providers.environmentVariable("LAZILY_CONFORMANCE_RUN_ID").orElse("")
+    environment("LAZILY_CONFORMANCE_RUN_ID", conformanceRunId.get())
 }
 
 tasks.register<JavaExec>("interopPeer") {

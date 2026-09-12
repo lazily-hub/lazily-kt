@@ -717,6 +717,107 @@ if [ ! -d "$SPEC_DIR" ]; then
   exit 0
 fi
 
+# --- RUN-ID FRESHNESS (#lzstalemanifest) -------------------------------------
+#
+# Every evidence file this guard reads is written by the Gradle test JVM and read
+# back here, in a separate process. Until this rung landed, nothing connected the
+# two but bytes on disk — and Gradle caches `:test` aggressively. With nothing
+# changed it prints `> Task :test UP-TO-DATE`, no JVM starts, nothing is written,
+# and the PREVIOUS run's manifest, scenario ledger and block ledger are still
+# sitting in build/ byte-identical to a real run's output.
+#
+# Measured before this landed: a second `make check` with nothing changed exited
+# 0 with `> Task :test UP-TO-DATE`, so every rung below — the per-fixture
+# accounting, the scenario equalities in both directions, the rung-0 site and
+# digest magnitudes, the bind ledger and its two stale directions — reported OK
+# about a run that never happened. Real evidence required forcing
+# `cleanTest test`. RTK strips Gradle task lines, so the one line that explains
+# it is invisible in captured output, which is how it survived.
+#
+# That is the failure mode this whole script exists to refuse, one level up: not
+# "the suite ran and proved nothing", but "the suite did not run and the file
+# says it did". Every message here claiming "these bytes were really read" was
+# conditional on a build-cache state nobody checked.
+#
+# So `make` generates ONE id per invocation, the test JVM stamps it as the FIRST
+# line of every evidence file it writes, and every read below goes through
+# require_run_id first. A cached `:test` writes no stamp at all, last run's id
+# stays on disk, and this fails BY NAME rather than trusting it.
+#
+# ABSENT is a REFUSAL, not a skip. A guard that accepts unstamped evidence when
+# the variable is unset is the same hole with one more step in front of it, and
+# it is the step every caller would take. There is deliberately NO opt-out flag:
+# both paths that run this guard set the variable — `make check` (the Makefile
+# generates it) and CI's own `Guard — conformance fixtures actually replayed`
+# step (the job sets it, because CI runs `./gradlew test` and this script as two
+# separate steps rather than through the Makefile).
+#
+# This sits AFTER the corpus skip on purpose. A checkout with no lazily-spec
+# sibling makes no claim about coverage and reads no evidence, so there is
+# nothing there for a freshness check to be about.
+RUN_ID_STAMP_PREFIX='# lazily-run-id '
+RUN_ID="${LAZILY_CONFORMANCE_RUN_ID-}"
+if [ -z "$RUN_ID" ]; then
+  echo "FAIL: LAZILY_CONFORMANCE_RUN_ID is unset (or empty)." >&2
+  echo "      Every rung below reads an evidence file written by a DIFFERENT" >&2
+  echo "      process, and Gradle's :test is cached — without a per-invocation id" >&2
+  echo "      to match against, a stale manifest from a run that happened last" >&2
+  echo "      week is indistinguishable from this one's (#lzstalemanifest)." >&2
+  echo "      Run this through \`make check\` / \`make test\`, which generates the" >&2
+  echo "      id, or export LAZILY_CONFORMANCE_RUN_ID yourself around BOTH the" >&2
+  echo "      test step and this guard. Refusing rather than skipping: accepting" >&2
+  echo "      unstamped evidence when the variable is unset is the same hole." >&2
+  exit 1
+fi
+
+# Refuse an evidence file that is not stamped with THIS invocation's run id.
+# Names the file, the id it found and the id it wanted — "stale evidence" without
+# those three is not actionable.
+require_run_id() {
+  file="$1"
+  what="$2"
+  first="$(head -n 1 "$file")"
+  case "$first" in
+    "$RUN_ID_STAMP_PREFIX"*)
+      found="${first#"$RUN_ID_STAMP_PREFIX"}"
+      ;;
+    *)
+      echo "FAIL: $what at $file carries NO run-id stamp (#lzstalemanifest)." >&2
+      echo "      first line: ${first:-<empty>}" >&2
+      echo "      wanted:     ${RUN_ID_STAMP_PREFIX}$RUN_ID" >&2
+      echo "      Either the file predates the stamp and is left over from an older" >&2
+      echo "      build directory, or the recorder that writes it is older than this" >&2
+      echo "      guard. Re-run the suite (./gradlew cleanTest test) so it is" >&2
+      echo "      rewritten. An unstamped file is undatable evidence, which is the" >&2
+      echo "      same as no evidence." >&2
+      exit 1
+      ;;
+  esac
+  if [ "$found" != "$RUN_ID" ]; then
+    echo "FAIL: $what at $file is STALE evidence (#lzstalemanifest)." >&2
+    echo "      stamped with: $found" >&2
+    echo "      this run is:  $RUN_ID" >&2
+    echo "      The test step did not write this file during this invocation, so it" >&2
+    echo "      describes an EARLIER run. The usual cause is Gradle skipping the" >&2
+    echo "      work: \`> Task :test UP-TO-DATE\` writes nothing and leaves the" >&2
+    echo "      previous run's bytes in place — and RTK strips task lines, so that" >&2
+    echo "      line may not appear in captured output at all." >&2
+    echo "      Re-run the suite for real: ./gradlew cleanTest test" >&2
+    echo "      Do NOT re-stamp the file by hand. The point of the id is that only" >&2
+    echo "      a run that actually happened can write one." >&2
+    exit 1
+  fi
+}
+
+# The evidence CONTENT of a stamped file: `#` lines are comments, the same rule
+# the committed per-site ledger below already uses. Only the run-id stamp is
+# written that way today, and freshness is checked from the raw first line before
+# any caller gets here — so this never launders an unstamped file into a valid
+# one, it only keeps the stamp out of the populations being counted.
+evidence_lines() {
+  grep -v '^#' "$1" || true
+}
+
 # Fixtures deliberately not replayed by this binding yet. Each entry is a claim
 # that someone looked; shrinking this list is the work. Adding to it silently is
 # how the guard rots, so keep a reason with any new entry.
@@ -860,7 +961,8 @@ if [ ! -s "$MANIFEST" ]; then
   echo "      absence." >&2
   exit 1
 fi
-OPENED="$(sort -u "$MANIFEST")"
+require_run_id "$MANIFEST" "the fixture manifest"
+OPENED="$(evidence_lines "$MANIFEST" | sort -u)"
 
 missing=0
 
@@ -987,7 +1089,8 @@ if [ ! -s "$SCENARIO_LEDGER" ]; then
   echo "      ledger is missing evidence, not evidence of absence." >&2
   exit 1
 fi
-LEDGER="$(sort -u "$SCENARIO_LEDGER")"
+require_run_id "$SCENARIO_LEDGER" "the scenario ledger"
+LEDGER="$(evidence_lines "$SCENARIO_LEDGER" | sort -u)"
 LEDGER_KEYS="$(cut -f1,2 <<< "$LEDGER")"
 TAB=$'\t'
 
@@ -1266,7 +1369,8 @@ if [ ! -f "$BLOCK_LEDGER" ]; then
   echo "       without the rung-0 recorder attached (#lzvacuousrun)." >&2
   missing=$((missing + 1))
 else
-  blocks_total=$(grep -c . "$BLOCK_LEDGER" || true)
+  require_run_id "$BLOCK_LEDGER" "the assertion-block ledger"
+  blocks_total=$(evidence_lines "$BLOCK_LEDGER" | grep -c . || true)
   if [ "$blocks_total" -eq 0 ]; then
     echo "ERROR: ZERO assertion blocks were inventoried." >&2
     echo "       Rung 0 is vacuously green over an empty population." >&2
@@ -1293,9 +1397,9 @@ else
       echo "       cannot be bound, or bind it." >&2
       missing=$((missing + 1))
     fi
-    run_unbound="$(awk -F'\t' '$2 == "UNBOUND" { print $1 }' "$BLOCK_LEDGER" | sort -u)"
-    run_bound="$(awk -F'\t' '$2 == "bound" { print $1 }' "$BLOCK_LEDGER" | sort -u)"
-    all_sites="$(cut -f1 "$BLOCK_LEDGER" | sort -u)"
+    run_unbound="$(evidence_lines "$BLOCK_LEDGER" | awk -F'\t' '$2 == "UNBOUND" { print $1 }' | sort -u)"
+    run_bound="$(evidence_lines "$BLOCK_LEDGER" | awk -F'\t' '$2 == "bound" { print $1 }' | sort -u)"
+    all_sites="$(evidence_lines "$BLOCK_LEDGER" | cut -f1 | sort -u)"
 
     unexcused="$(comm -23 <(printf '%s\n' "$run_unbound" | grep . || true) <(printf '%s\n' "$excused_blocks" | grep . || true))"
     if [ -n "$unexcused" ]; then
@@ -1482,6 +1586,12 @@ expected_ledgered = int(_pin_raw)
 run_unbound, run_sites = set(), set()
 with open(block_ledger, encoding="utf-8") as handle:
     for line in handle:
+        # The run-id stamp is a comment, not a site (#lzstalemanifest). Its
+        # freshness is enforced by the shell before this reader is ever called;
+        # here it is skipped by the same `#` rule the committed ledger below uses,
+        # so the stamp never enters the site population.
+        if line.startswith("#"):
+            continue
         parts = line.rstrip("\n").split("\t")
         if len(parts) != 3:
             continue
@@ -1862,6 +1972,13 @@ with open(ledger_path, encoding="utf-8") as handle:
     for line_no, line in enumerate(handle, 1):
         line = line.rstrip("\n")
         if not line:
+            continue
+        # The run-id stamp is a comment, not a site (#lzstalemanifest). Skipped
+        # explicitly rather than left to the digest-column check below: that
+        # check would fire on it and blame a stale recorder, which is the wrong
+        # diagnosis for a line that is supposed to be there. Freshness is
+        # enforced by the shell before this reader runs.
+        if line.startswith("#"):
             continue
         parts = line.split("\t")
         if len(parts) != 3 or not parts[2]:

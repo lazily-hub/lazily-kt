@@ -4,6 +4,43 @@ SPEC_CONFORMANCE_DIR ?= $(LAZILY_SPEC_DIR)/conformance
 LEAN_SPEC_DIR ?= ../lazily-spec/formal/lean
 LEAN_FORMAL_DIR ?= ../lazily-formal
 
+# ONE run id per `make` invocation (#lzstalemanifest).
+#
+# The conformance evidence files are written by the Gradle test JVM and read by
+# a separate shell step, so the two are only connected by bytes on disk. Gradle
+# caches `:test` aggressively: with nothing changed it prints
+# `> Task :test UP-TO-DATE`, no JVM starts, nothing is written, and the previous
+# run's manifest, scenario ledger and block ledger are still sitting there. Every
+# rung of the evidence ladder then reads last week's bytes and reports OK about a
+# run that never happened — and RTK strips Gradle task lines, so the
+# `UP-TO-DATE` that explains it is invisible in captured output.
+#
+# So the test JVM stamps this value into the first line of every evidence file it
+# writes, and every guard that reads one REQUIRES the stamp to equal the id of
+# the invocation running the guard. A cached `:test` writes no stamp, the stale
+# id stays on disk, and the guard fails by name instead of trusting it.
+#
+# SIMPLY EXPANDED (`:=`), not recursive: `?=` and `=` would re-run the $(shell)
+# at every reference and hand a different id to the Gradle step than to the
+# guard, which fails closed but for a confusing reason. An inherited value wins
+# (CI sets one per job, because CI runs `./gradlew test` and the guard as two
+# separate steps rather than through this file) — `$(or ...)` short-circuits, so
+# the $(shell) does not even run in that case.
+#
+# The consequence is deliberate and worth stating: a SECOND `make check` with
+# nothing changed now FAILS. Gradle prints `> Task :test UP-TO-DATE`, no evidence
+# is rewritten, and the guard refuses last run's bytes by name. That invocation
+# used to exit 0 having replayed nothing at all, which is the bug — so the
+# refusal is the fix, not a regression. To check again for real, re-run the suite:
+# `./gradlew cleanTest test` (or `./gradlew cleanTest && make check`). CI is
+# unaffected: it starts from a fresh checkout, and its own per-job id covers the
+# `./gradlew build` that runs the tests and the `./gradlew test` step that is
+# UP-TO-DATE behind it.
+#
+# The value is nanosecond-resolution UTC epoch plus make's own pid.
+LAZILY_CONFORMANCE_RUN_ID := $(or $(LAZILY_CONFORMANCE_RUN_ID),make-$(shell date -u +%s%N)-$(shell echo $$PPID))
+export LAZILY_CONFORMANCE_RUN_ID
+
 .PHONY: \
 	check \
 	fmt \

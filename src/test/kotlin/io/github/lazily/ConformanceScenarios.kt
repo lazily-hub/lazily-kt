@@ -253,7 +253,11 @@ object ConformanceScenarios {
         if (replayed.isEmpty()) return
         runCatching {
             ledgerPath.toAbsolutePath().parent?.let { Files.createDirectories(it) }
-            Files.writeString(ledgerPath, replayed.toSortedSet().joinToString("\n", postfix = "\n"))
+            Files.writeString(
+                ledgerPath,
+                ConformanceFixtures.runIdStamp() +
+                    replayed.toSortedSet().joinToString("\n", postfix = "\n"),
+            )
         }
     }
 }

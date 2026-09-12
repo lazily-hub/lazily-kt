@@ -106,6 +106,45 @@ object ConformanceFixtures {
                 ?: "build/conformance-assertion-blocks.txt",
         )
 
+    /**
+     * The run id this test JVM was launched with (`#lzstalemanifest`).
+     *
+     * Every evidence file written below carries it on its FIRST line, and
+     * `scripts/check-conformance-coverage.sh` refuses any evidence file whose
+     * stamp is not the id of the invocation running the guard. Without it the
+     * whole ladder rests on files nobody dates: Gradle's `:test` is aggressively
+     * cached, a cached task writes nothing, and the PREVIOUS run's manifest,
+     * scenario ledger and block ledger stay on disk looking exactly like this
+     * run's. Measured before this landed — a second `make check` with nothing
+     * changed printed `> Task :test UP-TO-DATE`, no JVM started, and the guard
+     * read last run's bytes and printed OK about a run that never happened.
+     *
+     * `make` generates the id once per invocation and `tasks.test` forwards it
+     * here EXPLICITLY, for the same reason the corpus paths are forwarded: a
+     * test JVM inherits the DAEMON's environment, and the daemon outlives the
+     * shell that exported the variable.
+     *
+     * It is deliberately NOT a declared Gradle input. Making it one would change
+     * the task fingerprint on every invocation, so `:test` could never be
+     * UP-TO-DATE, so the very path this stamp guards would become unreachable —
+     * a guard that cannot be reached is a guard nobody has tested.
+     *
+     * Empty when nothing set the variable: stamp the reason rather than omit the
+     * line, so the file says why it is untrusted instead of merely lacking a
+     * stamp. Either way the guard refuses (an absent stamp is a failure too), and
+     * a value carrying a newline truncates at the guard's first-line read and
+     * therefore also refuses — this fails closed in every direction.
+     */
+    private val runId: String = System.getenv("LAZILY_CONFORMANCE_RUN_ID")?.trim().orEmpty()
+
+    /** First line of every evidence file this suite writes (`#lzstalemanifest`). */
+    fun runIdStamp(): String =
+        if (runId.isEmpty()) {
+            "# lazily-run-id (unset: LAZILY_CONFORMANCE_RUN_ID reached no test JVM)\n"
+        } else {
+            "# lazily-run-id $runId\n"
+        }
+
     private val loaded = ConcurrentSkipListSet<String>()
 
     /**
@@ -382,7 +421,7 @@ object ConformanceFixtures {
                         val state = if (siteId in boundBlocks) "bound" else "UNBOUND"
                         "$siteId\t$state\t${blockDigest(declaredBlocks.getValue(siteId))}"
                     }
-            Files.writeString(assertionBlockLedgerPath, lines)
+            Files.writeString(assertionBlockLedgerPath, runIdStamp() + lines)
         }
     }
 
@@ -490,7 +529,10 @@ object ConformanceFixtures {
         if (loaded.isEmpty()) return
         runCatching {
             manifestPath.toAbsolutePath().parent?.let { Files.createDirectories(it) }
-            Files.writeString(manifestPath, loaded.toSortedSet().joinToString("\n", postfix = "\n"))
+            Files.writeString(
+                manifestPath,
+                runIdStamp() + loaded.toSortedSet().joinToString("\n", postfix = "\n"),
+            )
         }
     }
 }
