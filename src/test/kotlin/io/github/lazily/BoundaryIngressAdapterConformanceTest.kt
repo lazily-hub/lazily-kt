@@ -185,7 +185,14 @@ class BoundaryIngressAdapterConformanceTest {
         }
 
         private val fresh: Boolean
-            get() = lastStampedAt?.let { now - it <= freshnessHorizon } ?: false
+            get() {
+                // An early return, not `?: false` (`#lzsiblingrunnermasking`): this is
+                // model state rather than a fixture read, but the spelling is the one
+                // the flag/presence guard refuses, and there is no reason for the
+                // model to be the single place it survives.
+                val stamped = lastStampedAt ?: return false
+                return now - stamped <= freshnessHorizon
+            }
 
         fun projection(): JsonObject =
             buildJsonObject {

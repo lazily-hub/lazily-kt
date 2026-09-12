@@ -3,7 +3,6 @@ package io.github.lazily
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
-import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -161,9 +160,11 @@ class CoordinationConformanceTest {
         for (element in steps(fx)) {
             val step = element.jsonObject
             when (step["op"]!!.jsonObject["type"]!!.jsonPrimitive.content) {
+                // `.boolean`, never `booleanOrNull` — see ResilienceConformanceTest
+                // (`#lzsiblingrunnermasking`).
                 "acquire" ->
                     assertEquals(
-                        step["returns"]!!.jsonPrimitive.booleanOrNull,
+                        step["returns"]!!.jsonPrimitive.boolean,
                         sem.acquire(),
                     )
                 "release" -> sem.release()

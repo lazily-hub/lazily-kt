@@ -335,6 +335,364 @@ echo "corpus-root guard OK: $scanned Kotlin sources examined, none spell '../laz
      "(single-literal AND joined-segment forms; comments and KDoc skipped; 1 allowlisted seam)"
 
 
+# ---- RUNG: the flag/presence spellings a runner may NOT reach for -----------
+#
+# `#lzsiblingrunnermasking`. Every coerced flag and defaulted presence read
+# `#lzflagcoercion` found is fixed. Nothing stopped the next one — and the
+# measurement is what makes that worth a guard rather than a convention:
+#
+#  - `CollectionsFamilyConformanceTest` ran `handle_stable` in BOTH directions
+#    where `CollectionsConformanceTest` ran one, over the SAME two fixtures. A
+#    planted `handle_stable: false` reddened only because the family runner
+#    existed.
+#  - `QueueFamilyConformanceTest` read `expected` and `expected.invalidates`
+#    through `getValue` where `QueueCellConformanceTest` defaulted BOTH to
+#    `JsonObject(emptyMap())`, over the SAME five fixtures. An emptied block
+#    replays the op and then asserts nothing at all.
+#  - `WorkQueueConformanceTest` read the four matrix kinds by name (catching a
+#    DROPPED kind, blind to an ADDED one) where the family runner iterated the
+#    fixture's own keys (catching the add, blind to the drop). Each covered the
+#    half the other missed.
+#
+# In all three the coverage was an accident of which runners exist, not a
+# property of any assertion — and a mask disappears the moment a runner is
+# deleted, split, renamed or SKIPPED. lazily-kt's Gradle `:test` reads
+# `UP-TO-DATE` under RTK's output filter, so a suite that never executed reads
+# as a passing one: the tooling that hides a skipped runner is the same tooling
+# that hides the mask.
+#
+# So the spellings themselves are made unavailable. lazily-cpp could delete its
+# `Json::as_bool()` and turn the weak read into a COMPILE error; Kotlin cannot —
+# `booleanOrNull`, `as? Boolean` and `?: emptyList()` are kotlinx and stdlib, and
+# there is nothing local to delete. This rung is that compile error's stand-in,
+# and it is why it has to scan rather than trust a convention.
+#
+# WHAT IS BANNED, on code with comments, KDoc and string literals removed and
+# whitespace collapsed (so `?:\n    emptyList()` and `as?  Boolean` are the same
+# pattern to the scan — a guard that only matches the one-line form is one a
+# reformat walks through):
+#
+#   empty-default            `?: emptyList() / emptySet() / emptyMap()`
+#   flag-default             `?: true` / `?: false`
+#   empty-json-default       `?: JsonObject(...)` / `?: JsonArray(...)`
+#   boolean-cast             `as? Boolean`
+#   or-null-skip             `booleanOrNull?.let` / `intOrNull?.let`
+#   presence-proxy           `takeIf { ... isNotEmpty() }`
+#   unguarded-booleanOrNull  `booleanOrNull` with no `!isString` guard in the
+#                            same expression
+#
+# The strict shapes are `.boolean` / `.int`, `getValue`, and `!!` — all of which
+# THROW on a wrong type or a missing key, which is the whole point.
+#
+# `unguarded-booleanOrNull` is a rule about the GUARD, not about the name: the
+# one strict spelling is `(v as? JsonPrimitive)?.takeIf { !it.isString }?.
+# booleanOrNull ?: error(...)`, and the `!isString` half is load-bearing because
+# kotlinx parses the STRING "true" as a boolean. `AssertionKeys.boolean()` and
+# `StateChartConformanceTest`'s guard read that way and pass unallowlisted;
+# anything that drops the guard is a hit. `import` declarations are blanked
+# first — an import names a function, it does not read a fixture.
+#
+# SCOPE: `src/test/kotlin` only. `src/main` is library code, where a codec's
+# type-dispatch chain (`MsgpackCodec.kt`: try bool, then long, then string)
+# legitimately reaches for `booleanOrNull`, and `StateChart.kt` already carries
+# the `!isString` guard for `parallel`/`internal` with a comment saying why.
+# Widening this to `src/main` would ban a correct codec to guard a runner.
+#
+# NOT covered, and deliberately: `longOrNull` / `contentOrNull` read against a
+# NULLABLE expectation (`next_fire`, `holder`, `current_leader`) are the corpus's
+# own shape for "this observable may be absent", and the general presence-proxy
+# form (`if (x.isNotEmpty()) { assert... }`) is not statically separable from the
+# floors this file is full of (`assertTrue(steps.isNotEmpty())`). The
+# presence-proxy rule therefore catches only the `takeIf` spelling, which is the
+# one `#lzflagcoercion` actually found in a runner.
+#
+# It runs with the corpus-root rung, before the corpus is located: it is source
+# hygiene, and the absent-corpus skip further down must not swallow it.
+FLAG_HYGIENE_SCAN_DIRS_DEFAULT="src/test/kotlin"
+read -r -a FLAG_HYGIENE_SCAN_DIRS <<< "${LAZILY_FLAG_HYGIENE_SCAN_DIRS:-$FLAG_HYGIENE_SCAN_DIRS_DEFAULT}"
+
+# Allowlist entries are `<path>:<rule>` — a file is never excused wholesale, so
+# excusing one spelling cannot hide a different one in the same file.
+#
+# ONE entry. `ConformanceFixtures.kt` reads its two environment overrides as
+# `System.getenv(...)?.takeIf { it.isNotEmpty() }`, which is emptiness standing
+# for "nobody set this variable" — a shell variable really is empty-or-absent,
+# and there is no JSON key and no fixture anywhere near it. Both reads are the
+# override seam this whole file exists to keep falsifiable.
+FLAG_HYGIENE_ALLOW="src/test/kotlin/io/github/lazily/ConformanceFixtures.kt:presence-proxy"
+
+# The floor exists because the rung reasons about files the walk FOUND, so it is
+# vacuously satisfied by an empty file list: a scan that examined nothing reports
+# no offenders and prints OK (#lzvacuousrun). Pinned below the real tree (80 test
+# sources) with headroom; a drop this far means the walk is pointed somewhere
+# wrong, not that the suite shrank.
+MIN_SCANNED_FLAG_SOURCES="${MIN_SCANNED_FLAG_SOURCES:-60}"
+
+collect_flag_hygiene_sources() {
+  for d in "${FLAG_HYGIENE_SCAN_DIRS[@]}"; do
+    [ -d "$d" ] || continue
+    find "$d" -type f -name '*.kt' -not -path '*/build/*'
+  done | sort
+}
+
+FLAG_HYGIENE_PY="$(cat <<'FLAGPY'
+import re
+import sys
+
+# Every rule is (id, description, compiled pattern over NORMALIZED code).
+#
+# NORMALIZED code is the file with comments, KDoc, string literals, character
+# literals and backtick identifiers removed, and every run of whitespace
+# collapsed to one space. Normalizing is what makes the near-miss spellings
+# unreachable: `?:\n    emptyList()` across a line break and `as?  Boolean` with
+# two spaces are the SAME pattern to this scanner, and a guard that only sees
+# the one-line form is a guard a reformat walks straight through.
+RULES = [
+    (
+        "empty-default",
+        "a fixture read defaulted to an empty collection",
+        re.compile(r"\?: ?empty(?:List|Set|Map)(?: ?<[^<>{}]*>)? ?\(\)"),
+    ),
+    (
+        "flag-default",
+        "a fixture flag defaulted to a bare true/false",
+        re.compile(r"\?: ?(?:true|false)\b"),
+    ),
+    (
+        "empty-json-default",
+        "a fixture block defaulted to an empty JsonObject/JsonArray",
+        re.compile(r"\?: ?Json(?:Object|Array) ?\("),
+    ),
+    (
+        "boolean-cast",
+        "a Kotlin cast to Boolean instead of the JSON type",
+        re.compile(r"as\? ?Boolean\b"),
+    ),
+    (
+        "or-null-skip",
+        "an *OrNull read whose null is then SKIPPED by ?.let",
+        re.compile(r"(?:boolean|int)OrNull ?\?\. ?let\b"),
+    ),
+    (
+        "presence-proxy",
+        "emptiness used as a proxy for a key's PRESENCE",
+        re.compile(r"takeIf ?\{[^}]*isNotEmpty\(\)"),
+    ),
+]
+
+# `booleanOrNull` gets its own rule: the ONE strict spelling of it is
+# `(x as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull ?: error(...)`,
+# which is load-bearing (kotlinx parses the STRING "true" as a boolean, so the
+# `!isString` guard is what refuses the quoted spelling). So the rule is not
+# "never name booleanOrNull" but "never name it without that guard in the same
+# expression".
+GUARDED_WINDOW = 200
+
+
+IMPORT = re.compile(r"^[^\S\n]*import[^\S\n]+\S+[^\S\n]*$", re.MULTILINE)
+
+
+def strip(text):
+    """Code characters only, with their 1-based source line.
+
+    `import` declarations are blanked first, keeping their newlines so line
+    numbers still line up. An import NAMES a function; it does not read a
+    fixture, and `import kotlinx.serialization.json.booleanOrNull` is required
+    by the one guarded call site that is allowed to use it.
+    """
+    text = IMPORT.sub("", text)
+    out = []
+    i = 0
+    n = len(text)
+    line = 1
+    while i < n:
+        c = text[i]
+        if c == "\n":
+            out.append(("\n", line))
+            line += 1
+            i += 1
+            continue
+        if text[i:i + 2] == "//":
+            while i < n and text[i] != "\n":
+                i += 1
+            continue
+        if text[i:i + 2] == "/*":
+            depth = 1
+            i += 2
+            while i < n and depth > 0:
+                if text[i:i + 2] == "/*":
+                    depth += 1
+                    i += 2
+                    continue
+                if text[i:i + 2] == "*/":
+                    depth -= 1
+                    i += 2
+                    continue
+                if text[i] == "\n":
+                    line += 1
+                i += 1
+            continue
+        if c == "`":
+            i += 1
+            while i < n and text[i] != "`":
+                if text[i] == "\n":
+                    line += 1
+                i += 1
+            i += 1
+            out.append((" ", line))
+            continue
+        if c == "'":
+            i += 1
+            while i < n and text[i] != "'":
+                if text[i] == "\\":
+                    i += 1
+                i += 1
+            i += 1
+            out.append((" ", line))
+            continue
+        if c == '"':
+            if text[i:i + 3] == '"""':
+                i += 3
+                while i < n:
+                    if text[i] == '"' and text[i:i + 3] == '"""':
+                        i += 3
+                        break
+                    if text[i] == "\n":
+                        line += 1
+                    i += 1
+            else:
+                i += 1
+                while i < n:
+                    if text[i] == "\\":
+                        i += 2
+                        continue
+                    if text[i] == '"':
+                        i += 1
+                        break
+                    if text[i] == "\n":
+                        line += 1
+                    i += 1
+            out.append((" ", line))
+            continue
+        out.append((c, line))
+        i += 1
+    return out
+
+
+def normalize(stripped):
+    """Collapse whitespace runs to one space; keep a line number per char."""
+    chars = []
+    lines = []
+    prev_ws = False
+    for c, ln in stripped:
+        if c.isspace():
+            if not prev_ws:
+                chars.append(" ")
+                lines.append(ln)
+            prev_ws = True
+            continue
+        prev_ws = False
+        chars.append(c)
+        lines.append(ln)
+    return "".join(chars), lines
+
+
+def hits(text):
+    code, lines = normalize(strip(text))
+    found = []
+    for rule, desc, pat in RULES:
+        for m in pat.finditer(code):
+            found.append((lines[m.start()], rule, desc, m.group(0)))
+    for m in re.finditer(r"booleanOrNull", code):
+        window = code[max(0, m.start() - GUARDED_WINDOW):m.start()]
+        if "isString" in window:
+            continue
+        found.append((
+            lines[m.start()],
+            "unguarded-booleanOrNull",
+            "booleanOrNull with no !isString guard in the same expression",
+            "booleanOrNull",
+        ))
+    found.sort()
+    return found
+
+
+def main(argv):
+    allow = set()
+    for entry in argv[1].split(","):
+        entry = entry.strip()
+        if entry:
+            allow.add(entry)
+    paths = [p for p in sys.stdin.read().split("\n") if p]
+    examined = 0
+    out = []
+    for p in paths:
+        rel = p[2:] if p.startswith("./") else p
+        try:
+            with open(p, "r", encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except OSError as exc:
+            print("ERROR: cannot read %s: %s" % (p, exc), file=sys.stderr)
+            return 2
+        examined += 1
+        for line, rule, desc, snippet in hits(text):
+            if "%s:%s" % (rel, rule) in allow:
+                continue
+            out.append((rel, line, rule, desc, snippet))
+    print("EXAMINED %d" % examined)
+    for rel, line, rule, desc, snippet in out:
+        print("HIT %s:%d\t%s\t%s\t%s" % (rel, line, rule, desc, snippet))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
+FLAGPY
+)"
+
+flag_hygiene_report="$(collect_flag_hygiene_sources | python3 -c "$FLAG_HYGIENE_PY" "$FLAG_HYGIENE_ALLOW")"
+flag_scanned="$(sed -n 's/^EXAMINED //p' <<< "$flag_hygiene_report")"
+
+flag_hygiene_failed=0
+if [ -z "$flag_scanned" ]; then
+  echo "ERROR: the flag/presence hygiene scanner produced no verdict at all." >&2
+  echo "       That is missing EVIDENCE, not a clean tree." >&2
+  flag_hygiene_failed=1
+elif [ "$flag_scanned" -lt "$MIN_SCANNED_FLAG_SOURCES" ]; then
+  echo "ERROR: flag/presence scan examined only $flag_scanned Kotlin test sources," >&2
+  echo "       expected >= $MIN_SCANNED_FLAG_SOURCES." >&2
+  echo "       Searched: ${FLAG_HYGIENE_SCAN_DIRS[*]} (from \$PWD=$PWD)." >&2
+  echo "       Reporting OK here would be a pass over nothing: no files means no" >&2
+  echo "       offenders, which is not the same finding as no offenders in the" >&2
+  echo "       tree (#lzvacuousrun)." >&2
+  flag_hygiene_failed=1
+fi
+
+if grep -q '^HIT ' <<< "$flag_hygiene_report"; then
+  echo "ERROR: these conformance sources reach for a flag/presence spelling that" >&2
+  echo "       cannot fail on a malformed or missing fixture value:" >&2
+  grep '^HIT ' <<< "$flag_hygiene_report" | sed 's/^HIT /         /' >&2
+  echo "       Every one of these decodes a wrong TYPE or an ABSENT key to a value" >&2
+  echo "       and then compares it, or skips the comparison entirely — so the row" >&2
+  echo "       reads exactly like a key the fixture never carried and the suite" >&2
+  echo "       stays green. Use .boolean / .int (which throw on the wrong type)," >&2
+  echo "       getValue (which throws on a missing key), or spell the absence out" >&2
+  echo "       in a when/if that names what absence MEANS. Do not rely on a" >&2
+  echo "       sibling runner over the same fixture being stricter: that coverage" >&2
+  echo "       disappears the moment the sibling is deleted, split, renamed or" >&2
+  echo "       skipped (#lzsiblingrunnermasking)." >&2
+  flag_hygiene_failed=1
+fi
+
+if [ "$flag_hygiene_failed" -ne 0 ]; then
+  exit 1
+fi
+
+echo "flag/presence hygiene OK: $flag_scanned Kotlin test sources examined, none reach for a" \
+     "coercing or defaulting fixture read (7 rules; comments, KDoc, string literals and imports" \
+     "skipped; whitespace-insensitive; 1 allowlisted rule-in-file)"
+
+
 SPEC_DIR="${LAZILY_SPEC_CONFORMANCE_DIR:-${LAZILY_SPEC_DIR:-../lazily-spec}/conformance}"
 
 # A missing corpus is a legitimate LOCAL state (no sibling checkout) and an

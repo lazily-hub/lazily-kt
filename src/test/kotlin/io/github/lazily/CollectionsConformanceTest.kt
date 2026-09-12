@@ -103,9 +103,13 @@ class CollectionsConformanceTest {
         expected: JsonObject,
         readers: Readers,
     ) {
-        if ("order" in expected) {
-            assertEquals(strings(expected.getValue("order").jsonArray), h.map.keysNow(), "order")
-        }
+        // REQUIRED, not presence-gated (`#lzsiblingrunnermasking`). `if ("order" in
+        // expected)` made an `order` key dropped upstream read as "this step makes
+        // no claim about ordering" — over the two fixtures whose whole subject is
+        // ordering. CollectionsFamilyConformanceTest reads it as
+        // `expected["order"]!!` over the SAME two fixtures, so the family runner
+        // was the only thing standing between that drop and a green suite.
+        assertEquals(strings(expected.getValue("order").jsonArray), h.map.keysNow(), "order")
         if ("membership" in expected) {
             val want = strings(expected.getValue("membership").jsonArray).toSet()
             assertEquals(want, h.map.keysNow().toSet(), "membership")
@@ -114,30 +118,38 @@ class CollectionsConformanceTest {
             val vals = expected.getValue("values").jsonObject
             for ((k, v) in vals) assertEquals(v.jsonPrimitive.int, h.map.get(k), "value $k")
         }
-        val inv = expected["invalidates"]?.jsonObject
-        if (inv != null) {
-            val membershipInvalidated = inv.getValue("membership").jsonPrimitive.boolean
-            val orderInvalidated = inv.getValue("order").jsonPrimitive.boolean
-            // Required, not defaulted: `?: emptyList()` made a `value` key dropped
-            // upstream read as "nothing was invalidated", so the whole per-key half
-            // of the matrix could vanish and every reader would be asserted to have
-            // stayed cached (#lzflagcoercion).
-            val valueKeys =
-                (
-                    inv["value"]
-                        ?: error("expected.invalidates is missing 'value' — the matrix is the contract")
-                    ).jsonArray.map { it.jsonPrimitive.content }
-            for (key in readers.valueReaders.keys) {
-                val invalidated = key in valueKeys
-                assertEquals(
-                    !invalidated,
-                    h.ctx.isSet(readers.valueReaders.getValue(key)),
-                    "value reader '$key' invalidated=$invalidated",
-                )
-            }
-            assertEquals(!membershipInvalidated, h.ctx.isSet(readers.membership), "membership invalidate mismatch")
-            assertEquals(!orderInvalidated, h.ctx.isSet(readers.order), "order invalidate mismatch")
+        // The matrix is the contract, so its ABSENCE is a fixture-shape violation
+        // and never a step that checks no invalidation (`#lzsiblingrunnermasking`).
+        // CollectionsFamilyConformanceTest already errors on a missing
+        // `expected.invalidates` and counts the matrices it ran; this runner
+        // skipped the whole block silently, so a fixture that lost it would have
+        // reddened only the family runner.
+        val inv =
+            (
+                expected["invalidates"]
+                    ?: error("expected.invalidates is missing — the matrix is the contract")
+                ).jsonObject
+        val membershipInvalidated = inv.getValue("membership").jsonPrimitive.boolean
+        val orderInvalidated = inv.getValue("order").jsonPrimitive.boolean
+        // Required, not defaulted: `?: emptyList()` made a `value` key dropped
+        // upstream read as "nothing was invalidated", so the whole per-key half
+        // of the matrix could vanish and every reader would be asserted to have
+        // stayed cached (#lzflagcoercion).
+        val valueKeys =
+            (
+                inv["value"]
+                    ?: error("expected.invalidates is missing 'value' — the matrix is the contract")
+                ).jsonArray.map { it.jsonPrimitive.content }
+        for (key in readers.valueReaders.keys) {
+            val invalidated = key in valueKeys
+            assertEquals(
+                !invalidated,
+                h.ctx.isSet(readers.valueReaders.getValue(key)),
+                "value reader '$key' invalidated=$invalidated",
+            )
         }
+        assertEquals(!membershipInvalidated, h.ctx.isSet(readers.membership), "membership invalidate mismatch")
+        assertEquals(!orderInvalidated, h.ctx.isSet(readers.order), "order invalidate mismatch")
         val handleStable = expected["handle_stable"]?.jsonObject
         if (handleStable != null) {
             // BOTH directions (`#lzflagcoercion`). The true-only arm left
@@ -181,29 +193,39 @@ class CollectionsConformanceTest {
         return Readers(valueReaders, membership, order)
     }
 
-    @Test
-    fun `conformance cellmap independence`() {
-        val fixture = loadFixture("cellmap_independence.json")
+    /**
+     * Replay one ordering fixture, asserting that every step it DECLARES ran.
+     *
+     * The two tests below were byte-identical but for the filename, and neither
+     * carried a floor: `for (step in ...)` over an empty `steps` array is a
+     * passing test that replayed nothing, and no assertion inside the loop can
+     * see that. CollectionsFamilyConformanceTest counts its steps and its
+     * matrices over these same two fixtures (`#lzsiblingrunnermasking`), so a
+     * fixture emptied upstream would have reddened the family runner alone.
+     * The count is read back from the fixture, so there is no number to re-pin.
+     */
+    private fun replayOrdering(name: String) {
+        val fixture = loadFixture(name)
         val h = harness(fixture.getValue("initial").jsonObject)
-        for (step in fixture.getValue("steps").jsonArray) {
+        val steps = fixture.getValue("steps").jsonArray
+        assertTrue(steps.isNotEmpty(), "$name declares no steps — a zero-step replay is not a pass")
+        var executed = 0
+        for (step in steps) {
             val stepObj = step.jsonObject
-            val readers = primeReaders(h) // fresh readers per step: effect measured from a clean state
-            applyOp(h, stepObj.getValue("op").jsonObject)
-            assertExpected(h, stepObj.getValue("expected").jsonObject, readers)
-        }
-    }
-
-    @Test
-    fun `conformance cellmap atomic move`() {
-        val fixture = loadFixture("cellmap_atomic_move.json")
-        val h = harness(fixture.getValue("initial").jsonObject)
-        for (step in fixture.getValue("steps").jsonArray) {
-            val stepObj = step.jsonObject
+            // Fresh readers per step: the effect is measured from a clean state.
             val readers = primeReaders(h)
             applyOp(h, stepObj.getValue("op").jsonObject)
             assertExpected(h, stepObj.getValue("expected").jsonObject, readers)
+            executed++
         }
+        assertEquals(steps.size, executed, "$name: loaded ${steps.size} steps but executed $executed")
     }
+
+    @Test
+    fun `conformance cellmap independence`() = replayOrdering("cellmap_independence.json")
+
+    @Test
+    fun `conformance cellmap atomic move`() = replayOrdering("cellmap_atomic_move.json")
 
     @Test
     fun `conformance keyed reconciliation lis`() {

@@ -1030,6 +1030,10 @@ class QueueFamilyConformanceTest {
         }
     }
 
+    /** The reader kinds a WorkQueueCell matrix is made of — asserted as a SET. */
+    private val workInvalidationKinds =
+        setOf("pending_len", "is_empty", "in_flight_len", "dead_letter_len")
+
     private fun deliveryJson(delivery: WorkQueueDelivery<String>): JsonObject =
         JsonObject(
             mapOf(
@@ -1084,7 +1088,20 @@ class QueueFamilyConformanceTest {
                     }
                 assertEquals(step.getValue("returns"), returned, "$flavor $name step $index returns")
                 val expected = step.getValue("expected").jsonObject
-                for ((kind, rawWant) in expected.getValue("invalidates").jsonObject) {
+                val workInvalidates = expected.getValue("invalidates").jsonObject
+                // Iterating the fixture's keys catches a kind the corpus ADDS or
+                // RENAMES (`isSet` resolves through a map that throws) and is blind
+                // to one it DROPS. WorkQueueConformanceTest read the four by name,
+                // catching the drop and blind to the add — each runner covered the
+                // half the other missed, over these same two fixtures
+                // (`#lzsiblingrunnermasking`). The set equality supplies the other
+                // half here so neither runner depends on its sibling.
+                assertEquals(
+                    workInvalidationKinds,
+                    workInvalidates.keys,
+                    "$flavor $name step $index expected.invalidates reader kinds",
+                )
+                for ((kind, rawWant) in workInvalidates) {
                     assertEquals(
                         !rawWant.jsonPrimitive.boolean,
                         queue.isSet(kind),

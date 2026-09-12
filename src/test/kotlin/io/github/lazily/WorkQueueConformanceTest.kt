@@ -11,7 +11,9 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /** Canonical competing-consumer delivery lifecycle (`#lzworkqueue`). */
 class WorkQueueConformanceTest {
@@ -20,10 +22,25 @@ class WorkQueueConformanceTest {
         return Json.parseToJsonElement(text).jsonObject
     }
 
+    /**
+     * Every field the corpus spells for a delivery, so an added one cannot be
+     * ignored (`#lzsiblingrunnermasking`).
+     *
+     * Six `getValue` reads catch a field the corpus DROPS and are blind to one it
+     * ADDS. QueueFamilyConformanceTest compares the whole JSON object against a
+     * `deliveryJson(got)` projection, which catches both — so over these same two
+     * fixtures the extra-field half of the contract was asserted only by the
+     * family runner. The key-set equality is this runner's half of that, without
+     * duplicating the projection.
+     */
+    private val deliveryFields =
+        setOf("delivery_id", "item_id", "value", "worker", "attempt", "deadline")
+
     private fun assertDelivery(
         actual: WorkQueueDelivery<String>,
         expected: JsonObject,
     ) {
+        assertEquals(deliveryFields, expected.keys, "delivery field set")
         assertEquals(expected.getValue("delivery_id").jsonPrimitive.long, actual.deliveryId)
         assertEquals(expected.getValue("item_id").jsonPrimitive.long, actual.itemId)
         assertEquals(expected.getValue("value").jsonPrimitive.content, actual.value)
@@ -32,12 +49,28 @@ class WorkQueueConformanceTest {
         assertEquals(expected.getValue("deadline").jsonPrimitive.long, actual.deadline)
     }
 
+    /**
+     * The reader kinds the WorkQueueCell matrix is made of.
+     *
+     * Asserted as a SET before the four reads below (`#lzsiblingrunnermasking`).
+     * `getValue` per known name catches a kind the corpus drops and silently
+     * ignores one it adds or renames; QueueFamilyConformanceTest iterates the
+     * fixture's own keys and resolves each through a reader map that THROWS on an
+     * unknown kind, so it catches the add and is blind to the drop. Each runner
+     * covered exactly the half the other missed, over the same two fixtures —
+     * which is coverage by accident of which runners exist, not by assertion.
+     * Both halves now hold in both runners.
+     */
+    private val invalidationKinds =
+        setOf("pending_len", "is_empty", "in_flight_len", "dead_letter_len")
+
     private fun assertInvalidations(
         ctx: Context,
         queue: WorkQueueCell<String>,
         expected: JsonObject,
     ) {
         val invalidates = expected.getValue("invalidates").jsonObject
+        assertEquals(invalidationKinds, invalidates.keys, "expected.invalidates reader kinds")
         assertEquals(invalidates.getValue("pending_len").jsonPrimitive.boolean, !ctx.isSet(queue.readers.pendingLen))
         assertEquals(invalidates.getValue("is_empty").jsonPrimitive.boolean, !ctx.isSet(queue.readers.isEmpty))
         assertEquals(invalidates.getValue("in_flight_len").jsonPrimitive.boolean, !ctx.isSet(queue.readers.inFlightLen))
@@ -96,8 +129,19 @@ class WorkQueueConformanceTest {
                 maxDeliveries = initial.getValue("max_deliveries").jsonPrimitive.int,
             )
 
-        fixture.getValue("steps").jsonArray.forEach { rawStep ->
+        val steps = fixture.getValue("steps").jsonArray
+        assertTrue(steps.isNotEmpty(), "$name declares no steps — a zero-step replay is not a pass")
+        var executed = 0
+        steps.forEachIndexed { index, rawStep ->
             val step = rawStep.jsonObject
+            // The matrix lives under `expected.invalidates`. lazily-rs read it off
+            // the STEP, so its assertion never ran once; QueueFamilyConformanceTest
+            // carries this guard for the same fixtures and this runner did not
+            // (`#lzsiblingrunnermasking`).
+            assertFalse(
+                step.containsKey("invalidates"),
+                "step $index spells `invalidates` on the STEP, not under `expected`",
+            )
             val op = step.getValue("op").jsonObject
             // Materialize every reader before mutation so isSet observes exact invalidation.
             queue.pendingLen()
@@ -149,7 +193,9 @@ class WorkQueueConformanceTest {
             val expected = step.getValue("expected").jsonObject
             assertInvalidations(ctx, queue, expected)
             assertState(queue, expected)
+            executed++
         }
+        assertEquals(steps.size, executed, "$name: loaded ${steps.size} steps but executed $executed")
     }
 
     @Test

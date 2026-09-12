@@ -67,13 +67,17 @@ class QueueCellConformanceTest {
         return q
     }
 
-    /** A reader-kind slot whose invalidation we can observe via [Context.isSet]. */
+    /**
+     * The reader-kind slots whose invalidation we can observe via [Context.isSet],
+     * keyed by the CORPUS's spelling of the kind.
+     *
+     * A map, not five named fields (`#lzsiblingrunnermasking`). Five fields force
+     * the matrix check to be a check-list of the kinds this file happens to know,
+     * and a check-list cannot notice a kind it does not list — see
+     * [assertInvalidation].
+     */
     private class Readers(
-        val head: Computed<Unit>,
-        val len: Computed<Unit>,
-        val isEmpty: Computed<Unit>,
-        val isFull: Computed<Unit>,
-        val closed: Computed<Unit>,
+        val byKind: Map<String, Computed<Unit>>,
     )
 
     private fun makeReaders(
@@ -83,32 +87,35 @@ class QueueCellConformanceTest {
         // Each reader subscribes to exactly one reader-kind cell. We wrap the
         // reactive read in a `computed` returning `Unit` so `ctx.isSet` reports
         // whether the cached value survived the last op.
-        val head =
-            ctx.computed {
-                q.head(this)
-                Unit
-            }
-        val len =
-            ctx.computed {
-                q.len(this)
-                Unit
-            }
-        val isEmpty =
-            ctx.computed {
-                q.isEmpty(this)
-                Unit
-            }
-        val isFull =
-            ctx.computed {
-                q.isFull(this)
-                Unit
-            }
-        val closed =
-            ctx.computed {
-                q.isClosed(this)
-                Unit
-            }
-        return Readers(head, len, isEmpty, isFull, closed)
+        return Readers(
+            mapOf(
+                "head" to
+                    ctx.computed {
+                        q.head(this)
+                        Unit
+                    },
+                "len" to
+                    ctx.computed {
+                        q.len(this)
+                        Unit
+                    },
+                "is_empty" to
+                    ctx.computed {
+                        q.isEmpty(this)
+                        Unit
+                    },
+                "is_full" to
+                    ctx.computed {
+                        q.isFull(this)
+                        Unit
+                    },
+                "closed" to
+                    ctx.computed {
+                        q.isClosed(this)
+                        Unit
+                    },
+            ),
+        )
     }
 
     /** Materialize every reader's cache so the next op's invalidation is observable via [Context.isSet] (a cached reader that stays cached was not invalidated). */
@@ -116,11 +123,7 @@ class QueueCellConformanceTest {
         ctx: Context,
         readers: Readers,
     ) {
-        ctx.get(readers.head)
-        ctx.get(readers.len)
-        ctx.get(readers.isEmpty)
-        ctx.get(readers.isFull)
-        ctx.get(readers.closed)
+        readers.byKind.values.forEach { ctx.get(it) }
     }
 
     /**
@@ -132,31 +135,44 @@ class QueueCellConformanceTest {
      * (`true` ⇒ must invalidate, `false` ⇒ must stay cached). A reader kind
      * **absent** from [invalidates] is not asserted — fixtures that focus on one
      * reader kind (e.g. `popped_head_observation`) only declare the kind under
-     * test, so absence means "don't check", not "must be false".
+     * test, so absence means "don't check", not "must be false". That is a
+     * property of the corpus, and QueueFamilyConformanceTest reads it the same way.
+     *
+     * Driven by the fixture's OWN keys, never by a check-list of the five kinds
+     * this file knows (`#lzsiblingrunnermasking`). The check-list form ran
+     * `invalidates[name] ?: return` once per known name, so a kind the corpus
+     * ADDS or RENAMES — `is_closed` for `closed`, a sixth reader — was asserted
+     * by nothing at all: the matrix silently shrank and the row read exactly like
+     * a key the fixture never carried. QueueFamilyConformanceTest already
+     * iterated the fixture's keys and resolved each through
+     * `readers.getValue(kind)`, which THROWS on a kind it cannot resolve, so over
+     * these same five fixtures the family runner was the only thing that would
+     * have caught it. Coverage that depends on which sibling runner happens to be
+     * strict is an accident of which runners exist, not a property of this
+     * assertion — delete or rename that runner and the hole opens.
      */
     private fun assertInvalidation(
         ctx: Context,
         readers: Readers,
         invalidates: JsonObject,
     ) {
-        fun check(
-            name: String,
-            reader: Computed<Unit>,
-        ) {
-            val node = invalidates[name] ?: return
-            val expectedInv = node.jsonPrimitive.boolean
+        for ((kind, rawWant) in invalidates) {
+            val reader =
+                readers.byKind[kind]
+                    ?: error(
+                        "expected.invalidates names reader kind '$kind', which this runner " +
+                            "cannot resolve (known: ${readers.byKind.keys.sorted()}). A kind " +
+                            "nobody resolves is a row asserted by nothing — wire the reader, " +
+                            "never skip the row (#lzsiblingrunnermasking)",
+                    )
+            val expectedInv = rawWant.jsonPrimitive.boolean
             val cached = ctx.isSet(reader)
             if (expectedInv) {
-                assertFalse(cached, "reader `$name` should have been invalidated but stayed cached")
+                assertFalse(cached, "reader `$kind` should have been invalidated but stayed cached")
             } else {
-                assertTrue(cached, "reader `$name` should have stayed cached but was invalidated")
+                assertTrue(cached, "reader `$kind` should have stayed cached but was invalidated")
             }
         }
-        check("head", readers.head)
-        check("len", readers.len)
-        check("is_empty", readers.isEmpty)
-        check("is_full", readers.isFull)
-        check("closed", readers.closed)
         // Re-materialize all readers so the next step starts from a known-cached
         // state regardless of which were invalidated.
         materializeAll(ctx, readers)
@@ -199,19 +215,45 @@ class QueueCellConformanceTest {
         }
     }
 
-    /** Run a single fixture file: replay every step and assert state + invalidation. */
+    /**
+     * Run a single fixture file: replay every step and assert state + invalidation.
+     *
+     * `expected` and `expected.invalidates` are REQUIRED, never defaulted to an
+     * empty block (`#lzsiblingrunnermasking`). `?: JsonObject(emptyMap())` made a
+     * step that lost its expectations upstream replay its op and then assert
+     * NOTHING — an empty matrix iterates zero rows, an empty `expected` compares
+     * zero observables, and the step still counted as run.
+     * QueueFamilyConformanceTest reads both through `getValue` over these same
+     * five fixtures, which is the only reason a dropped block would have reddened
+     * anything; that is the sibling mask this runner no longer relies on.
+     *
+     * The step-count floor is the second half: `forEachIndexed` over an empty
+     * `steps` array is a passing test that replayed nothing, and a floor inside
+     * the loop cannot see it. The counter is compared to the length the fixture
+     * declared, so there is no number to re-pin.
+     */
     private fun runFixture(fixture: JsonObject) {
         val ctx = Context()
         val q = buildInitial(ctx, fixture.getValue("initial").jsonObject)
         val readers = makeReaders(ctx, q)
         materializeAll(ctx, readers)
 
-        for ((i, stepEl) in fixture.getValue("steps").jsonArray.withIndex()) {
+        val steps = fixture.getValue("steps").jsonArray
+        assertTrue(steps.isNotEmpty(), "fixture declares no steps — a zero-step replay is not a pass")
+        var executed = 0
+
+        for ((i, stepEl) in steps.withIndex()) {
             val step = stepEl.jsonObject
+            assertFalse(
+                step.containsKey("invalidates"),
+                "step $i spells `invalidates` on the STEP — the matrix lives under " +
+                    "`expected.invalidates`, and lazily-rs read it off the step, so its " +
+                    "assertion never ran once (#lzflagcoercion)",
+            )
             val op = step.getValue("op").jsonObject
             val opType = op.getValue("type").jsonPrimitive.content
-            val expected = step["expected"]?.jsonObject ?: JsonObject(emptyMap())
-            val invalidates = expected["invalidates"]?.jsonObject ?: JsonObject(emptyMap())
+            val expected = step.getValue("expected").jsonObject
+            val invalidates = expected.getValue("invalidates").jsonObject
 
             val gotReturns: kotlinx.serialization.json.JsonElement =
                 when (opType) {
@@ -269,6 +311,11 @@ class QueueCellConformanceTest {
 
             // Assert the per-reader-kind invalidation matrix.
             assertInvalidation(ctx, readers, invalidates)
+            executed++
+        }
+
+        check(executed == steps.size) {
+            "loaded ${steps.size} steps but executed $executed"
         }
     }
 

@@ -1,6 +1,7 @@
 package io.github.lazily
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
@@ -35,6 +36,25 @@ class CollectionsCrdtConformanceTest {
 
     // -- StableId -----------------------------------------------------------
 
+    /**
+     * A scenario's block list under [key]: absence is an empty list, a PRESENT
+     * non-array is a named failure (`#lzsiblingrunnermasking`).
+     *
+     * `s[key]?.jsonArray?.map { ... } ?: emptyList()` spelled the same thing, but
+     * the `?:` also swallows a shape the corpus never allowed, and the spelling
+     * is the one this binding's flag/presence guard now refuses outright. Same
+     * shape as StateChartConformanceTest's `actionsOf`.
+     */
+    private fun blocksOf(
+        s: JsonObject,
+        key: String,
+    ): List<Block> =
+        when (val raw = s[key]) {
+            null -> emptyList()
+            is JsonArray -> raw.map { block(it.jsonObject) }
+            else -> error("`$key` must be a JSON array of blocks, got $raw (#lzflagcoercion)")
+        }
+
     private fun block(obj: JsonObject): Block {
         val text = obj.getValue("text").jsonPrimitive.content
         val anchor = obj["anchor"]?.jsonPrimitive?.contentOrNull
@@ -64,8 +84,8 @@ class CollectionsCrdtConformanceTest {
                 continue
             }
 
-            val oldBlocks = s["old"]?.jsonArray?.map { block(it.jsonObject) } ?: emptyList()
-            val newBlocks = s["new"]?.jsonArray?.map { block(it.jsonObject) } ?: emptyList()
+            val oldBlocks = blocksOf(s, "old")
+            val newBlocks = blocksOf(s, "new")
             val expect = s.getValue("expect").jsonObject
 
             // Scenario 6: assign_stable_keys flows identity through edit.

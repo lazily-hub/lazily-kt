@@ -2,6 +2,7 @@ package io.github.lazily
 
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -963,7 +964,26 @@ class ReactiveGraphConformanceTest {
         return out
     }
 
-    private fun strs(v: JsonElement?): List<String> = v?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
+    /**
+     * A REQUIRED string array. Absence is a named failure, never an empty list
+     * (`#lzsiblingrunnermasking`).
+     *
+     * `?: emptyList()` made a key dropped upstream read as "the expected list is
+     * empty", which every one of the `checkList` call sites below would then
+     * compare against a possibly-empty observation. The one place absence is
+     * legitimate is `observationally_equal`, which is optional by design and says
+     * so at its own call site.
+     */
+    private fun strs(v: JsonElement?): List<String> =
+        when (v) {
+            null ->
+                error(
+                    "expected a string array and the key is absent — an absent expectation is " +
+                        "not an empty one (#lzsiblingrunnermasking)",
+                )
+            is JsonArray -> v.map { it.jsonPrimitive.content }
+            else -> error("expected a string array, got $v (#lzflagcoercion)")
+        }
 
     /** A top-level read: the value, or [READ_AFTER_DISPOSE] on a disposed node. */
     private fun readOrError(
@@ -1498,7 +1518,12 @@ class ReactiveGraphConformanceTest {
                 // independently. This is the whole reason the `scenarios` shape
                 // exists — a relation between two op streams is not expressible
                 // in a single `steps` array.
-                val pair = strs(fx["expected"]?.jsonObject?.get("observationally_equal"))
+                // OPTIONAL by design: most `scenarios` fixtures state no relation
+                // between their streams. Absence is spelled out rather than folded
+                // into `strs` — a defaulting reader cannot tell this deliberate
+                // absence from a dropped expectation (`#lzsiblingrunnermasking`).
+                val equalEl = fx["expected"]?.jsonObject?.get("observationally_equal")
+                val pair = if (equalEl == null) emptyList() else strs(equalEl)
                 if (pair.isNotEmpty()) {
                     val names = scenariosOf(fx).map { it["name"]!!.jsonPrimitive.content }
                     val idx =

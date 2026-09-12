@@ -112,13 +112,21 @@ class StateChartConformanceTest {
                     it as? JsonObject
                         ?: error("step $i `$event`: `guards` must be a JSON object, got $it")
                 }
+            // Absence spelled out, never `?: emptyMap()` (`#lzsiblingrunnermasking`).
+            // A step with no `guards` block passes no guards; the `?:` form said the
+            // same thing in the spelling this binding's flag/presence guard refuses,
+            // because it is indistinguishable from a defaulted EXPECTATION.
             val guards: Map<String, Boolean> =
-                guardBlock?.entries?.associate { (k, v) ->
-                    k to (
-                        (v as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull
-                            ?: error("step $i `$event`: guard '$k' must be a JSON boolean, got $v")
-                        )
-                } ?: emptyMap()
+                if (guardBlock == null) {
+                    emptyMap()
+                } else {
+                    guardBlock.entries.associate { (k, v) ->
+                        k to (
+                            (v as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull
+                                ?: error("step $i `$event`: guard '$k' must be a JSON boolean, got $v")
+                            )
+                    }
+                }
 
             val accepted = chart.send(ctx, event, guards)
             val wantAccepted = step.getValue("accepted").jsonPrimitive.boolean

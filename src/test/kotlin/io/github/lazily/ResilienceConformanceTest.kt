@@ -3,7 +3,6 @@ package io.github.lazily
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
-import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -116,7 +115,12 @@ class ResilienceConformanceTest {
         for (element in steps(fx)) {
             val step = element.jsonObject
             when (step["op"]!!.jsonObject["type"]!!.jsonPrimitive.content) {
-                "acquire" -> assertEquals(step["returns"]!!.jsonPrimitive.booleanOrNull, b.acquire())
+                // `.boolean`, never `booleanOrNull` (`#lzsiblingrunnermasking`).
+                // `booleanOrNull` decodes a quoted `"true"` or a `1` to null, and
+                // `assertEquals(null, someBoolean)` is a failure with a message that
+                // blames the LIBRARY for a fixture-shape violation. `.boolean` throws
+                // and says which key is malformed.
+                "acquire" -> assertEquals(step["returns"]!!.jsonPrimitive.boolean, b.acquire())
                 "release" -> b.release()
                 // Fail closed on an unrecognised op (`#lzscenariobodyskip`).
                 else ->
