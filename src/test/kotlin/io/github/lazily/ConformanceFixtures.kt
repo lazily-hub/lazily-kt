@@ -137,12 +137,45 @@ object ConformanceFixtures {
      */
     private val runId: String = System.getenv("LAZILY_CONFORMANCE_RUN_ID")?.trim().orEmpty()
 
-    /** First line of every evidence file this suite writes (`#lzstalemanifest`). */
+    /**
+     * The one spelling of the stamp's leading text, on THIS side of the seam
+     * (`#lzstampprefixdrift`).
+     *
+     * The prefix necessarily exists twice — this producer writes it, and
+     * `scripts/check-conformance-coverage.sh` matches it from its own
+     * `RUN_ID_STAMP_PREFIX` — because the two are different languages in
+     * different files, connected only by bytes on disk. A comment is not a
+     * coupling: `ConformanceRunIdStampTest` reads BOTH definitions and fails
+     * when they disagree, which is the only thing that makes them one string.
+     *
+     * Drift fails closed, and that is exactly what makes it a bad bug rather
+     * than a harmless one. The guard would find no stamp in a perfectly fresh
+     * file and refuse every run by name — as STALE EVIDENCE, pointing the reader
+     * at Gradle's cache and at `cleanTest`, for what is really a one-character
+     * typo in a string literal. Move only the trailing space and it is worse
+     * still: the prefix matches, the id it slices out is mangled, and the
+     * diagnosis says "the test step did not write this file" about a file the
+     * test step wrote moments earlier.
+     *
+     * Public so the test can read it from the real definition. Restating the
+     * literal in the test would add a THIRD place to drift, which is the shape
+     * being removed rather than a check of it.
+     */
+    const val RUN_ID_STAMP_PREFIX: String = "# lazily-run-id "
+
+    /**
+     * First line of every evidence file this suite writes (`#lzstalemanifest`).
+     *
+     * Built from [RUN_ID_STAMP_PREFIX] rather than spelling the prefix inline,
+     * so the constant the coupling test reads is the constant the bytes come
+     * from. A second literal here would let the test pass while the file on disk
+     * carried something else.
+     */
     fun runIdStamp(): String =
         if (runId.isEmpty()) {
-            "# lazily-run-id (unset: LAZILY_CONFORMANCE_RUN_ID reached no test JVM)\n"
+            RUN_ID_STAMP_PREFIX + "(unset: LAZILY_CONFORMANCE_RUN_ID reached no test JVM)\n"
         } else {
-            "# lazily-run-id $runId\n"
+            "$RUN_ID_STAMP_PREFIX$runId\n"
         }
 
     private val loaded = ConcurrentSkipListSet<String>()

@@ -818,6 +818,45 @@ evidence_lines() {
   grep -v '^#' "$1" || true
 }
 
+# Refuse a STAMPED file that carries no records (#lzstampsatisfiesnonempty).
+#
+# The run-id stamp made every evidence file non-empty by construction, which
+# quietly weakened every byte-based emptiness test standing in front of one. A
+# detached recorder that writes nothing but its stamp produces a file a few dozen
+# bytes long that passes `[ -s ]`, and passes require_run_id too — the stamp is
+# this run's id, it really was written by this run — and then yields an EMPTY
+# population to whatever rung reads it. The freshness check cannot catch it: the file is fresh.
+# It says nothing, freshly.
+#
+# So emptiness is asked of the RECORDS, below the stamp, and asked AFTER
+# require_run_id: the stamp has to be this run's before its absence of content
+# means anything about this run. lazily-js measured the same hazard as a 33-byte
+# stamp-only file satisfying its `statSync().size` check, and lazily-cpp found it
+# in CI, where a "manifest written" step tested `-s`.
+#
+# `[ ! -s ]` stays in front of every caller and is not redundant: it answers the
+# ABSENT and ZERO-BYTE cases, which must fail before `head -n 1` reads the file,
+# and it fails with the message that names the recorder that never attached.
+# This asks the different question that the stamp introduced.
+require_evidence_records() {
+  file="$1"
+  what="$2"
+  records="$(evidence_lines "$file" | grep -c . || true)"
+  if [ "$records" -eq 0 ]; then
+    echo "FAIL: $what at $file carries a run-id stamp and NOTHING ELSE" \
+         "(#lzstampsatisfiesnonempty)." >&2
+    echo "      The file is fresh — it is stamped with THIS run's id — and it is" >&2
+    echo "      non-empty, so an \`[ -s ]\` test passes it. It records zero" >&2
+    echo "      $what entries, which is not evidence of an empty corpus: it is a" >&2
+    echo "      recorder that attached and then wrote nothing." >&2
+    echo "      Usual cause: the suite ran with no fixture-bearing test selected" >&2
+    echo "      (a --tests filter, or a shutdown hook that flushed before the" >&2
+    echo "      replays), so the writer opened the file, stamped it and exited." >&2
+    echo "      Re-run the whole suite: ./gradlew cleanTest test" >&2
+    exit 1
+  fi
+}
+
 # Fixtures deliberately not replayed by this binding yet. Each entry is a claim
 # that someone looked; shrinking this list is the work. Adding to it silently is
 # how the guard rots, so keep a reason with any new entry.
@@ -962,6 +1001,7 @@ if [ ! -s "$MANIFEST" ]; then
   exit 1
 fi
 require_run_id "$MANIFEST" "the fixture manifest"
+require_evidence_records "$MANIFEST" "fixture-opened"
 OPENED="$(evidence_lines "$MANIFEST" | sort -u)"
 
 missing=0
@@ -1090,6 +1130,7 @@ if [ ! -s "$SCENARIO_LEDGER" ]; then
   exit 1
 fi
 require_run_id "$SCENARIO_LEDGER" "the scenario ledger"
+require_evidence_records "$SCENARIO_LEDGER" "scenario-replayed"
 LEDGER="$(evidence_lines "$SCENARIO_LEDGER" | sort -u)"
 LEDGER_KEYS="$(cut -f1,2 <<< "$LEDGER")"
 TAB=$'\t'
@@ -1370,10 +1411,20 @@ if [ ! -f "$BLOCK_LEDGER" ]; then
   missing=$((missing + 1))
 else
   require_run_id "$BLOCK_LEDGER" "the assertion-block ledger"
+  # This rung already asks emptiness of the RECORDS below the stamp, so it is
+  # the one evidence read the run-id stamp did NOT weaken
+  # (#lzstampsatisfiesnonempty) — a stamp-only ledger counts zero here and is
+  # refused. Deliberately NOT switched to require_evidence_records: this section
+  # accumulates into `missing` so every rung-0 diagnosis is reported in one pass,
+  # where the manifest and scenario reads exit immediately because nothing below
+  # them can be computed. Do not "tidy" this into a `[ -s ]` test: a stamped file
+  # is non-empty whatever it records.
   blocks_total=$(evidence_lines "$BLOCK_LEDGER" | grep -c . || true)
   if [ "$blocks_total" -eq 0 ]; then
-    echo "ERROR: ZERO assertion blocks were inventoried." >&2
-    echo "       Rung 0 is vacuously green over an empty population." >&2
+    echo "ERROR: ZERO assertion blocks were inventoried in $BLOCK_LEDGER." >&2
+    echo "       Rung 0 is vacuously green over an empty population. The file is" >&2
+    echo "       stamped with this run's id and is therefore non-empty — it records" >&2
+    echo "       nothing (#lzstampsatisfiesnonempty)." >&2
     missing=$((missing + 1))
   fi
 
