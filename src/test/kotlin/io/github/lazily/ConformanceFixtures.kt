@@ -1,9 +1,15 @@
 package io.github.lazily
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
+import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentSkipListSet
 
@@ -253,10 +259,90 @@ object ConformanceFixtures {
                 declaredBlocks.keys
                     .toSortedSet()
                     .joinToString("\n", postfix = "\n") { rel ->
-                        "$rel\t${if (rel in boundBlocks) "bound" else "UNBOUND"}"
+                        val state = if (rel in boundBlocks) "bound" else "UNBOUND"
+                        "$rel\t$state\t${blockDigest(declaredBlocks.getValue(rel))}"
                     }
             Files.writeString(assertionBlockLedgerPath, lines)
         }
+    }
+
+    /**
+     * Content digest of one inventoried assertion block — the SECOND dimension of
+     * the rung-0 magnitude (`#lzblocksitepin`).
+     *
+     * The site count and the distinct-digest count are each blind to what the other
+     * sees, in opposite directions:
+     *
+     *  - a **site** count absorbs a CONTENT edit. Respelling one block exactly like
+     *    another's leaves the site count untouched while the corpus has genuinely
+     *    lost a distinct claim (measured in lazily-cs: 743 sites unchanged, 634
+     *    digests down to 633).
+     *  - a **digest** count absorbs the DELETION of a block whose bytes recur
+     *    elsewhere (109 of lazily-py's 729 sites carry a recurring shape).
+     *
+     * So both are recorded here and both are asserted EQUAL against the same walk
+     * re-run over the corpus on disk by `scripts/check-conformance-coverage.sh`.
+     *
+     * The encoding is canonical and self-delimiting rather than "serialize back to
+     * JSON": the script's twin has to produce byte-identical input for the same
+     * block, and JSON string escaping is the one place two implementations reliably
+     * disagree. Every scalar is tagged and every string is UTF-8 LENGTH-PREFIXED,
+     * so no value can be confused with the punctuation around it, and object keys
+     * are emitted in sorted order because [JsonObject] equality — which [noteBound]
+     * matches on — is order-insensitive. Numbers keep their RAW source token: that
+     * is what kotlinx hands back and what the twin's JSON reader is configured to
+     * preserve, and normalizing either side would fold `1` into `1.0`.
+     */
+    fun blockDigest(block: JsonObject): String {
+        val canonical = StringBuilder()
+        appendCanonical(block, canonical)
+        val bytes =
+            MessageDigest.getInstance("SHA-256")
+                .digest(canonical.toString().toByteArray(StandardCharsets.UTF_8))
+        return bytes.joinToString("") { "%02x".format(it) }
+    }
+
+    private fun appendCanonical(
+        element: JsonElement,
+        out: StringBuilder,
+    ) {
+        when (element) {
+            // Checked BEFORE JsonPrimitive: JsonNull IS one, and its `content` is the
+            // bare string "null", which would otherwise digest identically to the raw
+            // number token of a (nonexistent, but unguarded) literal spelled the same.
+            is JsonNull -> out.append('z')
+            is JsonObject -> {
+                out.append('o').append(element.size).append('{')
+                for (key in element.keys.sorted()) {
+                    appendCanonicalString(key, out)
+                    appendCanonical(element.getValue(key), out)
+                }
+                out.append('}')
+            }
+            is JsonArray -> {
+                out.append('a').append(element.size).append('[')
+                for (value in element) appendCanonical(value, out)
+                out.append(']')
+            }
+            is JsonPrimitive ->
+                if (element.isString) {
+                    appendCanonicalString(element.content, out)
+                } else {
+                    // Numbers AND booleans. `content` is the raw source token for both,
+                    // so `true` and the string "true" stay distinguishable by their tag.
+                    out.append('n').append(element.content).append(';')
+                }
+        }
+    }
+
+    private fun appendCanonicalString(
+        value: String,
+        out: StringBuilder,
+    ) {
+        out.append('s')
+            .append(value.toByteArray(StandardCharsets.UTF_8).size)
+            .append(':')
+            .append(value)
     }
 
     /** Record a fixture replayed through a path this object did not read directly. */
