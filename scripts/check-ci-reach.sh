@@ -473,6 +473,49 @@ excuse_reason() {
 	done
 }
 
+# Refuse a target whose recipe `make -n` cannot even READ (#lzgrepcpipefail).
+#
+# dry_run() swallows both halves of a make failure: `2>/dev/null` eats the
+# "No rule to make target ..." line and the trailing `|| true` eats the exit 2.
+# An unbuildable PREREQUISITE therefore reaches the loop below as empty stdout,
+# which it reads as "recipe runs no checkable command" — the target drops out of
+# `reached` into `no gate` and the guard still reports OK.
+#
+# Measured on this repo: adding `test: does-not-exist.stamp` to the Makefile
+# moved `test` — `./gradlew test` plus the whole conformance ladder — out of
+# reached, and the guard still printed `OK — 6 target(s) reached by CI, 0
+# excused, 2 carrying no gate` and exited 0. That is a false green produced by an
+# ordinary commit which never touches this script; judging this guard against the
+# Makefile AS WRITTEN misses it, because the guard's job is to survive the edit
+# that changes it. Three sibling bindings reproduced the same hole the same way.
+#
+# So readability is asserted HERE, in the MAIN shell, before any recipe text is
+# interpreted. Deliberately NOT inside dry_run(): that runs inside `$(...)`, so a
+# non-zero exit or an `exit 1` there dies in the subshell and the caller still
+# sees an empty string — which is the masking this exists to refuse.
+#
+# An EMPTY recipe stays legitimate (`check` itself carries none, and is reported
+# as carrying no gate). This asks the different question of whether make could
+# read the recipe at all.
+unreadable_count=0
+while IFS= read -r target; do
+	[ -n "$target" ] || continue
+	if make_err="$("$MAKE_BIN" -n "$target" 2>&1 >/dev/null)"; then
+		continue
+	fi
+	unreadable_count=$((unreadable_count + 1))
+	printf 'UNREADABLE %-24s %s\n' "$target" "${make_err%%$'\n'*}" >&2
+done <<<"$closure"
+
+if [ "$unreadable_count" -gt 0 ]; then
+	echo "check-ci-reach: FAILED — \`$MAKE_BIN -n\` cannot read $unreadable_count target(s) above." >&2
+	echo "       Their recipes were never examined, so reporting them as carrying no" >&2
+	echo "       gate would be a pass over nothing: an unbuildable prerequisite is" >&2
+	echo "       missing EVIDENCE, not evidence that a gate is absent" >&2
+	echo "       (#lzgrepcpipefail). Fix the Makefile, or the prerequisite it names." >&2
+	exit 1
+fi
+
 unreached=""
 unreached_count=0
 stale=""
