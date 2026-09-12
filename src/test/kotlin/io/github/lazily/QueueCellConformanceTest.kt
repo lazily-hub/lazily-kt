@@ -5,8 +5,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
-import kotlinx.serialization.json.booleanOrNull
-import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -37,17 +36,34 @@ class QueueCellConformanceTest {
         return json.parseToJsonElement(text).jsonObject
     }
 
+    /**
+     * `capacity`: absent or JSON null means unbounded, any other value must
+     * decode as an Int (`#lzflagcoercion`).
+     */
+    private fun capacityOf(initial: JsonObject): Int? =
+        when (val raw = initial["capacity"]) {
+            null, JsonNull -> null
+            else -> raw.jsonPrimitive.int
+        }
+
     private fun buildInitial(
         ctx: Context,
         initial: JsonObject,
     ): QueueCell<V, VecDequeStorage<V>> {
-        val cap = initial["capacity"]?.jsonPrimitive?.intOrNull
+        // Absent or an EXPLICIT JSON null means unbounded — the corpus spells both.
+        // Anything else has to decode as an Int: `intOrNull` used to fold a
+        // malformed `capacity` into the same "unbounded" answer as a deliberate
+        // null, which replays a different fixture than the one on disk
+        // (`#lzflagcoercion`).
+        val cap = capacityOf(initial)
         val q = if (cap != null) QueueCell.bounded<V>(ctx, cap) else QueueCell.unbounded<V>(ctx)
         initial["elements"]?.jsonArray?.forEach { e ->
             assertNullError(q.tryPush(e.jsonPrimitive.content), "initial push")
         }
-        // `closed` in initial is rare but supported: honor it.
-        if (initial["closed"]?.jsonPrimitive?.booleanOrNull == true) q.close()
+        // `closed` in initial is rare but supported: honor it. A present value
+        // has to BE a boolean — `booleanOrNull == true` read every other spelling
+        // as "not closed" and replayed a different fixture (`#lzflagcoercion`).
+        if (initial["closed"]?.jsonPrimitive?.boolean == true) q.close()
         return q
     }
 
@@ -162,17 +178,24 @@ class QueueCellConformanceTest {
             val want: V? = if (headEl is JsonNull) null else headEl.jsonPrimitive.content
             assertEquals(want, q.head(), "head mismatch")
         }
-        expected["len"]?.jsonPrimitive?.intOrNull?.let {
-            assertEquals(it, q.len(), "len mismatch")
+        // Presence FIRST, then the type — never `booleanOrNull?.let` /
+        // `intOrNull?.let` (`#lzflagcoercion`). Those decode a wrong-typed
+        // expectation to null and then skip the assertion on it, so `is_empty: 0`
+        // or `len: 1.5` was indistinguishable from a key the fixture never
+        // carried: the arm ran zero comparisons and the suite stayed green.
+        // `.int` / `.boolean` throw on the same input, which is the whole point,
+        // and it is what QueueFamilyConformanceTest already does for these keys.
+        expected["len"]?.let {
+            assertEquals(it.jsonPrimitive.int, q.len(), "len mismatch")
         }
-        expected["is_empty"]?.jsonPrimitive?.booleanOrNull?.let {
-            assertEquals(it, q.isEmpty(), "is_empty mismatch")
+        expected["is_empty"]?.let {
+            assertEquals(it.jsonPrimitive.boolean, q.isEmpty(), "is_empty mismatch")
         }
-        expected["is_full"]?.jsonPrimitive?.booleanOrNull?.let {
-            assertEquals(it, q.isFull(), "is_full mismatch")
+        expected["is_full"]?.let {
+            assertEquals(it.jsonPrimitive.boolean, q.isFull(), "is_full mismatch")
         }
-        expected["closed"]?.jsonPrimitive?.booleanOrNull?.let {
-            assertEquals(it, q.isClosed(), "closed mismatch")
+        expected["closed"]?.let {
+            assertEquals(it.jsonPrimitive.boolean, q.isClosed(), "closed mismatch")
         }
     }
 

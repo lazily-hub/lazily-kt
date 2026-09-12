@@ -330,17 +330,42 @@ class AssertionKeys(
 
     fun int(key: String): Int? = long(key)?.toInt()
 
-    /** Booleans, tolerating the `"true"`/`"false"` string spelling the corpus also uses. */
+    /**
+     * The fixture's JSON BOOLEAN for [key], or null when the fixture omits it.
+     *
+     * A PRESENT value that is not a JSON boolean is a named failure — never a
+     * default, never a coercion (`#lzflagcoercion`). The quoted spellings are
+     * rejected with everything else: kotlinx's `booleanOrNull` parses the
+     * *string* `"true"`, so the `!isString` guard is load-bearing exactly as it
+     * is in `StateChart.kt`, which already refuses `"true"` for `parallel` and
+     * `internal`. This function used to accept it, on the claim that "the corpus
+     * also uses" that spelling; the corpus does not. Its only two string-spelled
+     * booleans are the malformed `parallel`/`internal` inputs
+     * `statechart/malformed_rejected.json` exists to watch get REJECTED, and no
+     * assertion block anywhere in it spells a flag as a string.
+     *
+     * The hole this closes is lazily-go's: it shipped `got != (want == true)`,
+     * where `want` held whatever the fixture spelled and `want == true` was
+     * false for EVERY non-boolean, so a fixture reading `"true"` silently
+     * asserted the opposite of what it said and passed. Tolerating a spelling
+     * the schema never allowed is how a binding earns that defect; requiring the
+     * type is the whole fix.
+     */
     fun boolean(key: String): Boolean? =
         when (val e = this[key]) {
             null -> null
             is JsonPrimitive ->
-                e.booleanOrNull ?: when (e.contentOrNull) {
-                    "true" -> true
-                    "false" -> false
-                    else -> error("$where: assertion key '$key' is not a boolean: $e")
-                }
-            else -> error("$where: assertion key '$key' is not a boolean: $e")
+                e.takeIf { !it.isString }?.booleanOrNull
+                    ?: error(
+                        "$where: assertion key '$key' must be a JSON boolean, got $e. A quoted " +
+                            "\"true\"/\"false\", a 0/1, or any other spelling is a fixture shape " +
+                            "violation, not a value to coerce — coercing one is how a silently " +
+                            "INVERTED assertion passes (#lzflagcoercion)",
+                    )
+            else ->
+                error(
+                    "$where: assertion key '$key' must be a JSON boolean, got $e (#lzflagcoercion)",
+                )
         }
 
     fun obj(key: String): JsonObject? = (this[key] as? JsonObject)

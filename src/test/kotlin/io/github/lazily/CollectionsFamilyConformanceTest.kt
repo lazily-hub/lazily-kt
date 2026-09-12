@@ -3,6 +3,7 @@ package io.github.lazily
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.int
@@ -411,7 +412,20 @@ class CollectionsFamilyConformanceTest {
                     ?: error("${where(i)}: expected.invalidates is missing - the matrix is the contract")
             matrices += 1
 
-            val dirty = invalidates["value"]?.jsonArray?.let { strings(it) }?.toSet() ?: emptySet()
+            // Every sub-key REQUIRED, none defaulted (`#lzflagcoercion`). `?: emptySet()`
+            // and `?: false` below made a matrix sub-key dropped upstream read as
+            // "nothing invalidated" — the weakest possible expectation, installed
+            // silently. `invalidates` itself is already required just above, and a
+            // half-present matrix is no more of a contract than an absent one.
+            fun matrix(key: String): JsonElement =
+                invalidates[key]
+                    ?: error(
+                        "${where(i)}: expected.invalidates is missing '$key' - a sub-key absent " +
+                            "from the matrix used to default to the weakest expectation, so " +
+                            "dropping it upstream silently disarmed this half of the contract",
+                    )
+
+            val dirty = strings(matrix("value").jsonArray).toSet()
             val survivors = gotOrder.toSet()
             for ((key, drive) in valueReaders) {
                 if (key !in survivors) continue // removed: no entry left to read
@@ -431,13 +445,13 @@ class CollectionsFamilyConformanceTest {
             }
 
             assertEquals(
-                invalidates["membership"]?.jsonPrimitive?.boolean ?: false,
+                matrix("membership").jsonPrimitive.boolean,
                 membership() != membershipBase,
                 "${where(i)}: membership reader invalidation mismatch - " +
                     "a pure reorder must NOT invalidate set-identity readers",
             )
             assertEquals(
-                invalidates["order"]?.jsonPrimitive?.boolean ?: false,
+                matrix("order").jsonPrimitive.boolean,
                 order() != orderBase,
                 "${where(i)}: order reader invalidation mismatch",
             )

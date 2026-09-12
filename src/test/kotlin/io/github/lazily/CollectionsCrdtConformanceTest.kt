@@ -519,11 +519,27 @@ class CollectionsCrdtConformanceTest {
                 tree.setValue(edit.getValue("id").jsonPrimitive.content, edit.getValue("value").jsonPrimitive.int)
                 for ((node, v) in expectAfter!!) {
                     when (node) {
-                        "sibling_a_cached" ->
-                            if (v.jsonPrimitive.boolean) {
-                                assertNotNull(siblingA)
-                                assertTrue(ctx.isSet(siblingA), "$name: sibling 'a' derived slot stayed cached")
-                            }
+                        // BOTH directions, and the node's EXISTENCE first
+                        // (`#lzflagcoercion`). This arm used to run only when the
+                        // flag was true, so `sibling_a_cached: false` was compared
+                        // by nothing at all; and `sums.node("a")` is null for a
+                        // tree that carries no 'a', so a `false` expectation would
+                        // have been satisfiable by the sibling's NON-EXISTENCE
+                        // rather than by its cache state — which is precisely the
+                        // second defect lazily-go found beside the flag coercion.
+                        "sibling_a_cached" -> {
+                            val wantCached = v.jsonPrimitive.boolean
+                            assertNotNull(
+                                siblingA,
+                                "$name: the fixture asserts sibling 'a' cache state, but this tree " +
+                                    "carries no derived slot for 'a' — absence must not answer for it",
+                            )
+                            assertEquals(
+                                wantCached,
+                                ctx.isSet(siblingA),
+                                "$name: sibling 'a' derived slot cached=$wantCached",
+                            )
+                        }
                         else -> assertEquals(v.jsonPrimitive.int, sums.nodeValue(ctx, node), "$name: after $node")
                     }
                 }

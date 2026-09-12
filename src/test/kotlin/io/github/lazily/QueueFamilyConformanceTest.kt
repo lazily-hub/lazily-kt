@@ -8,7 +8,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.int
-import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -29,6 +28,18 @@ import kotlin.test.assertTrue
  * lazily-kt ships. The capability ledger is exact: adding a flavor without a
  * runner or leaving a runner behind after staging a flavor both fail.
  */
+/**
+ * `initial.capacity`: absent or an EXPLICIT JSON null means unbounded — the corpus
+ * spells both — and any other value MUST decode as an Int. `intOrNull` folded a
+ * malformed capacity into the same "unbounded" answer as a deliberate null, which
+ * silently replays a different fixture than the one on disk (`#lzflagcoercion`).
+ */
+private fun capacityOf(initial: JsonObject): Int? =
+    when (val raw = initial["capacity"]) {
+        null, JsonNull -> null
+        else -> raw.jsonPrimitive.int
+    }
+
 class QueueFamilyConformanceTest {
     private enum class Flavor { Sync, ThreadSafe, Async }
 
@@ -128,7 +139,7 @@ class QueueFamilyConformanceTest {
         override val flavor = Flavor.Sync
         private val ctx = Context()
         private val queue: QueueCell<String, VecDequeStorage<String>> =
-            initial["capacity"]?.jsonPrimitive?.intOrNull?.let {
+            capacityOf(initial)?.let {
                 QueueCell.bounded<String>(ctx, it)
             } ?: QueueCell.unbounded(ctx)
         private val readers =
@@ -200,7 +211,7 @@ class QueueFamilyConformanceTest {
         override val flavor = Flavor.ThreadSafe
         private val ctx = ThreadSafeContext()
         private val queue: ThreadSafeQueueCell<String, VecDequeStorage<String>> =
-            initial["capacity"]?.jsonPrimitive?.intOrNull?.let {
+            capacityOf(initial)?.let {
                 ThreadSafeQueueCell.bounded<String>(ctx, it)
             } ?: ThreadSafeQueueCell.unbounded(ctx)
         private val readers =
@@ -272,7 +283,7 @@ class QueueFamilyConformanceTest {
         override val flavor = Flavor.Async
         private val ctx = AsyncContext()
         private val queue: AsyncQueueCell<String, VecDequeStorage<String>> =
-            initial["capacity"]?.jsonPrimitive?.intOrNull?.let {
+            capacityOf(initial)?.let {
                 AsyncQueueCell.bounded<String>(ctx, it)
             } ?: AsyncQueueCell.unbounded(ctx)
         private val readers =
@@ -420,7 +431,11 @@ class QueueFamilyConformanceTest {
                 expected["head"]?.let {
                     assertEquals(if (it is JsonNull) null else it.jsonPrimitive.content, queue.head())
                 }
-                expected["len"]?.jsonPrimitive?.intOrNull?.let { assertEquals(it, queue.len()) }
+                // `intOrNull?.let` decoded a wrong-typed `len` to null and then skipped
+                // the comparison on it, so `len: 1.5` asserted nothing and read exactly
+                // like an absent key. `.int` throws instead (`#lzflagcoercion`) — the
+                // three boolean keys below already did.
+                expected["len"]?.let { assertEquals(it.jsonPrimitive.int, queue.len()) }
                 expected["is_empty"]?.jsonPrimitive?.let { assertEquals(it.boolean, queue.isEmpty()) }
                 expected["is_full"]?.jsonPrimitive?.let { assertEquals(it.boolean, queue.isFull()) }
                 expected["closed"]?.jsonPrimitive?.let { assertEquals(it.boolean, queue.isClosed()) }

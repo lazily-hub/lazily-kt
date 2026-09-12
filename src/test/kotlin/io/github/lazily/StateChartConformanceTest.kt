@@ -58,14 +58,27 @@ class StateChartConformanceTest {
         chart: StateChart,
         step: JsonObject,
     ) {
-        val obj = step["matches"] as? JsonObject ?: return
+        val raw = step["matches"] ?: return
+        val obj =
+            raw as? JsonObject
+                ?: error("`matches` must be a JSON object, got $raw (#lzflagcoercion)")
         for ((id, expected) in obj) {
             val want = expected.jsonPrimitive.boolean
             assertEquals(want, chart.matches(ctx, id), "matches($id) mismatch")
         }
     }
 
-    private fun actionsOf(element: JsonElement?): List<String> = (element as? JsonArray)?.map { it.jsonPrimitive.content } ?: emptyList()
+    /**
+     * Absence is an empty list; a PRESENT value that is not an array is a named
+     * failure, not an empty list (`#lzflagcoercion`). `as? JsonArray ?: emptyList()`
+     * made a wrong-typed `actions` key read exactly like a missing one.
+     */
+    private fun actionsOf(element: JsonElement?): List<String> =
+        when (element) {
+            null -> emptyList()
+            is JsonArray -> element.map { it.jsonPrimitive.content }
+            else -> error("`actions` must be a JSON array, got $element (#lzflagcoercion)")
+        }
 
     private fun runFixture(name: String) {
         val fixture = loadFixture(name)
@@ -74,19 +87,37 @@ class StateChartConformanceTest {
         // initial_active (asserted once before any step).
         assertActive(ctx, chart, fixture.getValue("initial_active"), "initial_active")
 
-        // initial_actions (optional).
-        val initialActions = actionsOf(fixture["initial_actions"])
-        if (initialActions.isNotEmpty()) {
-            assertEquals(initialActions, chart.lastActions(), "initial_actions")
+        // initial_actions (optional). Keyed on PRESENCE, not on emptiness: an
+        // explicit `"initial_actions": []` is the claim that entering the initial
+        // configuration ran NO actions, and `isNotEmpty()` dropped exactly that
+        // claim — the one a chart running entry actions it should not would break
+        // (`#lzflagcoercion`). The per-step arm below already keys on presence.
+        fixture["initial_actions"]?.let {
+            assertEquals(actionsOf(it), chart.lastActions(), "initial_actions")
         }
 
         val steps = fixture.getValue("steps").jsonArray
         for ((i, stepElement) in steps.withIndex()) {
             val step = stepElement.jsonObject
             val event = step.getValue("event").jsonPrimitive.content
+            // A guard is an INPUT, and `booleanOrNull ?: false` silently replayed a
+            // DIFFERENT fixture than the one on disk: `0`, `"yes"`, an object all
+            // became `false`, and the quoted `"true"` became `true` — a spelling
+            // StateChart.kt itself refuses for `parallel` and `internal`, with the
+            // `!isString` guard called load-bearing there for exactly this reason.
+            // Same rule here (`#lzflagcoercion`): present means it has to BE a
+            // JSON boolean.
+            val guardBlock =
+                step["guards"]?.let {
+                    it as? JsonObject
+                        ?: error("step $i `$event`: `guards` must be a JSON object, got $it")
+                }
             val guards: Map<String, Boolean> =
-                (step["guards"] as? JsonObject)?.entries?.associate { (k, v) ->
-                    k to (v.jsonPrimitive.booleanOrNull ?: false)
+                guardBlock?.entries?.associate { (k, v) ->
+                    k to (
+                        (v as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull
+                            ?: error("step $i `$event`: guard '$k' must be a JSON boolean, got $v")
+                        )
                 } ?: emptyMap()
 
             val accepted = chart.send(ctx, event, guards)

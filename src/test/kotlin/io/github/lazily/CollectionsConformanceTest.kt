@@ -11,6 +11,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 /**
@@ -117,7 +118,15 @@ class CollectionsConformanceTest {
         if (inv != null) {
             val membershipInvalidated = inv.getValue("membership").jsonPrimitive.boolean
             val orderInvalidated = inv.getValue("order").jsonPrimitive.boolean
-            val valueKeys = inv["value"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
+            // Required, not defaulted: `?: emptyList()` made a `value` key dropped
+            // upstream read as "nothing was invalidated", so the whole per-key half
+            // of the matrix could vanish and every reader would be asserted to have
+            // stayed cached (#lzflagcoercion).
+            val valueKeys =
+                (
+                    inv["value"]
+                        ?: error("expected.invalidates is missing 'value' — the matrix is the contract")
+                    ).jsonArray.map { it.jsonPrimitive.content }
             for (key in readers.valueReaders.keys) {
                 val invalidated = key in valueKeys
                 assertEquals(
@@ -131,9 +140,25 @@ class CollectionsConformanceTest {
         }
         val handleStable = expected["handle_stable"]?.jsonObject
         if (handleStable != null) {
+            // BOTH directions (`#lzflagcoercion`). The true-only arm left
+            // `handle_stable: { k: false }` compared by nothing — the fixture read
+            // as "this handle was re-minted" and the runner asserted neither that
+            // nor its opposite. CollectionsFamilyConformanceTest already ran both
+            // halves over the same fixtures, which is the only reason a planted
+            // `false` reddened anything at all.
             for ((key, stable) in handleStable) {
-                if (stable.jsonPrimitive.boolean) {
-                    assertEquals(h.handles.getValue(key), h.map.value(key).id, "handle stable for $key")
+                val wantStable = stable.jsonPrimitive.boolean
+                val before = h.handles.getValue(key)
+                val after = h.map.value(key).id
+                if (wantStable) {
+                    assertEquals(before, after, "handle stable for $key")
+                } else {
+                    assertNotEquals(
+                        before,
+                        after,
+                        "handle for $key should have been re-minted - a `handle_stable: false` " +
+                            "claim is a re-mint, and it has to be asserted as one",
+                    )
                 }
             }
         }
