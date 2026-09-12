@@ -367,6 +367,43 @@ make test-lazily-formal # build lazily-formal (state-chart + reactive + collecti
 conformance gate. They default to `../lazily-spec/formal/lean` and
 `../lazily-formal` and can be redirected via `LEAN_SPEC_DIR` / `LEAN_FORMAL_DIR`.
 
+### The unbound-block ledger is size-pinned, exactly
+
+`scripts/check-conformance-coverage.sh` reconciles the assertion-block sites the
+suite OPENS against the ones a tracker BINDS, and excuses the difference one line
+at a time in `scripts/conformance-unbound-blocks.txt` (537 sites: 512
+`bind-pending`, 25 derived `unreachable`). Both stale directions are enforced,
+but agreement alone has a hole: a commit that detaches N binds and writes the N
+matching excuses satisfies every set comparison, and the magnitude rung misses it
+too because those sites are still declared, merely no longer bound.
+
+`EXPECTED_LEDGERED_BLOCKS` closes it by comparing the ledger's SIZE against a
+committed constant, which such a commit does not also get to rewrite. That
+independence is the whole value, and it is an EXACT equality
+(`#lzledgerratchet`), not a ceiling:
+
+- **Growth fails** — an excuse was added. Bind the block. Raising the pin is
+  legitimate only for a genuinely unbindable one, in the `unreachable` class,
+  with a reason, in the same commit.
+- **Shrink fails too** — sites were migrated and the pin was not lowered with
+  them. Lower it in the migrating commit.
+
+The shrink half is load-bearing, not bookkeeping. A one-sided `size > pin` bound
+refuses the detach-plus-excuse attack only while slack is zero, so it starts at
+zero slack and accumulates one step of slack per unrecorded migration,
+converging on exactly the slack floor this ladder was built to replace. An
+equality has no slack by construction and cannot drift quietly, because a stale
+pin FAILS. That is why a number here is not the defect lazily-rs refuses in
+`#lzrsbindpending`: the defect was never "a number exists", it was "a number with
+slack", and a number that fails when stale is a ratchet rather than drift.
+
+A per-class count of `bind-pending` is deliberately absent — with the set
+equality holding it could only restate that equality. The whole-ledger size pin
+is the independent measurement, and it covers both classes, where a per-class
+count reached only the reachable ones. An empty or malformed
+`EXPECTED_LEDGERED_BLOCKS` fails closed rather than reverting to the default,
+because a pin an exported typo can switch off is not pinned.
+
 ## Related Projects
 
 - `lazily-spec` — canonical wire protocol + state-chart conformance fixtures.

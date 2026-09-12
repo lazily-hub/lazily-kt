@@ -14,10 +14,20 @@
 # file and the run AGREE, and ANY CONSISTENT PAIR satisfies that: a commit that
 # detaches N binds and writes the N matching entries passes forward, backward and
 # stale-gone, and the magnitude rung misses it too because those sites are still
-# DECLARED, merely no longer bound. So the guard also holds a CEILING —
-# MAX_LEDGERED_BLOCKS, pinned at this file's size — and THIS FILE MAY ONLY EVER
-# SHRINK (#lzledgerceiling). Adding a line is a deliberate act that has to move
-# the pin in the same commit, and the pin is where you get asked why.
+# DECLARED, merely no longer bound. So the guard also pins this file's SIZE —
+# EXPECTED_LEDGERED_BLOCKS, an EXACT equality (#lzledgerceiling, made exact in
+# #lzledgerratchet).
+#
+# Exact means BOTH directions fail, and the line count here is part of the
+# contract either way:
+#
+#   adding a line      needs the pin raised in the same commit, and the pin is
+#                      where you get asked why the block cannot be bound at all.
+#   removing a line    needs the pin LOWERED in the same commit. A pin left above
+#                      the real size is slack, and slack is what lets a later
+#                      commit detach binds and write their own excuses with every
+#                      rung still green. A one-sided ceiling permitted this
+#                      silently and so re-armed the attack once per migration.
 #
 # TWO reason classes, and they are not the same kind of claim:
 #
