@@ -37,9 +37,38 @@
 # with every count unchanged and a byte-identical verdict. Closing that needs a
 # per-target recipe anchor, a second spelling of every recipe kept in sync inside
 # this guard, which the normalizer notes below record as a mistake that already
-# cost lazily-cpp a hand-written equality assertion. It also bounds the honest
-# claim for the pins: they turn an invisible drop into a reviewable edit, and a
-# recipe swap is an equally reviewable edit that stays equally undetected.
+# cost lazily-cpp a hand-written equality assertion.
+#
+# It also bounds the honest claim for the pins. What they assert is NO SILENT
+# CHANGE, never CORRECTNESS: a pin cannot name a gate that never existed, and
+# written from a broken Makefile it would faithfully pin the breakage. The
+# original argument for pinning — that a closure change is visible in a diff of
+# the `check:` line — turned out to be true of exactly one of the five attacks
+# measured: the rename, the `ifeq`, the neutered recipe and the recipe swap are
+# all equally visible edits, and three of the four were undetected before this.
+# What survives is narrower: the pin makes the retiring edit INCOMPLETE, so it
+# cannot be a one-line deletion. The oracle, not the visibility, is what makes the
+# pin describe anything at all.
+#
+# Two further things a SET pin structurally cannot see, recorded rather than left
+# implied:
+#
+#   ORDER. Prerequisite order is not pinned, and nothing else here pins it. Today
+#   nothing in this binding depends on it: every closure target is self-contained,
+#   and the one real ordering — the test JVM writing conformance evidence before
+#   the coverage guard reads it — lives INSIDE `test`'s own recipe, where make and
+#   the shell enforce it. `fmt` running first is a cost preference (fail on style
+#   before paying for a compile), not a correctness requirement. If an
+#   inter-target ordering requirement is ever introduced, this guard will not
+#   notice it changing.
+#
+#   EDGES. Dropping an edge BETWEEN two closure members can leave the node set
+#   unchanged and still pass the oracle, whenever another member already pulls the
+#   dependency into the root's run: `make check` keeps working while
+#   `make <target>` alone breaks. This binding's closure is flat — all seven gates
+#   are direct prerequisites of `check` and none has a Makefile-target
+#   prerequisite of its own — so there is no such edge to drop today. The gap
+#   opens the moment one is added.
 #
 # WHAT IT DOES NOT PROVE
 #
@@ -703,9 +732,14 @@ if [ ! -s "$ci_anchor" ]; then
 	exit 1
 fi
 
-# Does CI contain a command whose tokens contain this anchor as an in-order
-# subsequence? Extra flags and arguments on the CI side are fine; missing ones are
-# not.
+# Does the haystack contain a command whose tokens contain this anchor as an
+# in-order subsequence? Extra flags and arguments on the haystack side are fine;
+# missing ones are not.
+#
+# The haystack defaults to CI's anchors, and the make-derived oracle below passes
+# the root target's own anchors instead. One matcher, deliberately: "the same
+# command" has to mean one thing in this guard, or its two halves can disagree
+# about whether a gate is the gate.
 anchor_reached() {
 	awk -v want="$1" '
 		BEGIN { ANY = "\001any"; wn = split(want, w, / /) }
@@ -719,7 +753,7 @@ anchor_reached() {
 			if (wi > wn) { found = 1; exit }
 		}
 		END { exit found ? 0 : 1 }
-	' "$ci_anchor"
+	' "${2:-$ci_anchor}"
 }
 
 # CI invoking the target through make counts as reach without any anchor work.
@@ -816,21 +850,51 @@ fi
 # branch does the same with no variable to set. lazily-js found it; this guard is
 # ported family-wide, so it held here too.
 #
-# So the source-derived closure is CONFIRMED against make. For each target, the
-# commands make would run for it must all appear among the commands make would run
-# for the root. That is the one question make can answer cheaply and exactly.
+# So the source-derived closure is CONFIRMED against make. For each target, every
+# ANCHOR of the commands make would run for it must appear among the anchors of
+# the commands make would run for the root. That is the one question make can
+# answer cheaply and exactly.
+#
+# ANCHORS, not raw command lines. Requiring byte-equal lines looks stronger and is
+# actually unusable here: this Makefile mints LAZILY_CONFORMANCE_RUN_ID per
+# invocation from `date -u +%s%N` and `$$PPID`, and the oracle necessarily runs
+# `make -n` once per target plus once for the root — different invocations,
+# different ids. The moment any recipe interpolates that id a raw-line oracle
+# reddens on EVERY run, including the root against itself. Measured here both
+# ways: adding `-Plazily.runId=$(LAZILY_CONFORMANCE_RUN_ID)` to the test recipe,
+# and adding the id as a positional argument, each made the raw-line form report
+# `check` and `test` as absent from the root's own run. lazily-gd hit exactly this
+# on the target carrying its suite. A guard that is red on every invocation gets
+# weakened or deleted, and weakening the oracle to stop the red is the real
+# failure here — so the comparison uses the normal form this guard already uses to
+# decide whether two commands are the same command, which drops flag VALUES and
+# reduces paths to basenames.
+#
+# Two `make -n` invocations must still agree on the recipe TEXT, so the run id is
+# pinned to a fixed value for the oracle's own invocations. `$(or ...)` lets an
+# inherited value win, so this costs nothing and removes the volatility at its
+# source instead of loosening the comparison until it tolerates it — which also
+# covers the positional form, where the id is not a flag value and the normalizer
+# would keep it. `-n` executes nothing, so no evidence file is stamped with it.
 #
 # `make -n` only, never `make -p`: -p builds the default goal and dumps the whole
 # environment to stdout, which in CI means printing every secret in the job's env
 # into the log.
 #
-# A target with NO commands is skipped here — there is nothing to confirm, and
+# A target with NO anchor is skipped here — there is nothing to confirm, and
 # whether being gate-free is legitimate is part C's question, not this one.
-root_commands="$("$MAKE_BIN" -n "$ROOT_TARGET" 2>/dev/null | grep -v -e '^make\[' -e '^make:' | awk 'NF' | LC_ALL=C sort -u || true)"
+oracle_dry_run() {
+	env LAZILY_CONFORMANCE_RUN_ID=ci-reach-oracle "$MAKE_BIN" -n "$@" 2>/dev/null |
+		grep -v -e '^make\[' -e '^make:' | join_continuations || true
+}
 
-if [ -z "$root_commands" ]; then
-	echo "check-ci-reach: \`$MAKE_BIN -n $ROOT_TARGET\` printed no commands at all, so the" >&2
-	echo "       oracle would confirm every target against an empty list and confirm" >&2
+root_anchor="$(mktemp)"
+trap 'rm -f "$ci_raw" "$ci_anchor" "$root_anchor"' EXIT
+oracle_dry_run "$ROOT_TARGET" | anchors | LC_ALL=C sort -u >"$root_anchor"
+
+if [ ! -s "$root_anchor" ]; then
+	echo "check-ci-reach: \`$MAKE_BIN -n $ROOT_TARGET\` yielded no anchor at all, so the" >&2
+	echo "       oracle would confirm every target against an empty haystack and confirm" >&2
 	echo "       anything. A root that runs nothing is the vacuous case this refuses" >&2
 	echo "       (#pinreachclosure)." >&2
 	exit 1
@@ -839,9 +903,15 @@ fi
 oracle_missing_count=0
 while IFS= read -r target; do
 	[ -n "$target" ] || continue
-	target_commands="$("$MAKE_BIN" -n "$target" 2>/dev/null | grep -v -e '^make\[' -e '^make:' | awk 'NF' | LC_ALL=C sort -u || true)"
-	[ -n "$target_commands" ] || continue
-	absent="$(LC_ALL=C comm -23 <(printf '%s\n' "$target_commands") <(printf '%s\n' "$root_commands") | awk 'NF')"
+	target_anchor_list="$(oracle_dry_run "$target" | anchors | LC_ALL=C sort -u)"
+	[ -n "$target_anchor_list" ] || continue
+	absent=""
+	while IFS= read -r a; do
+		[ -n "$a" ] || continue
+		if ! anchor_reached "$a" "$root_anchor"; then
+			absent="$absent$a"$'\n'
+		fi
+	done <<<"$target_anchor_list"
 	[ -n "$absent" ] || continue
 	oracle_missing_count=$((oracle_missing_count + 1))
 	printf 'ORACLE   %-24s in the source closure, but `%s -n %s` does not run its commands\n' \
