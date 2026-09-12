@@ -60,6 +60,40 @@
 # helps: this guard cannot see a `uses:` step at all, which is the whole reason
 # those two run: steps exist. Step-scoping reddens both deletions.
 #
+# D IS TWO SETS, and their independence is load-bearing. EXPECTED_CI_STEPS names
+# the step per anchor-reached gate; EXPECTED_MAKE_INVOKED_TARGETS names the gates
+# CI reaches by running `make <target>` instead, for which a step pin would assert
+# nothing. Defining the second population as "whatever the first does not name"
+# reads equivalent and is not: cpp and dart both measured green at exit 0 on the
+# two-part edit — flip one member's CI step body to `make <that member>` AND
+# delete that member's step entry, in ONE edit. Each half alone fails; as a
+# complement the halves cancel, since the deleted entry was the only evidence the
+# mode had changed. In dart the sole trace was an OK line's count dropping by one,
+# which no exit status reflects. dart's formulation, worth keeping verbatim: a
+# population pinned only as the complement of another pinned population is not
+# pinned against an edit that moves both together — A COUNT IS NOT A PIN.
+#
+# Measured here against both shapes, each exit 1 naming the target: the edit on
+# `test-interop-peer`, and the same on `test`, which holds TWO step entries (CI
+# runs `./gradlew test` and the conformance-coverage guard as separate steps).
+# Holding more than one entry changes nothing about this fault — the mode rung
+# never consulted the entries — but it does make the dishonest edit strictly
+# larger: the attacker must delete BOTH entries, and deleting one leaves the
+# other pinning a target that is no longer anchor-reached, which fails on its own.
+#
+# ORDER: the mode rungs run BEFORE the step-pin rungs, and the step-pin rung is
+# suppressed for a target nothing in CI reaches. cpp paid for the other order.
+# Deleting a make-invoked member's CI step outright makes it want a step pin, so
+# the unpinned rung fired FIRST and told the reader to add one — the wrong remedy
+# for a deleted step, and reported ahead of the message that says what happened.
+#
+# The same restructure fixed a latent FALSE RED nothing here had exercised: the
+# pin accounting used to run before the excuse check, so the first honest excuse
+# anyone added — a target CI deliberately does not run, hence carrying no step
+# pin — would have exited 1 demanding a pin for it. Confirmed against the shipped
+# script. An excused target is now asked the FLAT reach question on purpose and
+# carries no pin.
+#
 # A THIRD limit on the superset measurement itself, since the fix is only as good
 # as the relation it was measured against: containment here is TEXTUAL, over
 # anchor tokens. It cannot see a build tool's own task graph. `./gradlew build`
@@ -1317,7 +1351,40 @@ while IFS= read -r target; do
 
 	hit=1
 	missing_anchors=""
+
+	# WHICH MODE reaches this target, decided before anything is required of it.
+	# The two modes ask different questions, they are pinned as two separate SETS,
+	# and neither set is the complement of the other — see
+	# EXPECTED_MAKE_INVOKED_TARGETS for the edit that reasoning cost cpp and dart.
 	if make_invokes "$target"; then
+		mode=make
+	else
+		mode=anchor
+	fi
+
+	if is_excused "$target"; then
+		# An excused target is asked the FLAT question on purpose: does CI reach it
+		# AT ALL. Step-scoping it would let a stale excuse survive whenever the step
+		# that reaches the target is not the step pinned for it — and an excused
+		# target carries no pin by the rule below, because an excuse says CI does not
+		# run it. So the excuse rungs are deliberately untouched by the step map.
+		if [ "$mode" = anchor ]; then
+			while IFS= read -r a; do
+				[ -n "$a" ] || continue
+				anchor_reached "$a" || hit=0
+			done <<<"$target_anchors"
+		fi
+		if [ "$hit" -eq 1 ]; then
+			stale="$stale$target"$'\n'
+			stale_count=$((stale_count + 1))
+		else
+			excused_ok=$((excused_ok + 1))
+			printf 'excused  %-32s %s\n' "$target" "$(excuse_reason "$target")"
+		fi
+		continue
+	fi
+
+	if [ "$mode" = make ]; then
 		# CI runs `make <target>`: reach needs no anchor work, and there is no
 		# independent CI-side spelling to pin a step against
 		# (#reversereachdirection).
@@ -1371,17 +1438,6 @@ while IFS= read -r target; do
 				fi
 			done < <(pinned_steps_of "$target")
 		fi
-	fi
-
-	if is_excused "$target"; then
-		if [ "$hit" -eq 1 ]; then
-			stale="$stale$target"$'\n'
-			stale_count=$((stale_count + 1))
-		else
-			excused_ok=$((excused_ok + 1))
-			printf 'excused  %-32s %s\n' "$target" "$(excuse_reason "$target")"
-		fi
-		continue
 	fi
 
 	if [ "$hit" -eq 1 ]; then
@@ -1468,12 +1524,99 @@ fi
 # commands" and "CI runs make" — or out of the pinned set entirely — and the
 # guard would quietly ask less of it than it did yesterday. A missing pin asks
 # nothing, which is the shape every hole this file records had.
+#
+# TWO SETS, NEITHER THE COMPLEMENT OF THE OTHER. The make-invoked population has
+# its own array rather than being "whatever EXPECTED_CI_STEPS does not name", and
+# that distinction is the whole of this block. Measured green at exit 0 in cpp and
+# dart before they fixed it: change one member's CI step body to
+# `make <that member>` AND delete that member's gate-step entry, in ONE edit. Each
+# half alone fails; with the population defined as a complement the halves CANCEL,
+# because the deleted entry is the very evidence that would have made the mode
+# change visible. In dart the only trace was an OK line's count dropping by one,
+# which no exit status reflects. dart's formulation: a population pinned only as
+# the complement of another pinned population is not pinned against an edit that
+# moves both together — A COUNT IS NOT A PIN. Measured here against both shapes,
+# each exit 1: `test-interop-peer`'s step body to `make test-interop-peer` with its
+# entry deleted, and the same on `test`, the member holding TWO entries, with both
+# deleted.
+#
+# ORDER MATTERS HERE, and cpp paid for getting it wrong. The MODE rungs run FIRST.
+# Delete a make-invoked member's CI step outright and the unpinned rung fires too —
+# the target is no longer make-invoked, so it wants a pin — and it tells the reader
+# to add one, which is the wrong remedy for a deleted step. So the mode change is
+# reported first, the unpinned rung is SUPPRESSED for a target that is unreached
+# (nothing to pin a step name against, and the unreached rung below carries the
+# right remedy), and the stale-mode message says which of the two things happened
+# instead of assuming the happier one.
 anchor_reached_set="$(printf '%s' "$anchor_reached_seen" | awk 'NF' | LC_ALL=C sort -u)"
 make_invoked_set="$(printf '%s' "$make_invoked_seen" | awk 'NF' | LC_ALL=C sort -u)"
+unreached_set="$(printf '%s' "$unreached" | awk 'NF' | LC_ALL=C sort -u)"
 pinned_step_set="$(printf '%s\n' ${pinned_step_targets[@]+"${pinned_step_targets[@]}"} | awk 'NF' | LC_ALL=C sort -u)"
 pinned_make_set="$(printf '%s\n' ${EXPECTED_MAKE_INVOKED_TARGETS[@]+"${EXPECTED_MAKE_INVOKED_TARGETS[@]}"} | awk 'NF' | LC_ALL=C sort -u)"
 
+# --- mode, first -------------------------------------------------------------
+make_invoked_unpinned="$(LC_ALL=C comm -13 <(printf '%s\n' "$pinned_make_set") <(printf '%s\n' "$make_invoked_set") | awk 'NF')"
+if [ -n "$make_invoked_unpinned" ]; then
+	echo >&2
+	echo "check-ci-reach: FAILED — target(s) reached only because a CI run: step invokes" >&2
+	echo "       \`make <target>\`, not pinned in EXPECTED_MAKE_INVOKED_TARGETS:" >&2
+	printf '%s\n' "$make_invoked_unpinned" | awk 'NF { print "  - " $0 }' >&2
+	echo "       This is a WEAKER kind of reach than a spelled command — CI's instruction is" >&2
+	echo "       \"run the target\", so a repoint of that recipe is invisible from CI. Moving a" >&2
+	echo "       gate into it retires what this guard can prove about it, so it has to be" >&2
+	echo "       said out loud HERE and not merely implied by the absence of a step pin:" >&2
+	echo "       deleting the step pin and flipping the CI step to \`make <target>\` in one" >&2
+	echo "       edit is the pair of changes this array exists to keep visible" >&2
+	echo "       (#reversereachdirection)." >&2
+	status=1
+fi
+
+make_invoked_stale="$(LC_ALL=C comm -23 <(printf '%s\n' "$pinned_make_set") <(printf '%s\n' "$make_invoked_set") | awk 'NF')"
+if [ -n "$make_invoked_stale" ]; then
+	# Which way did it move? A target CI now SPELLS is progress. A target CI no
+	# longer reaches at all is a deleted step, and "move it to EXPECTED_CI_STEPS"
+	# would be nonsense advice about a step that is gone.
+	stale_now_spelled=""
+	stale_now_unreached=""
+	while IFS= read -r t; do
+		[ -n "$t" ] || continue
+		if printf '%s\n' "$unreached_set" | awk -v s="$t" 'BEGIN { miss = 1 } $0 == s { miss = 0 } END { exit miss }'; then
+			stale_now_unreached="$stale_now_unreached$t"$'\n'
+		else
+			stale_now_spelled="$stale_now_spelled$t"$'\n'
+		fi
+	done <<<"$make_invoked_stale"
+
+	if [ -n "$stale_now_unreached" ]; then
+		echo >&2
+		echo "check-ci-reach: FAILED — target(s) pinned in EXPECTED_MAKE_INVOKED_TARGETS whose" >&2
+		echo "       CI step is GONE:" >&2
+		printf '%s\n' "$stale_now_unreached" | awk 'NF { print "  - " $0 }' >&2
+		echo "       No run: step invokes \`make <target>\` for these any more, and no step spells" >&2
+		echo "       their commands either, so CI runs the gate by neither route. The remedy is" >&2
+		echo "       to restore the step (or excuse the target with a reason in $CONF) — NOT to" >&2
+		echo "       add a step pin, which is what the unpinned rung would otherwise have told" >&2
+		echo "       you (#reversereachdirection)." >&2
+		status=1
+	fi
+	if [ -n "$stale_now_spelled" ]; then
+		echo >&2
+		echo "check-ci-reach: FAILED — target(s) pinned in EXPECTED_MAKE_INVOKED_TARGETS that CI" >&2
+		echo "       now reaches by SPELLING their commands instead:" >&2
+		printf '%s\n' "$stale_now_spelled" | awk 'NF { print "  - " $0 }' >&2
+		echo "       That is progress — a spelled command can be step-pinned like any other" >&2
+		echo "       gate. Move it from EXPECTED_MAKE_INVOKED_TARGETS to EXPECTED_CI_STEPS" >&2
+		echo "       (#reversereachdirection)." >&2
+		status=1
+	fi
+fi
+
+# --- then the step pin -------------------------------------------------------
 unpinned_gates="$(LC_ALL=C comm -13 <(printf '%s\n' "$pinned_step_set") <(printf '%s\n' "$anchor_reached_set") | awk 'NF')"
+# Suppressed for a target nothing in CI reaches: there is no step name to pin, and
+# the unreached rung below says what to do about it. Safe to suppress because an
+# unreached target already fails there, so this can never turn a red into a green.
+unpinned_gates="$(LC_ALL=C comm -23 <(printf '%s\n' "$unpinned_gates") <(printf '%s\n' "$unreached_set") | awk 'NF')"
 if [ -n "$unpinned_gates" ]; then
 	echo >&2
 	echo "check-ci-reach: FAILED — target(s) whose commands CI spells but which name no CI" >&2
@@ -1491,10 +1634,10 @@ if [ -n "$pinned_non_gates" ]; then
 	echo "check-ci-reach: FAILED — EXPECTED_CI_STEPS pins a step for target(s) that are not" >&2
 	echo "       anchor-reached closure members:" >&2
 	printf '%s\n' "$pinned_non_gates" | awk 'NF { print "  - " $0 }' >&2
-	echo "       Either the target left \`$ROOT_TARGET\`'s closure, or it carries no gate, or CI" >&2
-	echo "       reaches it by running \`make <target>\` — in which case it has no independent" >&2
-	echo "       CI-side spelling and a step pin for it asserts nothing. Remove the pin" >&2
-	echo "       (#reversereachdirection)." >&2
+	echo "       Either the target left \`$ROOT_TARGET\`'s closure, or it carries no gate, or it is" >&2
+	echo "       excused, or CI reaches it by running \`make <target>\` — in which case it has no" >&2
+	echo "       independent CI-side spelling and a step pin for it asserts nothing. Remove the" >&2
+	echo "       pin (#reversereachdirection)." >&2
 	status=1
 fi
 
@@ -1505,30 +1648,6 @@ if [ -n "$idle_pins" ]; then
 	printf '%s\n' "$idle_pins" | awk 'NF { print "  - " $0 }' >&2
 	echo "       A pin that may name steps the gate does not use is the flat haystack again," >&2
 	echo "       one step at a time. Name only the step(s) that run this target's commands" >&2
-	echo "       (#reversereachdirection)." >&2
-	status=1
-fi
-
-make_invoked_unpinned="$(LC_ALL=C comm -13 <(printf '%s\n' "$pinned_make_set") <(printf '%s\n' "$make_invoked_set") | awk 'NF')"
-make_invoked_stale="$(LC_ALL=C comm -23 <(printf '%s\n' "$pinned_make_set") <(printf '%s\n' "$make_invoked_set") | awk 'NF')"
-if [ -n "$make_invoked_unpinned" ]; then
-	echo >&2
-	echo "check-ci-reach: FAILED — target(s) reached only because a CI run: step invokes" >&2
-	echo "       \`make <target>\`, not pinned in EXPECTED_MAKE_INVOKED_TARGETS:" >&2
-	printf '%s\n' "$make_invoked_unpinned" | awk 'NF { print "  - " $0 }' >&2
-	echo "       This is a weaker kind of reach than a spelled command — CI's instruction is" >&2
-	echo "       \"run the target\", so a repoint of that recipe is invisible from CI. Moving a" >&2
-	echo "       gate into it changes what this guard can prove, so say so out loud" >&2
-	echo "       (#reversereachdirection)." >&2
-	status=1
-fi
-if [ -n "$make_invoked_stale" ]; then
-	echo >&2
-	echo "check-ci-reach: FAILED — target(s) pinned in EXPECTED_MAKE_INVOKED_TARGETS that CI" >&2
-	echo "       no longer reaches through \`make <target>\`:" >&2
-	printf '%s\n' "$make_invoked_stale" | awk 'NF { print "  - " $0 }' >&2
-	echo "       That is usually progress — CI now spells the command, so the target can be" >&2
-	echo "       step-pinned like any other. Move it to EXPECTED_CI_STEPS" >&2
 	echo "       (#reversereachdirection)." >&2
 	status=1
 fi
