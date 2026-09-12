@@ -1021,9 +1021,18 @@ done < <(printf '%s\n' ${EXPECTED_CI_STEPS[@]+"${EXPECTED_CI_STEPS[@]}"})
 # itself: without it a mapping could name a step that was renamed or deleted, and
 # the target pinned to it would fail with a message about its anchors instead of
 # about the stale pin.
+#
+# Matched with awk rather than `grep -qxF`. `grep -q` exits on its first match, so
+# under `pipefail` a `printf | grep -q` pipeline can return the WRITER's SIGPIPE
+# (141) instead of grep's 0 — a match read as a miss, and here a false RED naming
+# a pin that is perfectly good. Eleven step names sit far below the 64KiB pipe
+# buffer so it does not arm today, which is exactly the property that makes it a
+# trap: it arms when the workflow grows (#lzgrepcpipefail). awk reads all of its
+# input and decides in END.
 missing_pin_steps=""
 for i in "${!pinned_step_names[@]}"; do
-	if ! printf '%s\n' "$ci_step_names" | LC_ALL=C grep -qxF -- "${pinned_step_names[$i]}"; then
+	if ! printf '%s\n' "$ci_step_names" |
+		awk -v s="${pinned_step_names[$i]}" 'BEGIN { miss = 1 } $0 == s { miss = 0 } END { exit miss }'; then
 		missing_pin_steps="$missing_pin_steps${pinned_step_targets[$i]} -> ${pinned_step_names[$i]}"$'\n'
 	fi
 done
