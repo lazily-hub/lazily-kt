@@ -60,6 +60,17 @@
 # helps: this guard cannot see a `uses:` step at all, which is the whole reason
 # those two run: steps exist. Step-scoping reddens both deletions.
 #
+# A THIRD limit on the superset measurement itself, since the fix is only as good
+# as the relation it was measured against: containment here is TEXTUAL, over
+# anchor tokens. It cannot see a build tool's own task graph. `./gradlew build`
+# really does run `:test` — the `Test` step below it lands UP-TO-DATE, as that
+# job's own comment says — so `Build` is a genuine superset of `Test` in CI while
+# being no superset at all to this guard, whose anchors differ at the `build` /
+# `test` token. That direction is conservative (deleting the `Test` step reddens
+# even though the tests would still run), and it is the only direction available:
+# asking gradle for its task graph means running gradle, which is the job this
+# guard runs inside. Stated so the sweep is not read as exhaustive.
+#
 # WHAT D STILL DOES NOT PROVE, stated rather than implied covered: a recipe
 # weakened INSIDE its own pinned step. Anchors match as an in-order SUBSEQUENCE
 # and extra CI-side tokens are allowed by design, so a recipe that drops a flag —
