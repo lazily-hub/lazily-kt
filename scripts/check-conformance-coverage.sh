@@ -1439,8 +1439,20 @@ else
     echo "       opposite of what this rung is for (#lznullformblind)." >&2
     missing=$((missing + 1))
   else
-    excused_blocks="$(grep -v '^[[:space:]]*#' "$UNBOUND_LEDGER" | grep . | cut -f1 | sort -u)"
-    reasonless="$(grep -v '^[[:space:]]*#' "$UNBOUND_LEDGER" | grep . | awk -F'\t' 'NF < 2 || $2 ~ /^[[:space:]]*$/ { print $1 }')"
+    # awk, not `grep -v ... | grep .` (#lzgrepcpipefail). Both greps report
+    # "nothing matched" with exit 1, and under `set -euo pipefail` that status is
+    # the PIPELINE's, and the pipeline's is the ASSIGNMENT's — so a ledger holding
+    # only its header comments killed this script dead on this line, before any
+    # rung below could say a word about it. Measured: two OK lines, then exit 1
+    # with no diagnostic at all. That state is not exotic, it is this ladder's
+    # GOAL: drain the ledger by binding every site and the guard stopped being
+    # able to report it. awk filters the same two line classes and exits 0 on an
+    # empty result, so "no excused sites" stays a measurement instead of a status.
+    # Emptiness is legitimate here and is already handled below: `unexcused`,
+    # `stale_bound` and `stale_gone` guard it, and the count at the end tests
+    # `[ -n ]` first. Do not "simplify" either line back to a grep pipeline.
+    excused_blocks="$(awk '/^[[:space:]]*#/ { next } /./ { print }' "$UNBOUND_LEDGER" | cut -f1 | sort -u)"
+    reasonless="$(awk -F'\t' '/^[[:space:]]*#/ { next } !/./ { next } NF < 2 || $2 ~ /^[[:space:]]*$/ { print $1 }' "$UNBOUND_LEDGER")"
     if [ -n "$reasonless" ]; then
       echo "ERROR: unbound-block ledger entries with NO reason:" >&2
       echo "$reasonless" | sed 's/^/         /' >&2
