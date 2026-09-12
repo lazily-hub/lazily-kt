@@ -897,6 +897,11 @@ fi
 # AssertionKeys books it bound when it is constructed over it — matched by
 # CONTENT, not by the `where` label a runner picks for itself.
 BLOCK_LEDGER="${3:-${LAZILY_CONFORMANCE_ASSERTION_BLOCK_LEDGER:-build/conformance-assertion-blocks.txt}}"
+# The committed per-site excuse ledger. A FILE rather than a bash array: at 565
+# entries an array would dominate this script, and lazily-spec's
+# check-corpus-floors.mjs classifies the top-level arrays here — a third one
+# holding site ids would be a new shape for it to guess at.
+UNBOUND_LEDGER="${LAZILY_CONFORMANCE_UNBOUND_BLOCK_LEDGER:-$(dirname "$0")/conformance-unbound-blocks.txt}"
 if [ ! -f "$BLOCK_LEDGER" ]; then
   echo "ERROR: assertion-block ledger not found at $BLOCK_LEDGER." >&2
   echo "       That is missing EVIDENCE, not evidence of absence: the suite ran" >&2
@@ -904,19 +909,71 @@ if [ ! -f "$BLOCK_LEDGER" ]; then
   missing=$((missing + 1))
 else
   blocks_total=$(grep -c . "$BLOCK_LEDGER" || true)
-  unbound=$(awk -F'\t' '$2 == "UNBOUND" { print $1 }' "$BLOCK_LEDGER")
-  if [ -n "$unbound" ]; then
-    echo "ERROR: fixture-level \`assertions\` block(s) that NO runner bound to a tracker:" >&2
-    echo "$unbound" | sed 's/^/         /' >&2
-    echo "       Their keys are silent — not unread, because nothing reads them —" >&2
-    echo "       so every other rung passes over them (#lznullformblind). Bind the" >&2
-    echo "       block with AssertionKeys and assert its keys." >&2
-    missing=$((missing + 1))
-  fi
   if [ "$blocks_total" -eq 0 ]; then
-    echo "ERROR: ZERO fixture-level \`assertions\` blocks were inventoried." >&2
+    echo "ERROR: ZERO assertion blocks were inventoried." >&2
     echo "       Rung 0 is vacuously green over an empty population." >&2
     missing=$((missing + 1))
+  fi
+
+  # The bind rung, reconciled against the committed per-site excuse ledger in
+  # BOTH directions (#lzktblockwalk). An UNBOUND site missing from the ledger is
+  # an error, and a ledger entry the run BOUND — or that the corpus no longer
+  # carries at all — is a stale excuse and also an error. Neither direction has
+  # slack, and the ledger is per SITE so each entry dies on its own.
+  if [ ! -f "$UNBOUND_LEDGER" ]; then
+    echo "ERROR: per-site unbound-block ledger not found at $UNBOUND_LEDGER." >&2
+    echo "       Without it every unbound site would pass unchallenged, which is the" >&2
+    echo "       opposite of what this rung is for (#lznullformblind)." >&2
+    missing=$((missing + 1))
+  else
+    excused_blocks="$(grep -v '^[[:space:]]*#' "$UNBOUND_LEDGER" | grep . | cut -f1 | sort -u)"
+    reasonless="$(grep -v '^[[:space:]]*#' "$UNBOUND_LEDGER" | grep . | awk -F'\t' 'NF < 2 || $2 ~ /^[[:space:]]*$/ { print $1 }')"
+    if [ -n "$reasonless" ]; then
+      echo "ERROR: unbound-block ledger entries with NO reason:" >&2
+      echo "$reasonless" | sed 's/^/         /' >&2
+      echo "       An excuse without a reason is an allowlist entry. Say why the site" >&2
+      echo "       cannot be bound, or bind it." >&2
+      missing=$((missing + 1))
+    fi
+    run_unbound="$(awk -F'\t' '$2 == "UNBOUND" { print $1 }' "$BLOCK_LEDGER" | sort -u)"
+    run_bound="$(awk -F'\t' '$2 == "bound" { print $1 }' "$BLOCK_LEDGER" | sort -u)"
+    all_sites="$(cut -f1 "$BLOCK_LEDGER" | sort -u)"
+
+    unexcused="$(comm -23 <(printf '%s\n' "$run_unbound" | grep . || true) <(printf '%s\n' "$excused_blocks" | grep . || true))"
+    if [ -n "$unexcused" ]; then
+      echo "ERROR: assertion-block site(s) that NO runner bound to a tracker, and that" >&2
+      echo "       $UNBOUND_LEDGER does not excuse:" >&2
+      echo "$unexcused" | sed 's/^/         /' >&2
+      echo "       Their keys are silent — not unread, because nothing reads them —" >&2
+      echo "       so every other rung passes over them (#lznullformblind). Bind the" >&2
+      echo "       block with AssertionKeys and assert its keys, or ledger the site" >&2
+      echo "       with a real reason." >&2
+      missing=$((missing + 1))
+    fi
+
+    stale_bound="$(comm -12 <(printf '%s\n' "$excused_blocks" | grep . || true) <(printf '%s\n' "$run_bound" | grep . || true))"
+    if [ -n "$stale_bound" ]; then
+      echo "ERROR: unbound-block ledger excuses site(s) this run BOUND:" >&2
+      echo "$stale_bound" | sed 's/^/         /' >&2
+      echo "       The excuse is stale — the gap it claims was closed. Delete these" >&2
+      echo "       entries. Leaving them understates this binding's coverage and" >&2
+      echo "       disarms the rung for those sites the day a bind really goes away." >&2
+      missing=$((missing + 1))
+    fi
+
+    stale_gone="$(comm -23 <(printf '%s\n' "$excused_blocks" | grep . || true) <(printf '%s\n' "$all_sites" | grep . || true))"
+    if [ -n "$stale_gone" ]; then
+      echo "ERROR: unbound-block ledger names site(s) the run inventoried NOWHERE:" >&2
+      echo "$stale_gone" | sed 's/^/         /' >&2
+      echo "       Either the corpus moved that block and nobody updated the excuse," >&2
+      echo "       or the walk stopped reaching it — and an excuse for a site nothing" >&2
+      echo "       declares hides the second case completely." >&2
+      missing=$((missing + 1))
+    fi
+    excused_block_count=0
+    [ -n "$excused_blocks" ] && excused_block_count="$(printf '%s\n' "$excused_blocks" | grep -c . || true)"
+    bound_block_count=0
+    [ -n "$run_bound" ] && bound_block_count="$(printf '%s\n' "$run_bound" | grep -c . || true)"
   fi
 fi
 
@@ -1024,6 +1081,35 @@ def block_digest(block):
     return hashlib.sha256("".join(out).encode("utf-8")).hexdigest()
 
 
+# All five names the canonical corpus gives an assertion-bearing block. Taken
+# from the corpus, not from what kt's runners happen to read: a name set derived
+# from the runners could never surface a block the runners do not reach, which is
+# the whole question rung 0 asks.
+BLOCK_NAMES = frozenset(("assertions", "expect", "expect_after", "expect_initial", "expected"))
+
+
+def walk_for_blocks(fixture_id, element, path, sites, digests):
+    """The twin of ConformanceFixtures.walkForBlocks.
+
+    A tracked NAME whose value is a JSON OBJECT is a site, emitted and NOT
+    descended into. An ARRAY-valued tracked key is NOT a site but IS descended
+    into: a runner binds such an array's ELEMENTS and never the array, so
+    counting it would declare a site unbindable by construction, while refusing
+    to descend would lose every `steps[3].expect` in the corpus.
+    """
+    if isinstance(element, dict):
+        for key, value in element.items():
+            child_path = key if not path else path + "." + key
+            if key in BLOCK_NAMES and isinstance(value, dict):
+                sites.add(fixture_id + "|" + child_path)
+                digests.add(block_digest(value))
+            else:
+                walk_for_blocks(fixture_id, value, child_path, sites, digests)
+    elif isinstance(element, list):
+        for index, value in enumerate(element):
+            walk_for_blocks(fixture_id, value, "%s[%d]" % (path, index), sites, digests)
+
+
 # --- the RUN side: read back what the loader inventoried --------------------
 ledger_sites = set()
 ledger_digests = set()
@@ -1083,15 +1169,11 @@ for fixture_id in corpus:
             file=sys.stderr,
         )
         sys.exit(1)
-    # THE WALK. Keep this identical to ConformanceFixtures.declareAssertionBlock:
-    # top-level `assertions`, object only, at most one per fixture.
-    if not isinstance(document, dict):
-        continue
-    block = document.get("assertions")
-    if not isinstance(block, dict):
-        continue
-    expected_sites.add(fixture_id)
-    expected_digests.add(block_digest(block))
+    # THE WALK. Keep this identical to ConformanceFixtures.walkForBlocks, which
+    # carries the full rationale for both weight-bearing clauses (#lzktblockwalk):
+    # an ARRAY-valued tracked key contributes NO site but IS descended into, and a
+    # site is EMITTED AND NOT DESCENDED INTO.
+    walk_for_blocks(fixture_id, document, "", expected_sites, expected_digests)
 
 # Positive-evidence floor on EACH dimension (#lzvacuousrun). A derivation of zero
 # is matched trivially by a run that inventoried nothing, on either axis.
@@ -1120,8 +1202,8 @@ if len(ledger_sites) != len(expected_sites):
         "       The run has %s the corpus declares.\n"
         "       This is an EQUALITY, not a floor. Either the corpus moved under this\n"
         "       checkout (re-pull the lazily-spec sibling so both sides read the same\n"
-        "       bytes), or ConformanceFixtures.declareAssertionBlock detached from the\n"
-        "       walk spelled out beside it and stopped declaring sites it should.\n"
+        "       bytes), or ConformanceFixtures.walkForBlocks detached from the walk\n"
+        "       spelled out beside it and stopped declaring sites it should.\n"
         "       There is no number to re-pin here — fix whichever side moved."
         % (len(ledger_sites), spec_dir, len(expected_sites), walked, direction),
         file=sys.stderr,
@@ -1207,9 +1289,10 @@ echo "scenario coverage OK: $sc_replayed/$sc_total scenarios across $sc_fixtures
      "scenario-bearing fixtures were REPLAYED ($sc_excused excused of" \
      "${#KNOWN_UNREPLAYED_SCENARIOS[@]} excuseScenario entries; runtime ledger —" \
      "these scenarios really ran)"
-echo "assertion-block coverage OK: $blocks_total/$blocks_total fixture-level \`assertions\`" \
-     "block(s) opened by the suite were BOUND to a tracker (runtime ledger — a block" \
-     "nobody binds is silent to every other rung; $block_magnitude)"
+echo "assertion-block coverage OK: $bound_block_count/$blocks_total assertion-block site(s)" \
+     "opened by the suite were BOUND to a tracker ($excused_block_count ledgered per SITE in" \
+     "$UNBOUND_LEDGER, both stale directions enforced; runtime ledger — a block nobody binds" \
+     "is silent to every other rung; $block_magnitude)"
 # Printed so MIN_OPENED_AREAS can be re-pinned from a CI log instead of being
 # guessed or probed locally — a floor nobody can read the real number for is a
 # floor that drifts.

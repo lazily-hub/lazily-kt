@@ -109,20 +109,29 @@ object ConformanceFixtures {
     private val loaded = ConcurrentSkipListSet<String>()
 
     /**
-     * Top-level `assertions` blocks the corpus carries, per fixture this run
-     * opened — rung 0 of the conformance-evidence ladder (`#lznullformblind`).
+     * Every assertion-bearing block the corpus carries, per SITE, across the
+     * fixtures this run opened — rung 0 of the conformance-evidence ladder
+     * (`#lznullformblind`).
      *
      * Every other rung is scoped to a block a runner ALREADY OPENED. The unread
      * check, the unasserted check and the prose ledger all live inside
-     * [AssertionKeys], so a fixture-level `assertions` block that no runner ever
-     * binds to an [AssertionKeys] reports nothing at all: its keys are not
-     * unread, because nothing was reading. lazily-dart found two such blocks in
-     * its own suite, eight silent keys including a load-bearing anti-spoof
-     * invariant. No grep finds that — the evidence is the absence of a call.
+     * [AssertionKeys], so a block no runner ever binds to an [AssertionKeys]
+     * reports nothing at all: its keys are not unread, because nothing was
+     * reading. lazily-dart found two such blocks in its own suite, eight silent
+     * keys including a load-bearing anti-spoof invariant. No grep finds that —
+     * the evidence is the absence of a call.
      *
      * So the blocks are inventoried here at READ time, and [AssertionKeys] books
      * one as bound when it is constructed over it. What is left over is the
      * answer.
+     *
+     * Keyed by SITE — `"<fixture>|<path>"` — and not by fixture (`#lzktblockwalk`).
+     * This map used to be `Map<String, JsonObject>` keyed on the fixture path,
+     * which made ONE block per fixture the data structure's ceiling rather than an
+     * incidental choice: the walk could not widen at all while the inventory could
+     * not hold a second block. That ceiling held rung 0 to 18 sites of the 725 the
+     * same 148 opened fixtures carry — 2.5%, the narrowest in the family — and the
+     * magnitude guard pinned the narrow number faithfully while it did so.
      */
     private val declaredBlocks = ConcurrentHashMap<String, JsonObject>()
 
@@ -207,46 +216,126 @@ object ConformanceFixtures {
         }
         val text = Files.readString(p)
         loaded.add(rel)
-        declareAssertionBlock(rel, text)
+        declareAssertionBlocks(rel, text)
         return text
     }
 
-    /** Inventory [rel]'s top-level `assertions` block, if it carries one. */
-    private fun declareAssertionBlock(
+    /**
+     * Inventory every assertion-bearing block [rel] carries, at every depth.
+     *
+     * THE WALK (`#lzktblockwalk`). `scripts/check-conformance-coverage.sh` re-runs
+     * this same rule over the corpus on disk to derive the expected magnitude, so
+     * the two must stay in lock step — the twin is marked THE WALK there too.
+     *
+     * A tracked NAME in [BLOCK_NAMES] whose value is a JSON OBJECT is a site. Two
+     * clauses carry the weight and neither is a detail:
+     *
+     *  - an ARRAY-valued tracked key contributes NO site, but IS descended into. A
+     *    runner binds the ELEMENTS of such an array, never the array itself, so
+     *    counting the array would declare a block unbindable by construction —
+     *    while refusing to descend would lose `steps[3].expect`, which is exactly
+     *    where most of this corpus keeps its per-step expectations.
+     *  - a site is EMITTED AND NOT DESCENDED INTO. Without that, a fixture's
+     *    `expect` nested inside its own `assertions` becomes a second, separately
+     *    bindable site that no tracker can reach without first unwrapping the
+     *    block above it — an unbindable-by-construction site again, in the other
+     *    direction. [AssertionKeys.sub] and `consumingNested` guard everything
+     *    beneath an emitted block, and deliberately do NOT book a rung-0 bind.
+     */
+    private fun declareAssertionBlocks(
         rel: String,
         text: String,
     ) {
-        val block =
-            runCatching { Json.parseToJsonElement(text) }
-                .getOrNull()
-                ?.let { it as? JsonObject }
-                ?.get("assertions") as? JsonObject ?: return
-        if (declaredBlocks.putIfAbsent(rel, block) == null) {
-            blocksByShape.computeIfAbsent(block.keys) { mutableListOf() }.let { bucket ->
-                synchronized(bucket) { bucket.add(rel) }
+        for ((siteId, block) in blockSitesOf(rel, text)) {
+            if (declaredBlocks.putIfAbsent(siteId, block) == null) {
+                blocksByShape.computeIfAbsent(block.keys) { mutableListOf() }.let { bucket ->
+                    synchronized(bucket) { bucket.add(siteId) }
+                }
             }
         }
     }
 
     /**
-     * Book a fixture-level `assertions` block as BOUND to a tracker.
+     * The walk as a PURE function: every site [text] carries, keyed
+     * `"<rel>|<path>"`, without touching the inventory.
      *
-     * Matched by CONTENT rather than by the caller's `where` string: runners
-     * spell that inconsistently — `"codec/x.json assertions"` in one and
-     * `"x.json assertions"` in another — and a ledger keyed on a label a runner
-     * chooses is one the runner can be wrong about.
+     * One walk, three callers — the inventory above, the clone-equality proof in
+     * `AssertionBlockDigestCloneTest`, and the twin in
+     * `scripts/check-conformance-coverage.sh`. A second traversal written for any
+     * one of them is a second rule that can drift from this one.
      */
-    fun noteBound(block: JsonObject) {
-        val candidates = blocksByShape[block.keys] ?: return
-        val snapshot = synchronized(candidates) { candidates.toList() }
-        for (rel in snapshot) {
-            if (declaredBlocks[rel] == block) boundBlocks.add(rel)
+    fun blockSitesOf(
+        rel: String,
+        text: String,
+    ): Map<String, JsonObject> {
+        val root = runCatching { Json.parseToJsonElement(text) }.getOrNull() ?: return emptyMap()
+        val sites = LinkedHashMap<String, JsonObject>()
+        walkForBlocks(rel, root, "", sites)
+        return sites
+    }
+
+    /** As [blockSitesOf], over an element a caller has ALREADY parsed. */
+    fun blockSitesOf(
+        rel: String,
+        root: JsonElement,
+    ): Map<String, JsonObject> {
+        val sites = LinkedHashMap<String, JsonObject>()
+        walkForBlocks(rel, root, "", sites)
+        return sites
+    }
+
+    private fun walkForBlocks(
+        rel: String,
+        element: JsonElement,
+        path: String,
+        sites: MutableMap<String, JsonObject>,
+    ) {
+        when (element) {
+            is JsonObject ->
+                for ((key, value) in element) {
+                    val childPath = if (path.isEmpty()) key else "$path.$key"
+                    if (key in BLOCK_NAMES && value is JsonObject) {
+                        sites["$rel|$childPath"] = value
+                    } else {
+                        walkForBlocks(rel, value, childPath, sites)
+                    }
+                }
+            is JsonArray ->
+                element.forEachIndexed { index, value ->
+                    walkForBlocks(rel, value, "$path[$index]", sites)
+                }
+            else -> Unit
         }
     }
 
     /**
-     * Fixtures this run OPENED that carry a top-level `assertions` block no
-     * runner ever bound to an [AssertionKeys]. Non-empty means silent keys.
+     * Book an assertion block as BOUND to a tracker.
+     *
+     * Matched by CONTENT rather than by the caller's `where` string: runners
+     * spell that inconsistently — `"codec/x.json assertions"` in one and
+     * `"x.json assertions"` in another — and a ledger keyed on a label a runner
+     * chooses is one the runner can be wrong about. One content match books EVERY
+     * site carrying those bytes, which is the honest reading of a content-keyed
+     * ledger: two sites spelled identically are one claim, and a tracker over
+     * those bytes has read it.
+     *
+     * The block handed in must be the LOADER'S OWN value, reached by indexing the
+     * element [read] returned. A runner that re-parses the fixture text and passes
+     * a rebuilt object binds nothing whenever the two parses disagree on so much
+     * as a number's spelling — lazily-cpp lost 71 of 96 sites to exactly that,
+     * its clone digesting `5` as `5.000000` (`#lzrunnerownjsonclone`).
+     */
+    fun noteBound(block: JsonObject) {
+        val candidates = blocksByShape[block.keys] ?: return
+        val snapshot = synchronized(candidates) { candidates.toList() }
+        for (siteId in snapshot) {
+            if (declaredBlocks[siteId] == block) boundBlocks.add(siteId)
+        }
+    }
+
+    /**
+     * Sites this run OPENED that no runner ever bound to an [AssertionKeys].
+     * Non-empty means silent keys.
      */
     fun unboundAssertionBlocks(): Set<String> = declaredBlocks.keys.toSortedSet() - boundBlocks
 
@@ -258,9 +347,9 @@ object ConformanceFixtures {
             val lines =
                 declaredBlocks.keys
                     .toSortedSet()
-                    .joinToString("\n", postfix = "\n") { rel ->
-                        val state = if (rel in boundBlocks) "bound" else "UNBOUND"
-                        "$rel\t$state\t${blockDigest(declaredBlocks.getValue(rel))}"
+                    .joinToString("\n", postfix = "\n") { siteId ->
+                        val state = if (siteId in boundBlocks) "bound" else "UNBOUND"
+                        "$siteId\t$state\t${blockDigest(declaredBlocks.getValue(siteId))}"
                     }
             Files.writeString(assertionBlockLedgerPath, lines)
         }
@@ -344,6 +433,18 @@ object ConformanceFixtures {
             .append(':')
             .append(value)
     }
+
+    /**
+     * The names the canonical corpus gives an assertion-bearing block.
+     *
+     * All five, because the corpus uses all five and a rung that only knows one of
+     * them is blind to the rest by construction. Derived from the canonical
+     * listing rather than from this binding's runners: a name set taken from what
+     * kt happens to read today could never surface a block kt does not read, which
+     * is the entire question rung 0 asks.
+     */
+    private val BLOCK_NAMES =
+        setOf("assertions", "expect", "expect_after", "expect_initial", "expected")
 
     /** Record a fixture replayed through a path this object did not read directly. */
     fun record(rel: String) {
