@@ -73,13 +73,35 @@
 # population pinned only as the complement of another pinned population is not
 # pinned against an edit that moves both together — A COUNT IS NOT A PIN.
 #
-# Measured here against both shapes, each exit 1 naming the target: the edit on
-# `test-interop-peer`, and the same on `test`, which holds TWO step entries (CI
-# runs `./gradlew test` and the conformance-coverage guard as separate steps).
-# Holding more than one entry changes nothing about this fault — the mode rung
+# Measured here against three shapes, each exit 1 naming the target: the edit on
+# `test-interop-peer`; the same on `test`, which holds TWO step entries (CI runs
+# `./gradlew test` and the conformance-coverage guard as separate steps); and go's
+# fully loaded form, one commit that retires a gate from everywhere — CI step to
+# `make <member>`, step entry dropped, recipe repointed at another member's gate.
+# That last one leaves `make -n check` running `interopPeerCheck` ZERO times, and
+# it was exit 0 in go before go fixed it.
+#
+# Holding more than one entry changes nothing about the fault — the mode rung
 # never consulted the entries — but it does make the dishonest edit strictly
-# larger: the attacker must delete BOTH entries, and deleting one leaves the
-# other pinning a target that is no longer anchor-reached, which fails on its own.
+# larger: the attacker must delete BOTH of `test`'s entries, and deleting one
+# leaves the other pinning a target that is no longer anchor-reached, which fails
+# on its own.
+#
+# BOTH DIRECTIONS OF THE MODE EQUALITY ARE LOAD-BEARING, and only one of them
+# catches this. Falsified here the way go falsified it: keep the array, keep
+# pinned-but-not-observed, and delete observed-but-not-pinned — the two-part edit
+# goes back to exit 0, printing an OBSERVED make-invoked count of 2 against an
+# array of ONE and calling it fine. So the OK line below counts from the PINS, not
+# from what was observed: a number that moves while nothing refuses it is the
+# trace dart was left with, and it is not a pin.
+#
+# EXCLUSIVITY IS THE SECOND PROPERTY, and it is asserted directly rather than
+# inferred from the four set-equalities. They say each array matches its own
+# observed population; they do not say the arrays are DISJOINT, and an array that
+# names a member the other one observes lets each look complete while the member's
+# mode is claimed twice. Asserted OVER MEMBERS, not over pin entries, because
+# `test` is one member with two entries: the step pin's domain is 6 distinct
+# targets behind 7 entries.
 #
 # ORDER: the mode rungs run BEFORE the step-pin rungs, and the step-pin rung is
 # suppressed for a target nothing in CI reaches. cpp paid for the other order.
@@ -1554,6 +1576,38 @@ unreached_set="$(printf '%s' "$unreached" | awk 'NF' | LC_ALL=C sort -u)"
 pinned_step_set="$(printf '%s\n' ${pinned_step_targets[@]+"${pinned_step_targets[@]}"} | awk 'NF' | LC_ALL=C sort -u)"
 pinned_make_set="$(printf '%s\n' ${EXPECTED_MAKE_INVOKED_TARGETS[@]+"${EXPECTED_MAKE_INVOKED_TARGETS[@]}"} | awk 'NF' | LC_ALL=C sort -u)"
 
+# --- the partition, stated rather than inferred ------------------------------
+#
+# Every gate-carrying, non-excused closure member belongs to EXACTLY ONE of the
+# two arrays. The loop above puts it in exactly one OBSERVED population — the
+# `make_invokes` test is an if/else — and each array is set-equal to its own
+# population in both directions, so the two arrays cover the population between
+# them. What that chain does NOT say on its own is that they are DISJOINT: an
+# array can name a member the other one observes, and then each array looks
+# individually complete while the member's mode is claimed twice. So exclusivity
+# is asserted directly.
+#
+# OVER MEMBERS, NOT OVER PIN ENTRIES, and in this binding that distinction is
+# real rather than pedantic: `test` holds TWO EXPECTED_CI_STEPS entries, because
+# CI runs `./gradlew test` and the conformance-coverage guard as two separate
+# named steps. A member is one member however many steps run it, so the step
+# pin's domain is its set of distinct TARGETS and the entry count (7) is not the
+# member count (6).
+pinned_step_member_set="$pinned_step_set"
+both_arrays="$(LC_ALL=C comm -12 <(printf '%s\n' "$pinned_step_member_set") <(printf '%s\n' "$pinned_make_set") | awk 'NF')"
+if [ -n "$both_arrays" ]; then
+	echo >&2
+	echo "check-ci-reach: FAILED — target(s) claimed by BOTH EXPECTED_CI_STEPS and" >&2
+	echo "       EXPECTED_MAKE_INVOKED_TARGETS:" >&2
+	printf '%s\n' "$both_arrays" | awk 'NF { print "  - " $0 }' >&2
+	echo "       The two arrays partition the gate-carrying, non-excused closure members:" >&2
+	echo "       CI either SPELLS a target's commands (pin the step that does) or RUNS" >&2
+	echo "       \`make <target>\` (pin it as such), never both. A member in both means one" >&2
+	echo "       array can drop it while the other still appears to account for it" >&2
+	echo "       (#reversereachdirection)." >&2
+	status=1
+fi
+
 # --- mode, first -------------------------------------------------------------
 make_invoked_unpinned="$(LC_ALL=C comm -13 <(printf '%s\n' "$pinned_make_set") <(printf '%s\n' "$make_invoked_set") | awk 'NF')"
 if [ -n "$make_invoked_unpinned" ]; then
@@ -1683,8 +1737,15 @@ fi
 if [ "$status" -eq 0 ]; then
 	printf 'pinned   %s gate-free target(s), exactly matching EXPECTED_NO_GATE_TARGETS\n' \
 		"$(count_lines "$pinned_nogate")"
-	printf 'pinned   %s gate step name(s) for %s anchor-reached target(s) and %s make-invoked target(s), reach checked INSIDE the pinned step\n' \
-		"$pin_count" "$(count_lines "$anchor_reached_set")" "$(count_lines "$make_invoked_set")"
+	# Counted from the PINS, never from what was observed. In the falsification
+	# below, a guard missing one direction of the make-invoked equality printed an
+	# OBSERVED count of 2 against an array of 1 and still exited 0 — a number that
+	# moved while nothing refused it, which is dart's whole point: a count is not a
+	# pin. By this line the four set-equalities have already passed, so pinned and
+	# observed are the same numbers; printing the pinned ones means the line cannot
+	# report a population the pins do not claim.
+	printf 'pinned   %s gate step name(s) for %s anchor-reached target(s) and %s make-invoked target(s), set-equal both ways, reach checked INSIDE the pinned step\n' \
+		"$pin_count" "$(count_lines "$pinned_step_member_set")" "$(count_lines "$pinned_make_set")"
 	echo "check-ci-reach: OK — $reached target(s) reached by CI, $excused_ok excused, $nogate_count carrying no gate"
 fi
 exit "$status"
