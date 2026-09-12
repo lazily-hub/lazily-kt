@@ -60,7 +60,53 @@
 # helps: this guard cannot see a `uses:` step at all, which is the whole reason
 # those two run: steps exist. Step-scoping reddens both deletions.
 #
-# D IS TWO SETS, and their independence is load-bearing. EXPECTED_CI_STEPS names
+# D IS A THREE-WAY PARTITION of the gate-carrying closure members:
+#
+#     {gate-carrying} = {anchor-reached} + {make-invoked} + {excused}
+#
+# exclusive and total, every cell an explicit set, and the domain itself derived
+# from EXPECTED_CLOSURE_TARGETS minus EXPECTED_NO_GATE_TARGETS rather than from
+# what the loop happened to record. EXPECTED_CI_STEPS pins a step name per member
+# of the first cell; EXPECTED_MAKE_INVOKED_TARGETS pins the second; the third is
+# pinned where it already lives, with a reason, in $CONF. An excused member has NO
+# MODE — an excuse says CI does not reach the gate, so there is no step to pin and
+# no make invocation to record.
+#
+# THE PARTITION IS ASSERTED, NOT DERIVED, and dart's residual is why. Classify
+# every member through one `make_invokes` if/else and the cells are exclusive and
+# total BY CONSTRUCTION, with each array set-equal to one of them — which sounds
+# like proof and is not. Add a branch that leaves a member reached, printed and
+# counted but recorded in NEITHER population, drop its gate-step entry, and both
+# equalities still hold, because each is equal to a population the member has
+# left. Reproduced here on `test-interop-peer`: exit 0, `reached test-interop-peer`
+# printed, the step-scoped check run zero times, and the only trace a pinned count
+# falling from 7 to 6. dart's conclusion: A PROPERTY THAT HOLDS BY CONSTRUCTION IS
+# NOT A PROPERTY THE GUARD CHECKS.
+#
+# Measured here after asserting it, each exit 1: that residual; the deeper variant
+# whose branch precedes the gated accumulation, so the member is in no cell AND in
+# no domain (caught by anchoring the domain to the two pinned sets); a member in
+# two cells; a cell holding a target the closure never gated; a member claimed by
+# both arrays; and an excused member also pinned with a mode.
+#
+# THE THIRD CELL IS EMPTY IN THIS BINDING TODAY — 6 anchor-reached, 1
+# make-invoked, 0 excused — and it was exercised anyway rather than reasoned
+# about. dart's three-way shape only appeared once it ran its excused path for the
+# first time, and an empty cell is the one a guard has never executed. Measured
+# here at nonzero excuses: an honest excuse (its CI step removed, its step pin
+# removed, a reason in $CONF) passes at exit 0 and prints `1 excused`; the same
+# excuse while a mode pin still names it fails; the excuse whose target CI does
+# reach still fails the pre-existing stale-excuse rung.
+#
+# The totality equation is written {anchor} + {make} + {excused} = {gated} rather
+# than {anchor} + {make} = {gated} - {excused}. With exclusivity asserted the two
+# are the same statement, and the equality form keeps every cell on one side where
+# the reader can see all three. The failure mode that framing has to avoid — a
+# legitimate excuse reading as a member missing from the other two cells, a false
+# RED — is the reason the excused cell is a cell at all, and it is measured green
+# above, not argued.
+#
+# THE OLD TWO-SET FRAMING, and why both directions of each equality stay: EXPECTED_CI_STEPS names
 # the step per anchor-reached gate; EXPECTED_MAKE_INVOKED_TARGETS names the gates
 # CI reaches by running `make <target>` instead, for which a step pin would assert
 # nothing. Defining the second population as "whatever the first does not name"
@@ -1358,6 +1404,8 @@ reached=0
 excused_ok=0
 make_invoked_seen=""
 anchor_reached_seen=""
+gated_seen=""
+excused_seen=""
 idle_pins=""
 
 while IFS= read -r target; do
@@ -1370,6 +1418,20 @@ while IFS= read -r target; do
 		nogate_count=$((nogate_count + 1))
 		continue
 	fi
+
+	# The GATED population, accumulated BEFORE any branch (#reversereachdirection).
+	#
+	# This line is the whole difference between a partition the guard CHECKS and a
+	# partition that merely holds by construction. Every population below used to
+	# be read off the `make_invokes` if/else, so "exclusive and total" was a
+	# property of the control flow rather than a claim anything verified — and dart
+	# measured the residual: add a branch that leaves a member reached, printed and
+	# counted but recorded in NEITHER population, drop its gate-step entry, and both
+	# set equalities still hold, because each is equal to a population the member is
+	# no longer in. Exit 0, gate checked zero times. Reproduced here on
+	# `test-interop-peer` before this line existed. dart's conclusion: A PROPERTY
+	# THAT HOLDS BY CONSTRUCTION IS NOT A PROPERTY THE GUARD CHECKS.
+	gated_seen="$gated_seen$target"$'\n'
 
 	hit=1
 	missing_anchors=""
@@ -1396,6 +1458,12 @@ while IFS= read -r target; do
 				anchor_reached "$a" || hit=0
 			done <<<"$target_anchors"
 		fi
+		# An excused member has NO MODE. An excuse says CI does not reach the gate,
+		# so there is no step to pin and no make invocation to record; what is pinned
+		# is its membership of the excused cell, and that is already explicit in
+		# $CONF. It is the third cell of the partition, not a target missing from the
+		# other two.
+		excused_seen="$excused_seen$target"$'\n'
 		if [ "$hit" -eq 1 ]; then
 			stale="$stale$target"$'\n'
 			stale_count=$((stale_count + 1))
@@ -1576,35 +1644,139 @@ unreached_set="$(printf '%s' "$unreached" | awk 'NF' | LC_ALL=C sort -u)"
 pinned_step_set="$(printf '%s\n' ${pinned_step_targets[@]+"${pinned_step_targets[@]}"} | awk 'NF' | LC_ALL=C sort -u)"
 pinned_make_set="$(printf '%s\n' ${EXPECTED_MAKE_INVOKED_TARGETS[@]+"${EXPECTED_MAKE_INVOKED_TARGETS[@]}"} | awk 'NF' | LC_ALL=C sort -u)"
 
-# --- the partition, stated rather than inferred ------------------------------
+# --- THE PARTITION, asserted over the OBSERVED sets --------------------------
 #
-# Every gate-carrying, non-excused closure member belongs to EXACTLY ONE of the
-# two arrays. The loop above puts it in exactly one OBSERVED population — the
-# `make_invokes` test is an if/else — and each array is set-equal to its own
-# population in both directions, so the two arrays cover the population between
-# them. What that chain does NOT say on its own is that they are DISJOINT: an
-# array can name a member the other one observes, and then each array looks
-# individually complete while the member's mode is claimed twice. So exclusivity
-# is asserted directly.
+#   {gate-carrying} = {anchor-reached} + {make-invoked} + {excused}
 #
-# OVER MEMBERS, NOT OVER PIN ENTRIES, and in this binding that distinction is
-# real rather than pedantic: `test` holds TWO EXPECTED_CI_STEPS entries, because
-# CI runs `./gradlew test` and the conformance-coverage guard as two separate
-# named steps. A member is one member however many steps run it, so the step
-# pin's domain is its set of distinct TARGETS and the entry count (7) is not the
-# member count (6).
+# Three cells, each an explicit set, asserted EXCLUSIVE and TOTAL. Not derived
+# from the classification branch: the branch is what used to make the property
+# true, and dart's residual is what a by-construction property is worth — a
+# member left reached, printed and counted but recorded in NEITHER population
+# passed at exit 0 with both set equalities intact, because each was equal to a
+# population the member had left. Reproduced here on `test-interop-peer`.
+#
+# An excused member has NO MODE, which is the correction dart landed: an excuse
+# says CI does not reach the gate, so there is no step to pin and no make
+# invocation to record. It is the third CELL, not a hole in the other two, and its
+# membership is pinned where it already lives — with a reason, in $CONF.
+#
+# OVER MEMBERS, NOT OVER PIN ENTRIES, and in this binding the distinction is real
+# rather than pedantic: `test` holds TWO EXPECTED_CI_STEPS entries, because CI
+# runs `./gradlew test` and the conformance-coverage guard as two separate named
+# steps. A member is one member however many steps run it, so the step pin's
+# domain is its distinct TARGETS — 6 members behind 7 entries — and every set
+# operation below is over members. Stating it over entries would make the totality
+# arithmetic wrong here by exactly one.
+gated_set="$(printf '%s' "$gated_seen" | awk 'NF' | LC_ALL=C sort -u)"
+
+# THE DOMAIN IS ANCHORED TO THE PINS, not to what the loop happened to record.
+# `gated_set` is filled in by the loop, so a partition asserted only against it
+# is satisfied by removing a member from the loop as well — measured here: a
+# branch placed BEFORE the accumulation leaves the member reached and printed,
+# in no mode AND in no gated set, and the equation holds vacuously at exit 0.
+# So the domain is derived from two sets that are already pinned by set equality:
+#
+#   {gated} = EXPECTED_CLOSURE_TARGETS - EXPECTED_NO_GATE_TARGETS
+#
+# Every cell of the partition now terminates in a pin rather than in a variable
+# the audited code assigns, which is the same reason the oracle above exists: a
+# guard may not take the audited program's word for the population it is judging.
+expected_gated="$(LC_ALL=C comm -23 <(printf '%s\n' "$pinned_targets") <(printf '%s\n' "$pinned_nogate") | awk 'NF')"
+gated_domain_missing="$(LC_ALL=C comm -13 <(printf '%s\n' "$gated_set") <(printf '%s\n' "$expected_gated") | awk 'NF')"
+gated_domain_extra="$(LC_ALL=C comm -23 <(printf '%s\n' "$gated_set") <(printf '%s\n' "$expected_gated") | awk 'NF')"
+if [ -n "$gated_domain_missing" ] || [ -n "$gated_domain_extra" ]; then
+	echo >&2
+	echo "check-ci-reach: FAILED — the gate-carrying population this run measured is not" >&2
+	echo "       EXPECTED_CLOSURE_TARGETS minus EXPECTED_NO_GATE_TARGETS:" >&2
+	printf '%s\n' "$gated_domain_missing" | awk 'NF { print "  - pinned gate-carrying, but this run gated no such target: " $0 }' >&2
+	printf '%s\n' "$gated_domain_extra" | awk 'NF { print "  - gated by this run, but not pinned gate-carrying: " $0 }' >&2
+	echo "       The partition below is only as good as the population it partitions, so the" >&2
+	echo "       population is derived from the two pinned sets rather than from what the" >&2
+	echo "       loop recorded. A member that never reaches the loop's accounting is asked" >&2
+	echo "       for nothing by any cell (#reversereachdirection)." >&2
+	status=1
+fi
+excused_set="$(printf '%s' "$excused_seen" | awk 'NF' | LC_ALL=C sort -u)"
+observed_union="$(printf '%s\n%s\n%s\n' "$anchor_reached_set" "$make_invoked_set" "$excused_set" | awk 'NF' | LC_ALL=C sort -u)"
+
+partition_missing="$(LC_ALL=C comm -13 <(printf '%s\n' "$observed_union") <(printf '%s\n' "$gated_set") | awk 'NF')"
+if [ -n "$partition_missing" ]; then
+	echo >&2
+	echo "check-ci-reach: FAILED — gate-carrying closure member(s) in NO population:" >&2
+	printf '%s\n' "$partition_missing" | awk 'NF { print "  - " $0 }' >&2
+	echo "       Every gate-carrying member must be anchor-reached, make-invoked, or" >&2
+	echo "       excused. A member in none of the three is asked for nothing — no step" >&2
+	echo "       pin, no make pin, no excuse and no reason — while still being printed as" >&2
+	echo "       handled, which is how a gate is retired with every set equality intact" >&2
+	echo "       (#reversereachdirection)." >&2
+	status=1
+fi
+
+partition_extra="$(LC_ALL=C comm -23 <(printf '%s\n' "$observed_union") <(printf '%s\n' "$gated_set") | awk 'NF')"
+if [ -n "$partition_extra" ]; then
+	echo >&2
+	echo "check-ci-reach: FAILED — population member(s) that are not gate-carrying closure" >&2
+	echo "       members:" >&2
+	printf '%s\n' "$partition_extra" | awk 'NF { print "  - " $0 }' >&2
+	echo "       A population counted a target the closure walk never gated. The totality" >&2
+	echo "       check is asserted in both directions on purpose: a population that can" >&2
+	echo "       grow past the gated set can absorb a member another cell dropped" >&2
+	echo "       (#reversereachdirection)." >&2
+	status=1
+fi
+
+# Exclusivity, pairwise, over the observed sets.
+overlap_report=""
+add_overlap() {
+	local a="$1" b="$2" an="$3" bn="$4" hit
+	hit="$(LC_ALL=C comm -12 <(printf '%s\n' "$a") <(printf '%s\n' "$b") | awk 'NF')"
+	if [ -n "$hit" ]; then
+		while IFS= read -r t; do
+			[ -n "$t" ] || continue
+			overlap_report="$overlap_report$t  ($an and $bn)"$'\n'
+		done <<<"$hit"
+	fi
+}
+add_overlap "$anchor_reached_set" "$make_invoked_set" "anchor-reached" "make-invoked"
+add_overlap "$anchor_reached_set" "$excused_set" "anchor-reached" "excused"
+add_overlap "$make_invoked_set" "$excused_set" "make-invoked" "excused"
+if [ -n "$overlap_report" ]; then
+	echo >&2
+	echo "check-ci-reach: FAILED — closure member(s) in more than one population:" >&2
+	printf '%s\n' "$overlap_report" | awk 'NF { print "  - " $0 }' >&2
+	echo "       The three cells are exclusive. A member in two of them is accounted for" >&2
+	echo "       twice, so either cell can drop it while the other still appears to cover" >&2
+	echo "       it (#reversereachdirection)." >&2
+	status=1
+fi
+
+# The pinned side of the partition. The step pin's domain is its distinct MEMBERS.
 pinned_step_member_set="$pinned_step_set"
+
+# An excused member carries no mode, so it must appear in neither array.
+excused_but_pinned="$(LC_ALL=C comm -12 <(printf '%s\n' "$excused_set") \
+	<(printf '%s\n%s\n' "$pinned_step_member_set" "$pinned_make_set" | awk 'NF' | LC_ALL=C sort -u) | awk 'NF')"
+if [ -n "$excused_but_pinned" ]; then
+	echo >&2
+	echo "check-ci-reach: FAILED — excused member(s) also pinned with a mode:" >&2
+	printf '%s\n' "$excused_but_pinned" | awk 'NF { print "  - " $0 }' >&2
+	echo "       An excuse says CI does not reach this gate, so there is no step to pin and" >&2
+	echo "       no make invocation to record. Remove it from EXPECTED_CI_STEPS /" >&2
+	echo "       EXPECTED_MAKE_INVOKED_TARGETS, or remove the excuse from $CONF — one of the" >&2
+	echo "       two is a lie (#reversereachdirection)." >&2
+	status=1
+fi
+
 both_arrays="$(LC_ALL=C comm -12 <(printf '%s\n' "$pinned_step_member_set") <(printf '%s\n' "$pinned_make_set") | awk 'NF')"
 if [ -n "$both_arrays" ]; then
 	echo >&2
 	echo "check-ci-reach: FAILED — target(s) claimed by BOTH EXPECTED_CI_STEPS and" >&2
 	echo "       EXPECTED_MAKE_INVOKED_TARGETS:" >&2
 	printf '%s\n' "$both_arrays" | awk 'NF { print "  - " $0 }' >&2
-	echo "       The two arrays partition the gate-carrying, non-excused closure members:" >&2
-	echo "       CI either SPELLS a target's commands (pin the step that does) or RUNS" >&2
-	echo "       \`make <target>\` (pin it as such), never both. A member in both means one" >&2
-	echo "       array can drop it while the other still appears to account for it" >&2
-	echo "       (#reversereachdirection)." >&2
+	echo "       The arrays pin two exclusive cells of the partition: CI either SPELLS a" >&2
+	echo "       target's commands (pin the step that does) or RUNS \`make <target>\` (pin it" >&2
+	echo "       as such), never both. A member in both means one array can drop it while" >&2
+	echo "       the other still appears to account for it (#reversereachdirection)." >&2
 	status=1
 fi
 
@@ -1744,8 +1916,9 @@ if [ "$status" -eq 0 ]; then
 	# pin. By this line the four set-equalities have already passed, so pinned and
 	# observed are the same numbers; printing the pinned ones means the line cannot
 	# report a population the pins do not claim.
-	printf 'pinned   %s gate step name(s) for %s anchor-reached target(s) and %s make-invoked target(s), set-equal both ways, reach checked INSIDE the pinned step\n' \
-		"$pin_count" "$(count_lines "$pinned_step_member_set")" "$(count_lines "$pinned_make_set")"
+	printf 'pinned   %s gate step name(s) over %s anchor-reached + %s make-invoked + %s excused = %s gate-carrying member(s), exclusive and total, reach checked INSIDE the pinned step\n' \
+		"$pin_count" "$(count_lines "$pinned_step_member_set")" "$(count_lines "$pinned_make_set")" \
+		"$(count_lines "$excused_set")" "$(count_lines "$gated_set")"
 	echo "check-ci-reach: OK — $reached target(s) reached by CI, $excused_ok excused, $nogate_count carrying no gate"
 fi
 exit "$status"
