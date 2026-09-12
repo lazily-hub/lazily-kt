@@ -509,6 +509,42 @@ class AssertionKeys(
     }
 
     /**
+     * [assertKeyWith] for a runner whose comparison ACCUMULATES rather than
+     * throws: [check] returns whether the comparison PASSED, and the key is
+     * booked asserted only if it did (`#lzktreactivemodelfailures`).
+     *
+     * The distinction matters wherever a runner collects divergences into a
+     * report instead of failing at the first one — ReactiveGraphConformanceTest
+     * drives three execution models and wants all three to speak. Through
+     * [assertKeyWith] such a runner books EVERY key it hands over as asserted the
+     * moment the comparison runs, whatever the comparison concluded, so rung 3
+     * degrades to "a comparison happened" and the tracker's signal becomes a
+     * restatement of the accumulator's. A swallowed divergence — an accumulator
+     * whose report is never read, a comparison that quietly returns false —
+     * leaves the key looking asserted.
+     *
+     * Here the OUTCOME is the evidence. A failed comparison leaves the key
+     * consumed-but-unasserted, so [requireAllSatisfied] fails it as read-and-never-
+     * asserted independently of whether anyone reads the accumulator's report.
+     * That is a strictly stronger rung 3 than [assertKeyWith] can offer, and it
+     * costs the caller one `Boolean`.
+     *
+     * The fixture's value still has to reach [check] — a [check] that ignores its
+     * argument and returns `true` is the same defect [assertKeyWith] names, one
+     * indirection further along. Object-valued keys carry the same key-set
+     * obligation here as there: this is an opaque path, so pair it with
+     * [assertKeySet] or [sub], or use [assertKeyValue] instead.
+     */
+    fun assertKeyOutcome(
+        key: String,
+        check: (JsonElement) -> Boolean,
+    ) {
+        guardNotProse(key, "asserting")
+        val want = this[key] ?: return
+        if (check(want)) markAsserted(key)
+    }
+
+    /**
      * Assert [key]'s object value wholesale against [actual] — whole-element
      * equality, which subsumes key-set equality (`#lzsubblockkeyset`).
      *

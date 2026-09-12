@@ -1155,6 +1155,44 @@ class ReactiveGraphConformanceTest {
             model.settle()
             val observed = model.runLog.toList().subList(runsBefore, model.runLog.size)
 
+            // WHY THIS BLOCK IS NOT YET BOUND TO AN AssertionKeys, AND WHAT THE
+            // SHAPE WILL BE WHEN IT IS (#lzktreactivemodelfailures).
+            //
+            // Every other conformance runner in this repo wraps its assertion
+            // block in `consuming(where) { }` and lets AssertionKeys throw. This
+            // one does not, and the reason is a real asymmetry rather than an
+            // oversight, so it is written down here where someone reading a
+            // failure will be looking.
+            //
+            // This runner replays the whole corpus once PER EXECUTION MODEL
+            // (`runCorpus` is called once for each), and `check` below
+            // ACCUMULATES divergences into `report.failures` instead of throwing
+            // at the first one. That is deliberate: a value divergence is a
+            // property of ONE model, and when the sync model disagrees with the
+            // fixture it is worth knowing whether the async and the batched
+            // models agree too. Failing fast would hide two thirds of that.
+            //
+            // A COVERAGE defect is the opposite kind of fact. "This runner never
+            // read `observed_count`" is a property of the RUNNER, not of any
+            // model — it is identical in all three passes by construction, so
+            // accumulating it three times reports the same thing three times, and
+            // failing fast on it is correct. The two therefore do not conflict;
+            // they answer different questions and want different failure modes.
+            //
+            // So the settled shape is: run the tracker over this block ONCE —
+            // gated on the first model's pass — and let `requireAllSatisfied`
+            // throw, while every per-model value comparison keeps going through
+            // `check` and the accumulator. The tracker hands the fixture's value
+            // to `check` via AssertionKeys.assertKeyOutcome, which books a key
+            // asserted only when the comparison PASSED; assertKeyWith would book
+            // it the moment the comparison ran, which in an accumulating runner
+            // degrades rung 3 to "a comparison happened".
+            //
+            // Landing that is the MIGRATION of this runner's 88 sites, tracked as
+            // #lzktbindpending, and it cannot be done by halves: a tracker over
+            // this block throws immediately unless all thirteen key families
+            // below are routed through it in the same change. The decision and
+            // the tracker surface it needs are in place; the wiring is not.
             val expect = step["expect"]?.jsonObject ?: continue
             val unknown = (expect.keys - KNOWN_EXPECT_KEYS).sorted()
             check(unknown.isEmpty()) {
