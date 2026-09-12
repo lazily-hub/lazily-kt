@@ -1058,10 +1058,24 @@ fi
 # the override must be a number. An empty or malformed value FAILS CLOSED rather
 # than silently reverting to the default, because a pin that can be switched off
 # by exporting a typo is not pinned.
+#
+# ONE parse for the whole family (#lzpinparsestrict): a NON-EMPTY run of bare
+# ASCII digits `0`-`9`, and nothing else. This binding already had the rule, and
+# it is the only one of the ten that got the unset-versus-empty distinction right
+# from the start: `${VAR-537}` substitutes the default only when the variable is
+# UNSET, where `${VAR:-537}` would also have swallowed `export
+# EXPECTED_LEDGERED_BLOCKS=` and a typo that expanded to nothing. That is why the
+# empty case is spelled in the pattern below rather than left to the default.
+#
+# The digit class is enumerated rather than written `0-9`, because a bracket
+# RANGE is resolved by the locale's collation and `0-9` is only guaranteed to be
+# the ten ASCII digits under LC_COLLATE=C. An enumeration is the same ten in every
+# locale, which is what the family rule says.
 EXPECTED_LEDGERED_BLOCKS="${EXPECTED_LEDGERED_BLOCKS-537}"
 case "$EXPECTED_LEDGERED_BLOCKS" in
-  '' | *[!0-9]*)
-    echo "ERROR: EXPECTED_LEDGERED_BLOCKS is not a non-negative integer:" \
+  '' | *[!0123456789]*)
+    echo "ERROR: EXPECTED_LEDGERED_BLOCKS is not a non-negative integer in bare" \
+         "ASCII digits (#lzpinparsestrict):" \
          "'$EXPECTED_LEDGERED_BLOCKS'." >&2
     echo "       The ledger size is pinned as an exact equality, so an unreadable pin" >&2
     echo "       has nothing to compare against. Falling back to the built-in default" >&2
@@ -1081,18 +1095,30 @@ import re
 import sys
 
 block_ledger, unbound_ledger, runner_src = sys.argv[1], sys.argv[2], sys.argv[3]
-# The shell already refused a non-numeric pin. Parse it again rather than assume,
-# and fail closed on the same terms if this reader is ever called directly.
-try:
-    expected_ledgered = int(sys.argv[4])
-except ValueError:
+# The shell already refused a non-numeric pin. Re-check it on the SAME terms
+# rather than assume, so this reader fails closed if it is ever called directly.
+#
+# ONE parse for the whole family (#lzpinparsestrict): a NON-EMPTY run of bare
+# ASCII digits `0`-`9`, and nothing else. Deliberately stricter than the bare
+# `int()` this used to be, and than `str.isdigit()`, because each of those
+# silently accepts a number nobody wrote: `int("1_0")` is 10 (PEP 515
+# separators), `int(" 7 ")` is 7, `int("+1")` is 1, and `"\u0663".isdigit()` is
+# true for the Arabic-Indic three. The shell's `case` refuses all of those, so
+# this only mattered on a direct call — but a fallback reader that is looser than
+# the gate in front of it is the gate's real contract the moment anyone invokes
+# it, which is how the ten bindings in this family ended up with ten different
+# answers for one constant.
+_pin_raw = sys.argv[4]
+if not _pin_raw or _pin_raw.strip("0123456789"):
     print(
-        "ERROR: the ledger-size pin %r is not an integer. The size is pinned as an\n"
-        "       exact equality, so there is nothing to compare against — and\n"
-        "       defaulting here would disarm the rung silently." % (sys.argv[4],),
+        "ERROR: the ledger-size pin %r is not a non-negative integer in bare ASCII\n"
+        "       digits (#lzpinparsestrict). The size is pinned as an exact equality,\n"
+        "       so there is nothing to compare against — and defaulting here would\n"
+        "       disarm the rung silently." % (_pin_raw,),
         file=sys.stderr,
     )
     sys.exit(1)
+expected_ledgered = int(_pin_raw)
 
 # --- the run's own sites, by bind state ------------------------------------
 run_unbound, run_sites = set(), set()
