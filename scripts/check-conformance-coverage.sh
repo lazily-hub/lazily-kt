@@ -897,8 +897,8 @@ fi
 # AssertionKeys books it bound when it is constructed over it — matched by
 # CONTENT, not by the `where` label a runner picks for itself.
 BLOCK_LEDGER="${3:-${LAZILY_CONFORMANCE_ASSERTION_BLOCK_LEDGER:-build/conformance-assertion-blocks.txt}}"
-# The committed per-site excuse ledger. A FILE rather than a bash array: at 565
-# entries an array would dominate this script, and lazily-spec's
+# The committed per-site excuse ledger. A FILE rather than a bash array: at this
+# many hundred entries an array would dominate this script, and lazily-spec's
 # check-corpus-floors.mjs classifies the top-level arrays here — a third one
 # holding site ids would be a new shape for it to guess at.
 UNBOUND_LEDGER="${LAZILY_CONFORMANCE_UNBOUND_BLOCK_LEDGER:-$(dirname "$0")/conformance-unbound-blocks.txt}"
@@ -984,7 +984,8 @@ fi
 # `bind-pending` entry is just an accepted excuse, so the bind-pending count could
 # GROW — a new runner area could add sites to the ledger and stay green, which is
 # a slack floor wearing a reason string and exactly the rot this ladder refuses
-# (#lzktblockwalk). So each class is now pinned to something that can fail:
+# (#lzktblockwalk). Neither class is excused by a number any more: one is DERIVED
+# and the other is bounded by a CEILING over the whole ledger (#lzledgerceiling).
 #
 #   unreachable    DERIVED, not counted. These sites exist because
 #                  ReactiveGraphConformanceTest.EXPECTED_SKIPS names six fixtures
@@ -996,22 +997,53 @@ fi
 #                  instead of surviving as folklore — and there is no number here
 #                  for anyone to re-pin.
 #
-#   bind-pending   an EQUALITY against a pinned debt, failing in BOTH directions.
-#                  Above the pin means new unbound sites appeared and the ledger
-#                  absorbed them; below it means a migration landed. Either way
-#                  the number moves in the same commit as the change, which is
-#                  what a ceiling alone would not force. It is a DEBT, so it may
-#                  only ever be re-pinned DOWNWARD.
+#   bind-pending   NOT counted either, as of #lzledgerceiling. The typed count
+#                  that used to sit here (`MIN_BIND_PENDING`, last pinned at 512)
+#                  MIRRORED the population the set equality above already fixes:
+#                  if the ledger set and the run's unbound set are equal then
+#                  their counts are equal, so the number carried no information
+#                  the equality did not, and it was a second edit site that had to
+#                  move in lockstep or go red. That is the `MIN_BLOCKS` shape, and
+#                  lazily-rs is right to refuse it (#lzrsbindpending).
 #
-# Pinned 2026-09-12 at 540, the count the widening surfaced across 18 areas, and
-# re-pinned DOWNWARD to 512 the same day as the first migration pass
-# (#lzktbindpending) took ipc/root 1, familysync 3, protobuf 6, membership 9 and
-# message-passing 9 — 28 sites over five areas and four different block shapes.
-# Every remaining block here is reachable and its runner does assert its keys, by
-# direct indexing rather than through AssertionKeys. Re-pin DOWNWARD as each
-# area's runner migrates, never upward — a new area that cannot bind its blocks is
-# a finding to report, not a number to raise.
-MIN_BIND_PENDING="${MIN_BIND_PENDING:-512}"
+#                  Dropping it is only safe because this ledger is ENUMERATED —
+#                  one literal `<fixture>|<path>` per line, compared as a set with
+#                  `comm` and with exact string membership in the readers below.
+#                  There is no glob, prefix or regex anywhere in the excuse path,
+#                  so the excused population cannot widen without the diff showing
+#                  every new site. A ledger matched by PATTERN would need to keep a
+#                  number, because a pattern can widen silently and set equality
+#                  cannot see it.
+#
+#                  What the count DID buy, and what is deliberately given up: it
+#                  failed on SHRINK too, forcing a downward re-pin in the same
+#                  commit as each migration. The ceiling below permits shrink
+#                  silently, so headroom accumulates as areas migrate. The OK line
+#                  prints `N ledgered of at most M` so that headroom is visible
+#                  rather than implied — lower the ceiling when you migrate an
+#                  area. In exchange the ceiling covers the WHOLE ledger, both
+#                  classes, where the count reached only the 512 reachable ones.
+# A CEILING on the excused population, because set equality alone has a hole
+# (#lzledgerceiling). Both directions above only check that the ledger and the run
+# AGREE, and that is satisfied by ANY CONSISTENT PAIR: a commit that detaches N
+# binds and writes the N matching entries passes forward, backward and stale-gone.
+# The magnitude rung does not see it either — the sites are still DECLARED, merely
+# no longer bound.
+#
+# So the missing guard is not a count of what IS excused but a bound on how much
+# MAY be. A ceiling is POLICY rather than measurement: it does not move with the
+# corpus, and it never needs re-pinning except deliberately. It is what makes
+# enlarging the excused set an explicit act instead of a side effect of a commit
+# that also writes its own excuse.
+#
+# Defaulted to 537, the ledger's size the day this landed, so landing it is a
+# no-op and any growth is red. This number may only ever move DOWNWARD in normal
+# work: lower it as each area's runner migrates. Raising it needs a genuinely
+# unbindable block, the `unreachable` class and a reason, and expects to be asked
+# why the capability cannot exist — never to park a `bind-pending` site, which is
+# the laundering this guard refuses. Env-overridable so the guard itself can be
+# probed without editing the pin.
+MAX_LEDGERED_BLOCKS="${MAX_LEDGERED_BLOCKS:-537}"
 # Overridable ONLY so the derivation itself can be probed against a doctored copy
 # of the map (a fixture removed, the map renamed). Never point it at anything but
 # the real runner in a real run.
@@ -1022,7 +1054,7 @@ import os
 import re
 import sys
 
-block_ledger, unbound_ledger, runner_src, pinned = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
+block_ledger, unbound_ledger, runner_src, ceiling = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
 
 # --- the run's own sites, by bind state ------------------------------------
 run_unbound, run_sites = set(), set()
@@ -1038,6 +1070,10 @@ with open(block_ledger, encoding="utf-8") as handle:
 # --- the ledger, by reason CLASS ------------------------------------------
 KNOWN_CLASSES = ("unreachable", "bind-pending")
 by_class = {name: set() for name in KNOWN_CLASSES}
+# Every site the ledger names, whatever class it claims. The ceiling is a bound on
+# the excused population as a whole, so an entry with an unrecognised class still
+# counts against it — otherwise misspelling the class would buy headroom.
+ledgered_sites = set()
 unknown_class = []
 with open(unbound_ledger, encoding="utf-8") as handle:
     for line in handle:
@@ -1048,6 +1084,7 @@ with open(unbound_ledger, encoding="utf-8") as handle:
         if len(parts) < 2:
             continue
         site, reason = parts[0], parts[1]
+        ledgered_sites.add(site)
         name = reason.split(":", 1)[0].strip()
         if name in by_class:
             by_class[name].add(site)
@@ -1143,39 +1180,43 @@ if by_class["unreachable"] != derived_unreachable:
             print("         " + site, file=sys.stderr)
     failed = True
 
-# --- bind-pending: an EQUALITY against a pinned debt ----------------------
-# Derived from the RUN, not from the ledger, so a ledger edit cannot satisfy it
-# on its own: these are the sites nothing bound and EXPECTED_SKIPS does not
-# excuse.
+# --- bind-pending: reported, and bounded by the CEILING below -------------
+# Derived from the RUN, not from the ledger, so this is what nothing bound and
+# EXPECTED_SKIPS does not excuse. There is deliberately no typed count of it any
+# more: with the set equality above holding, a count of this population equals a
+# count of the ledger's `bind-pending` class, so it could only ever restate the
+# equality or drift away from it (#lzledgerceiling).
 run_bind_pending = run_unbound - derived_unreachable
-if len(run_bind_pending) != pinned:
-    if len(run_bind_pending) > pinned:
+
+# --- the CEILING: a bound on how much may be excused at all ---------------
+# The set equality is satisfied by any CONSISTENT PAIR, so detaching N binds and
+# writing the N matching entries passes every check above. This is the only thing
+# that refuses it, and it covers BOTH classes: laundering a detached bind into
+# `unreachable` by widening EXPECTED_SKIPS grows the ledger just the same.
+if len(ledgered_sites) > ceiling:
+    print(
+        "ERROR: %d assertion-block site(s) are ledgered as unbound; the ceiling is %d.\n"
+        "       This ledger may only ever SHRINK. The set equality above checks only\n"
+        "       that the ledger and the run AGREE, which any consistent pair satisfies\n"
+        "       — a commit that detaches binds and writes the matching entries passes\n"
+        "       it, and the magnitude rung does not see it either because the sites are\n"
+        "       still DECLARED, just no longer bound. This ceiling is what makes\n"
+        "       enlarging the excused set an explicit act instead of a side effect.\n"
+        "       Bind the block. Raise MAX_LEDGERED_BLOCKS only for a genuinely\n"
+        "       unbindable one, with the `unreachable` class and a reason:"
+        % (len(ledgered_sites), ceiling),
+        file=sys.stderr,
+    )
+    over = sorted(ledgered_sites)
+    for site in over[:20]:
+        print("         " + site, file=sys.stderr)
+    if len(over) > 20:
         print(
-            "ERROR: %d assertion-block site(s) are reachable, unbound, and not covered by\n"
-            "       EXPECTED_SKIPS; the pin is %d. The ledger has GROWN.\n"
-            "       This number is a DEBT and may only ever be re-pinned DOWNWARD. A new\n"
-            "       area whose blocks nothing binds is a finding to report, not a number\n"
-            "       to raise — bind the new sites, or say plainly that a whole area went\n"
-            "       unbound and why."
-            % (len(run_bind_pending), pinned),
+            "         ... and %d more — `git diff scripts/conformance-unbound-blocks.txt`\n"
+            "         is the shortest way to see which entries this commit ADDED."
+            % (len(over) - 20),
             file=sys.stderr,
         )
-        for site in sorted(run_bind_pending - by_class["bind-pending"])[:20]:
-            print("         new: " + site, file=sys.stderr)
-    else:
-        print(
-            "ERROR: %d assertion-block site(s) are reachable, unbound, and not covered by\n"
-            "       EXPECTED_SKIPS; the pin is %d. %d site(s) have been BOUND since the pin\n"
-            "       was set.\n"
-            "       That is the direction this number is supposed to move, so re-pin it to\n"
-            "       %d in the SAME commit as the migration. Failing here rather than\n"
-            "       accepting the shrink is deliberate: a ceiling that quietly absorbed\n"
-            "       progress would also quietly absorb a regression back up to it."
-            % (len(run_bind_pending), pinned, pinned - len(run_bind_pending), len(run_bind_pending)),
-            file=sys.stderr,
-        )
-        for site in sorted(by_class["bind-pending"] - run_bind_pending)[:20]:
-            print("         now bound: " + site, file=sys.stderr)
     failed = True
 
 if failed:
@@ -1183,8 +1224,15 @@ if failed:
 
 print(
     "%d unreachable (derived from %d EXPECTED_SKIPS fixture(s), no number to re-pin) "
-    "and %d bind-pending (pinned EQUAL, shrink-only)"
-    % (len(derived_unreachable), len(skip_fixtures), len(run_bind_pending))
+    "and %d bind-pending (no typed count — bounded by the ceiling); %d ledgered of at "
+    "most %d"
+    % (
+        len(derived_unreachable),
+        len(skip_fixtures),
+        len(run_bind_pending),
+        len(ledgered_sites),
+        ceiling,
+    )
 )
 PY
 )"
@@ -1192,7 +1240,7 @@ block_classes=""
 if [ -f "$BLOCK_LEDGER" ] && [ -f "$UNBOUND_LEDGER" ]; then
   if ! block_classes="$(
     python3 -c "$BLOCK_CLASS_PY" "$BLOCK_LEDGER" "$UNBOUND_LEDGER" \
-      "$REACTIVE_GRAPH_RUNNER" "$MIN_BIND_PENDING"
+      "$REACTIVE_GRAPH_RUNNER" "$MAX_LEDGERED_BLOCKS"
   )"; then
     missing=$((missing + 1))
   fi
