@@ -977,6 +977,224 @@ else
   fi
 fi
 
+# --- the ledger's two reason CLASSES, enforced rather than documented -------
+#
+# The reconciliation above proves every unbound site is ledgered and every ledger
+# entry is really unbound. That is not enough on its own: to those checks a
+# `bind-pending` entry is just an accepted excuse, so the bind-pending count could
+# GROW — a new runner area could add sites to the ledger and stay green, which is
+# a slack floor wearing a reason string and exactly the rot this ladder refuses
+# (#lzktblockwalk). So each class is now pinned to something that can fail:
+#
+#   unreachable    DERIVED, not counted. These sites exist because
+#                  ReactiveGraphConformanceTest.EXPECTED_SKIPS names six fixtures
+#                  whose replay stops on an op this binding does not model, so no
+#                  tracker can reach any block in them. The expected set is read
+#                  out of that map and compared BOTH ways against the run's own
+#                  unbound sites. The day a `merge_cell` op lands upstream and a
+#                  fixture leaves EXPECTED_SKIPS, its entries fail as stale
+#                  instead of surviving as folklore — and there is no number here
+#                  for anyone to re-pin.
+#
+#   bind-pending   an EQUALITY against a pinned debt, failing in BOTH directions.
+#                  Above the pin means new unbound sites appeared and the ledger
+#                  absorbed them; below it means a migration landed. Either way
+#                  the number moves in the same commit as the change, which is
+#                  what a ceiling alone would not force. It is a DEBT, so it may
+#                  only ever be re-pinned DOWNWARD.
+#
+# Pinned 2026-09-12 at 540, the count this widening surfaced across 18 areas:
+# every one of these blocks is reachable and its runner does assert its keys, by
+# direct indexing rather than through AssertionKeys. Re-pin DOWNWARD as each
+# area's runner migrates, never upward — a new area that cannot bind its blocks is
+# a finding to report, not a number to raise.
+MIN_BIND_PENDING="${MIN_BIND_PENDING:-540}"
+# Overridable ONLY so the derivation itself can be probed against a doctored copy
+# of the map (a fixture removed, the map renamed). Never point it at anything but
+# the real runner in a real run.
+REACTIVE_GRAPH_RUNNER="${LAZILY_CONFORMANCE_SKIPS_SOURCE:-src/test/kotlin/io/github/lazily/ReactiveGraphConformanceTest.kt}"
+
+BLOCK_CLASS_PY="$(cat <<'PY'
+import os
+import re
+import sys
+
+block_ledger, unbound_ledger, runner_src, pinned = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
+
+# --- the run's own sites, by bind state ------------------------------------
+run_unbound, run_sites = set(), set()
+with open(block_ledger, encoding="utf-8") as handle:
+    for line in handle:
+        parts = line.rstrip("\n").split("\t")
+        if len(parts) != 3:
+            continue
+        run_sites.add(parts[0])
+        if parts[1] == "UNBOUND":
+            run_unbound.add(parts[0])
+
+# --- the ledger, by reason CLASS ------------------------------------------
+KNOWN_CLASSES = ("unreachable", "bind-pending")
+by_class = {name: set() for name in KNOWN_CLASSES}
+unknown_class = []
+with open(unbound_ledger, encoding="utf-8") as handle:
+    for line in handle:
+        line = line.rstrip("\n")
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        site, reason = parts[0], parts[1]
+        name = reason.split(":", 1)[0].strip()
+        if name in by_class:
+            by_class[name].add(site)
+        else:
+            unknown_class.append((site, name))
+
+failed = False
+
+if unknown_class:
+    print(
+        "ERROR: unbound-block ledger entries whose reason names no known class:\n"
+        + "".join("         %s  ->  %r\n" % (site, name) for site, name in sorted(unknown_class)[:20])
+        + "       Every entry must open with one of %s, because each class is pinned\n"
+        "       to a different thing and an unclassed entry is pinned to nothing."
+        % (", ".join(KNOWN_CLASSES),),
+        file=sys.stderr,
+    )
+    failed = True
+
+# --- unreachable: DERIVED from EXPECTED_SKIPS -----------------------------
+try:
+    with open(runner_src, encoding="utf-8") as handle:
+        source = handle.read()
+except OSError as error:
+    print(
+        "ERROR: could not read %s: %s\n"
+        "       The `unreachable` class is DERIVED from its EXPECTED_SKIPS map, so an\n"
+        "       unreadable runner is missing EVIDENCE, not evidence of absence."
+        % (runner_src, error),
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+start = source.find("val EXPECTED_SKIPS")
+skip_fixtures = set()
+if start != -1:
+    open_paren = source.find("mapOf(", start)
+    if open_paren != -1:
+        depth, index = 0, open_paren + len("mapOf(") - 1
+        while index < len(source):
+            if source[index] == "(":
+                depth += 1
+            elif source[index] == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            index += 1
+        body = source[open_paren:index]
+        skip_fixtures = {name for name in re.findall(r'"([^"]+\.json)"\s*to\b', body, re.S)}
+
+if not skip_fixtures:
+    print(
+        "ERROR: found no EXPECTED_SKIPS entries in %s.\n"
+        "       The `unreachable` class is derived from that map. An empty parse would\n"
+        "       make the derivation vacuously satisfied by an empty ledger class, which\n"
+        "       is the shape this rung exists to refuse (#lzvacuousrun). The map was\n"
+        "       renamed or reshaped — update this reader, do not type the set in."
+        % runner_src,
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+# Every site of a skipped fixture that the run did not bind. The replay stops
+# before any block in these fixtures, so this is the whole unreachable set.
+derived_unreachable = {
+    site
+    for site in run_unbound
+    if site.split("|", 1)[0].startswith("reactive-graph/")
+    and site.split("|", 1)[0].split("/")[-1] in skip_fixtures
+}
+
+if by_class["unreachable"] != derived_unreachable:
+    only_ledger = sorted(by_class["unreachable"] - derived_unreachable)
+    only_derived = sorted(derived_unreachable - by_class["unreachable"])
+    print(
+        "ERROR: the `unreachable` ledger class does not match what EXPECTED_SKIPS\n"
+        "       derives. It carries %d site(s); %s names %d fixture(s) whose unbound\n"
+        "       sites number %d.\n"
+        "       This class is DERIVED, so there is nothing to re-pin: either a fixture\n"
+        "       left EXPECTED_SKIPS because its op is now modelled — in which case its\n"
+        "       entries here are folklore and must go, and the sites must be BOUND —\n"
+        "       or a fixture entered it and its sites belong in this class."
+        % (len(by_class["unreachable"]), runner_src, len(skip_fixtures), len(derived_unreachable)),
+        file=sys.stderr,
+    )
+    if only_ledger:
+        print("       ledgered `unreachable`, but EXPECTED_SKIPS does not cover them:", file=sys.stderr)
+        for site in only_ledger[:20]:
+            print("         " + site, file=sys.stderr)
+    if only_derived:
+        print("       unreachable per EXPECTED_SKIPS, but not ledgered as such:", file=sys.stderr)
+        for site in only_derived[:20]:
+            print("         " + site, file=sys.stderr)
+    failed = True
+
+# --- bind-pending: an EQUALITY against a pinned debt ----------------------
+# Derived from the RUN, not from the ledger, so a ledger edit cannot satisfy it
+# on its own: these are the sites nothing bound and EXPECTED_SKIPS does not
+# excuse.
+run_bind_pending = run_unbound - derived_unreachable
+if len(run_bind_pending) != pinned:
+    if len(run_bind_pending) > pinned:
+        print(
+            "ERROR: %d assertion-block site(s) are reachable, unbound, and not covered by\n"
+            "       EXPECTED_SKIPS; the pin is %d. The ledger has GROWN.\n"
+            "       This number is a DEBT and may only ever be re-pinned DOWNWARD. A new\n"
+            "       area whose blocks nothing binds is a finding to report, not a number\n"
+            "       to raise — bind the new sites, or say plainly that a whole area went\n"
+            "       unbound and why."
+            % (len(run_bind_pending), pinned),
+            file=sys.stderr,
+        )
+        for site in sorted(run_bind_pending - by_class["bind-pending"])[:20]:
+            print("         new: " + site, file=sys.stderr)
+    else:
+        print(
+            "ERROR: %d assertion-block site(s) are reachable, unbound, and not covered by\n"
+            "       EXPECTED_SKIPS; the pin is %d. %d site(s) have been BOUND since the pin\n"
+            "       was set.\n"
+            "       That is the direction this number is supposed to move, so re-pin it to\n"
+            "       %d in the SAME commit as the migration. Failing here rather than\n"
+            "       accepting the shrink is deliberate: a ceiling that quietly absorbed\n"
+            "       progress would also quietly absorb a regression back up to it."
+            % (len(run_bind_pending), pinned, pinned - len(run_bind_pending), len(run_bind_pending)),
+            file=sys.stderr,
+        )
+        for site in sorted(by_class["bind-pending"] - run_bind_pending)[:20]:
+            print("         now bound: " + site, file=sys.stderr)
+    failed = True
+
+if failed:
+    sys.exit(1)
+
+print(
+    "%d unreachable (derived from %d EXPECTED_SKIPS fixture(s), no number to re-pin) "
+    "and %d bind-pending (pinned EQUAL, shrink-only)"
+    % (len(derived_unreachable), len(skip_fixtures), len(run_bind_pending))
+)
+PY
+)"
+block_classes=""
+if [ -f "$BLOCK_LEDGER" ] && [ -f "$UNBOUND_LEDGER" ]; then
+  if ! block_classes="$(
+    python3 -c "$BLOCK_CLASS_PY" "$BLOCK_LEDGER" "$UNBOUND_LEDGER" \
+      "$REACTIVE_GRAPH_RUNNER" "$MIN_BIND_PENDING"
+  )"; then
+    missing=$((missing + 1))
+  fi
+fi
+
 # --- rung 0, MAGNITUDE: how many blocks should that walk have found? ---------
 #
 # Everything above is a comparison between two RUNTIME facts: the blocks the
@@ -1291,8 +1509,8 @@ echo "scenario coverage OK: $sc_replayed/$sc_total scenarios across $sc_fixtures
      "these scenarios really ran)"
 echo "assertion-block coverage OK: $bound_block_count/$blocks_total assertion-block site(s)" \
      "opened by the suite were BOUND to a tracker ($excused_block_count ledgered per SITE in" \
-     "$UNBOUND_LEDGER, both stale directions enforced; runtime ledger — a block nobody binds" \
-     "is silent to every other rung; $block_magnitude)"
+     "$UNBOUND_LEDGER, both stale directions enforced — $block_classes; runtime ledger — a" \
+     "block nobody binds is silent to every other rung; $block_magnitude)"
 # Printed so MIN_OPENED_AREAS can be re-pinned from a CI log instead of being
 # guessed or probed locally — a floor nobody can read the real number for is a
 # floor that drifts.
