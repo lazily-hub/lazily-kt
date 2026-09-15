@@ -1006,6 +1006,7 @@ lossless-tree
   membership
   message-passing
   presence
+  protobuf
   rateshape
   reactive-graph
   receipts
@@ -1019,6 +1020,12 @@ lossless-tree
   temporal
   windowing
 )
+
+# Areas this binding deliberately opens NOTHING from. Together with
+# REQUIRED_AREAS this must partition the canonical corpus exactly; the guard
+# below checks both directions and rejects overlap. Kotlin currently opens every
+# area, so the honest complement is empty rather than an omitted assertion.
+EXCUSED_AREAS=()
 
 if [ ! -s "$MANIFEST" ]; then
   echo "FAIL: no conformance manifest at $MANIFEST." >&2
@@ -1047,6 +1054,43 @@ echo "       The lazily-spec checkout at $SPEC_DIR is stale or partial; coverage
 echo "       computed against it would silently understate the real corpus." >&2
 missing=$((missing + 1))
 fi
+done
+
+# The two area arrays must PARTITION the corpus. Without this check a new corpus
+# directory can sit in neither array, making every array-driven coverage rung
+# blind to it while the guard still reports success. `ipc` is the one deliberate
+# non-directory area: its fixtures live at the corpus root and are matched above.
+corpus_areas="$(cd "$SPEC_DIR" && find . -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)"
+while IFS= read -r area; do
+  [ -n "$area" ] || continue
+  listed=0
+  for known in "${REQUIRED_AREAS[@]}" "${EXCUSED_AREAS[@]}"; do
+    if [ "$known" = "$area" ]; then listed=1; break; fi
+  done
+  if [ "$listed" -eq 0 ]; then
+    echo "ERROR: conformance area '$area' is in neither REQUIRED_AREAS nor EXCUSED_AREAS." >&2
+    echo "       Classify it explicitly so corpus growth cannot bypass the audit." >&2
+    missing=$((missing + 1))
+  fi
+done <<< "$corpus_areas"
+
+for area in "${REQUIRED_AREAS[@]}" "${EXCUSED_AREAS[@]}"; do
+  [ "$area" = "ipc" ] && continue
+  if [ ! -d "$SPEC_DIR/$area" ]; then
+    echo "ERROR: area '$area' is listed here but is not in the canonical corpus." >&2
+    echo "       It was renamed or removed upstream — prune the stale entry." >&2
+    missing=$((missing + 1))
+  fi
+done
+
+for required in "${REQUIRED_AREAS[@]}"; do
+  for excused in "${EXCUSED_AREAS[@]}"; do
+    if [ "$required" = "$excused" ]; then
+      echo "ERROR: conformance area '$required' is both REQUIRED and EXCUSED." >&2
+      echo "       The two arrays must be disjoint to form an exact partition." >&2
+      missing=$((missing + 1))
+    fi
+  done
 done
 
 total=0
@@ -1924,23 +1968,12 @@ fi
 #   recur elsewhere. Both come off the one walk below; neither is a floor.
 #
 # NOTE on this binding's walk, and on reading it against lazily-spec. The walk
-# below is now the widest in the family's vocabulary: all FIVE tracked names at
-# every depth, objects AND plain-object array elements
-# (#lzktblockwalk, #lzarrayelementsites). `lazily-spec/scripts/check-corpus-
-# floors.mjs --report-blocks` prints that as the third row per binding, and for
-# lazily-kt it reads sites=743 distinct-digests=634 over 147 fixtures.
-#
-# This script derives 749 / 640 over 148, and the six-site difference is NOT
-# drift. The spec's opened set for kt is corpus-minus-KNOWN_UNCOVERED narrowed
-# again by REQUIRED_AREAS, and REQUIRED_AREAS scopes the AUDIT rather than the
-# set the suite opens — check-corpus-floors.mjs says so itself and declines to
-# derive a floor for kt for exactly that reason, calling its opened count a lower
-# bound. The one fixture in the gap is `protobuf/graph_boundary_traces.json`,
-# whose area is not required but which ProtobufGraphBoundaryConformanceTest
-# opens; it carries 6 sites / 6 digests and no array-valued tracked key, so both
-# derivations move by the SAME +12 / +12 when the walk widens. Pairing
-# REQUIRED_AREAS with an enforced EXCUSED_AREAS complement, as lazily-cpp does,
-# is what would close that gap; it is separate work.
+# below is the widest in the family's vocabulary: all FIVE tracked names at every
+# depth, objects AND plain-object array elements (#lzktblockwalk,
+# #lzarrayelementsites). The REQUIRED_AREAS / EXCUSED_AREAS partition above now
+# models the suite's opened set exactly, including the protobuf fixture, so
+# `lazily-spec/scripts/check-corpus-floors.mjs --report-blocks` independently
+# derives the same 749 sites / 640 distinct digests over 148 fixtures.
 #
 # The numbers here stay DERIVED either way. They are computed under the walk this
 # binding runs, so they pin it against detaching and they move on their own when
