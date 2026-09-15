@@ -50,7 +50,7 @@
 #                  each entry is a runner that needs migrating, not a gap that was
 #                  investigated and dismissed. Before this walk widened, these 540
 #                  sites were not excused — they were INVISIBLE, outside a rung
-#                  that saw 18 of the corpus's 737. An entry is a debt that is now
+#                  that saw 18 of the corpus's 749. An entry is a debt that is now
 #                  counted; do not read it as a waiver.
 #
 #                  Migrated so far (#lzktbindpending): ipc/root 1, familysync 3,
