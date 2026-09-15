@@ -45,7 +45,7 @@
 #   bind-pending   the block IS reachable and the runner DOES assert its keys, by
 #                  direct indexing rather than through AssertionKeys. So the keys
 #                  are compared, but nothing books the bind and nothing enforces
-#                  the unread/unasserted/key-set rungs over them. 512 sites across
+#                  the unread/unasserted/key-set rungs over them. 496 sites across
 #                  13 areas. This is PHASE 2 of #lzktblockwalk and it is NOT done:
 #                  each entry is a runner that needs migrating, not a gap that was
 #                  investigated and dismissed. Before this walk widened, these 540
@@ -54,7 +54,8 @@
 #                  counted; do not read it as a waiver.
 #
 #                  Migrated so far (#lzktbindpending): ipc/root 1, familysync 3,
-#                  protobuf 6, membership 9, message-passing 9 — 28 sites.
+#                  protobuf 6, membership 9, message-passing 9, lossless-tree 16
+#                  — 44 sites.
 #
 #                  There is NO typed count of this class any more. A count that
 #                  mirrors the population the set equality already fixes carries no
@@ -94,7 +95,7 @@ reactive-graph/merge_per_settled_cone_not_per_write.json|steps[4].expect	unreach
 reactive-graph/merge_per_settled_cone_not_per_write.json|steps[5].expect	unreachable: replay stops on merge_cell, so no tracker reaches this step (ReactiveGraphConformanceTest.EXPECTED_SKIPS)
 reactive-graph/merge_per_settled_cone_not_per_write.json|steps[6].expect	unreachable: replay stops on merge_cell, so no tracker reaches this step (ReactiveGraphConformanceTest.EXPECTED_SKIPS)
 
-# --- bind-pending: phase 2 of #lzktblockwalk (512) ---
+# --- bind-pending: phase 2 of #lzktblockwalk (496) ---
 collections/cellmap_atomic_move.json|steps[0].expected	bind-pending: the collections runner asserts this block's keys by direct indexing, not through AssertionKeys (#lzktblockwalk phase 2)
 collections/cellmap_atomic_move.json|steps[1].expected	bind-pending: the collections runner asserts this block's keys by direct indexing, not through AssertionKeys (#lzktblockwalk phase 2)
 collections/cellmap_atomic_move.json|steps[2].expected	bind-pending: the collections runner asserts this block's keys by direct indexing, not through AssertionKeys (#lzktblockwalk phase 2)
@@ -320,22 +321,6 @@ ingress/ingress_reorder_and_duplication.json|steps[4].expected	bind-pending: the
 ingress/ingress_reorder_window_overflow.json|steps[0].expected	bind-pending: the ingress runner asserts this block's keys by direct indexing, not through AssertionKeys (#lzktblockwalk phase 2)
 ingress/ingress_reorder_window_overflow.json|steps[1].expected	bind-pending: the ingress runner asserts this block's keys by direct indexing, not through AssertionKeys (#lzktblockwalk phase 2)
 ingress/ingress_reorder_window_overflow.json|steps[2].expected	bind-pending: the ingress runner asserts this block's keys by direct indexing, not through AssertionKeys (#lzktblockwalk phase 2)
-lossless-tree/apply_update_advances_counter.json|scenarios[0].expect	bind-pending: the lossless-tree runner asserts this block's keys by direct indexing, not through AssertionKeys (#lzktblockwalk phase 2)
-lossless-tree/concurrent_conflict_preserves_text.json|scenarios[0].expect	bind-pending: the lossless-tree runner asserts this block's keys by direct indexing, not through AssertionKeys (#lzktblockwalk phase 2)
-lossless-tree/concurrent_insert_same_parent.json|scenarios[0].expect	bind-pending: the lossless-tree runner asserts this block's keys by direct indexing, not through AssertionKeys (#lzktblockwalk phase 2)
-lossless-tree/concurrent_reorder_and_leaf_edit.json|scenarios[0].expect	bind-pending: the lossless-tree runner asserts this block's keys by direct indexing, not through AssertionKeys (#lzktblockwalk phase 2)
-lossless-tree/exact_roundtrip.json|scenarios[0].expect	bind-pending: the lossless-tree runner asserts this block's keys by direct indexing, not through AssertionKeys (#lzktblockwalk phase 2)
-lossless-tree/invalid_source_roundtrip.json|scenarios[0].expect	bind-pending: the lossless-tree runner asserts this block's keys by direct indexing, not through AssertionKeys (#lzktblockwalk phase 2)
-lossless-tree/invalid_source_roundtrip.json|scenarios[1].expect	bind-pending: the lossless-tree runner asserts this block's keys by direct indexing, not through AssertionKeys (#lzktblockwalk phase 2)
-lossless-tree/non_contiguous_anti_entropy.json|scenarios[0].expect	bind-pending: the lossless-tree runner asserts this block's keys by direct indexing, not through AssertionKeys (#lzktblockwalk phase 2)
-lossless-tree/non_contiguous_anti_entropy.json|scenarios[1].expect	bind-pending: the lossless-tree runner asserts this block's keys by direct indexing, not through AssertionKeys (#lzktblockwalk phase 2)
-lossless-tree/one_leaf_edit_delta.json|scenarios[0].expect	bind-pending: the lossless-tree runner asserts this block's keys by direct indexing, not through AssertionKeys (#lzktblockwalk phase 2)
-lossless-tree/one_leaf_edit_delta.json|scenarios[1].expect	bind-pending: the lossless-tree runner asserts this block's keys by direct indexing, not through AssertionKeys (#lzktblockwalk phase 2)
-lossless-tree/out_of_order_delivery_buffers.json|scenarios[0].expect	bind-pending: the lossless-tree runner asserts this block's keys by direct indexing, not through AssertionKeys (#lzktblockwalk phase 2)
-lossless-tree/split_merge.json|scenarios[0].expect	bind-pending: the lossless-tree runner asserts this block's keys by direct indexing, not through AssertionKeys (#lzktblockwalk phase 2)
-lossless-tree/split_merge.json|scenarios[1].expect	bind-pending: the lossless-tree runner asserts this block's keys by direct indexing, not through AssertionKeys (#lzktblockwalk phase 2)
-lossless-tree/token_trivia_preservation.json|scenarios[0].expect	bind-pending: the lossless-tree runner asserts this block's keys by direct indexing, not through AssertionKeys (#lzktblockwalk phase 2)
-lossless-tree/token_trivia_preservation.json|scenarios[1].expect	bind-pending: the lossless-tree runner asserts this block's keys by direct indexing, not through AssertionKeys (#lzktblockwalk phase 2)
 presence/awareness.json|steps[0].expected	bind-pending: the presence runner asserts this block's keys by direct indexing, not through AssertionKeys (#lzktblockwalk phase 2)
 presence/awareness.json|steps[1].expected	bind-pending: the presence runner asserts this block's keys by direct indexing, not through AssertionKeys (#lzktblockwalk phase 2)
 presence/awareness.json|steps[2].expected	bind-pending: the presence runner asserts this block's keys by direct indexing, not through AssertionKeys (#lzktblockwalk phase 2)

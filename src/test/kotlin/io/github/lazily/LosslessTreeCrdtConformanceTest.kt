@@ -2,7 +2,6 @@ package io.github.lazily
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -37,28 +36,33 @@ class LosslessTreeCrdtConformanceTest {
         expect: JsonObject,
         scenario: String,
     ) {
-        expect["render"]?.jsonPrimitive?.content?.let {
-            assertEquals(it, world.replicas.getValue("a").render(), "$scenario: render on `a`")
+        val assertions = AssertionKeys("$scenario expect", expect)
+
+        assertions.assertString("render") {
+            world.replicas.getValue("a").render()
         }
-        expect["render_on"]?.jsonObject?.forEach { (name, text) ->
-            assertEquals(text.jsonPrimitive.content, world.replicas.getValue(name).render(), "$scenario: render on `$name`")
+        assertions.sub("render_on") { renders ->
+            for (name in renders.keys) {
+                renders.assertString(name) { world.replicas.getValue(name).render() }
+            }
         }
-        expect["live_nodes"]?.jsonPrimitive?.int?.let {
-            assertEquals(it, world.replicas.getValue("a").liveNodeCount(), "$scenario: live_nodes on `a`")
+        assertions.assertInt("live_nodes") {
+            world.replicas.getValue("a").liveNodeCount()
         }
-        expect["converged"]?.jsonArray?.let { names ->
-            val labels = names.map { it.jsonPrimitive.content }
+        assertions.assertKeyWith("converged") { names ->
+            val labels = names.jsonArray.map { it.jsonPrimitive.content }
             val first = world.replicas.getValue(labels[0]).render()
             for (name in labels.drop(1)) {
                 assertEquals(first, world.replicas.getValue(name).render(), "$scenario: `${labels[0]}`/`$name` should converge")
             }
         }
+        assertions.requireAllSatisfied()
     }
 
     private fun runFixture(name: String) {
         val fixture = loadFixture(name)
         for ((i, scenario) in ConformanceScenarios.indexed("lossless-tree/$name", fixture)) {
-            val label = "$name[${ConformanceScenarios.idOf(scenario, i).value}]"
+            val label = "lossless-tree/$name[${ConformanceScenarios.idOf(scenario, i).value}]"
             val seed = scenario.getValue("seed").jsonObject
             val peer = seed.getValue("peer").jsonPrimitive.long
             val world = LosslessTreeReplayWorld()
