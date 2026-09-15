@@ -451,7 +451,10 @@ RULES = [
     (
         "empty-default",
         "a fixture read defaulted to an empty collection",
-        re.compile(r"\?: ?empty(?:List|Set|Map)(?: ?<[^<>{}]*>)? ?\(\)"),
+        re.compile(
+            r"\?: ?(?:[A-Za-z_][A-Za-z0-9_]* ?\. ?)*"
+            r"empty(?:List|Set|Map)\b(?: ?<[^()]*>)? ?\(\)"
+        ),
     ),
     (
         "flag-default",
@@ -617,7 +620,31 @@ def hits(text):
     return found
 
 
+def scanner_self_test():
+    """Prove the normalized matcher sees the spellings that broke earlier rungs."""
+    probes = [
+        ("val x = block ?: emptyMap<String, Boolean>()", "empty-default"),
+        ("val x = block ?: \n emptyList < String > ()", "empty-default"),
+        (
+            "val x = block ?: kotlin.collections.emptyMap < String, List<Boolean> > ()",
+            "empty-default",
+        ),
+        ("val x = value as?   Boolean", "boolean-cast"),
+    ]
+    failures = []
+    for source, expected in probes:
+        observed = {rule for _, rule, _, _ in hits(source)}
+        if expected not in observed:
+            failures.append("%s missed by %s" % (source.replace("\n", "\\n"), expected))
+    return failures
+
+
 def main(argv):
+    probe_failures = scanner_self_test()
+    if probe_failures:
+        for failure in probe_failures:
+            print("ERROR: flag-hygiene scanner self-test: %s" % failure, file=sys.stderr)
+        return 2
     allow = set()
     for entry in argv[1].split(","):
         entry = entry.strip()
