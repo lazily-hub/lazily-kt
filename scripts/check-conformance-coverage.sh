@@ -1454,6 +1454,19 @@ if [ "$sc_fixtures" -eq 0 ] || [ "$sc_total" -eq 0 ]; then
   missing=$((missing + 1))
 fi
 
+# Positive runtime evidence for scenario replay magnitude. The exact per-id set
+# checks above remain the primary proof; this floor independently refuses a run
+# whose scenario recorder silently shrank while still producing a non-empty
+# ledger. Derived from the completed gate's own 157/157 report. Override only for
+# the n+1 exactness probe; never lower it to repair a red run.
+MIN_SCENARIOS="${MIN_SCENARIOS:-157}"
+if [ "$sc_replayed" -lt "$MIN_SCENARIOS" ]; then
+  echo "ERROR: the runtime ledger records only $sc_replayed replayed scenario(s)," >&2
+  echo "       expected >= MIN_SCENARIOS=$MIN_SCENARIOS. The replay population shrank;" >&2
+  echo "       do not lower the floor to repair this run (#lzscenariofloormissing)." >&2
+  missing=$((missing + 1))
+fi
+
 # --- rung 0: was every fixture-level `assertions` block BOUND to a tracker? ---
 #
 # Every other rung here is scoped to a block a runner ALREADY OPENED. The unread
