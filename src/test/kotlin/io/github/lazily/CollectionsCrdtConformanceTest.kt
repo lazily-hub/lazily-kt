@@ -579,7 +579,7 @@ class CollectionsCrdtConformanceTest {
     private fun semFold(name: String): SemFold<Int, Int> =
         when (name) {
             "sum" -> SemFold { v, kids -> v + kids.sum() }
-            "count_positive" -> SemFold { v, kids -> (if (v < 0) 1 else 0) + kids.sum() }
+            "count_positive" -> SemFold { v, kids -> (if (v > 0) 1 else 0) + kids.sum() }
             else -> error("unknown semtree fold: $name")
         }
 
