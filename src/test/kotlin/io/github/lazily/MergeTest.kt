@@ -1,13 +1,17 @@
 package io.github.lazily
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFails
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -18,7 +22,13 @@ import kotlin.test.assertTrue
  * identically to lazily-rs / lazily-js / lazily-py / lazily-go / lazily-zig.
  */
 class MergeTest {
-    private fun loadFixture(name: String): String = ConformanceFixtures.read("collections/$name")
+    private var fixtureOverride: ((String) -> String)? = null
+    private var expectationTransform: (String, JsonObject) -> JsonObject = { _, expected -> expected }
+    private var bindCanonicalBlocks = true
+    private var skippedSite: String? = null
+    private var duplicatedSite: String? = null
+
+    private fun loadFixture(name: String): String = fixtureOverride?.invoke(name) ?: ConformanceFixtures.read("collections/$name")
 
     @Test
     fun every_policy_is_associative() {
@@ -108,7 +118,10 @@ class MergeTest {
 
     @Test
     fun mergecell_algebra_fixture() {
+        val fixturePath = "collections/mergecell_algebra.json"
         val fixture = Json.parseToJsonElement(loadFixture("mergecell_algebra.json")).jsonObject
+        val declaredSites = ConformanceFixtures.blockSitesOf(fixturePath, fixture).keys
+        val visitedSites = linkedSetOf<String>()
         val byName = mapOf("KeepLatest" to keepLatest<Long>(), "Sum" to sum(), "Max" to max())
         var seen = 0
         // `collections/mergecell_algebra.json` is the one fixture in the corpus
@@ -116,7 +129,7 @@ class MergeTest {
         // the ledger records them by positional fallback (`#0`/`#1`/`#2`) and the
         // guard reports that fallback rather than accepting it silently
         // (#lzscenariocoverage).
-        for (scenario in ConformanceScenarios.of("collections/mergecell_algebra.json", fixture)) {
+        for ((scenarioIndex, scenario) in ConformanceScenarios.indexed(fixturePath, fixture)) {
             val policy = byName[scenario["policy"]!!.jsonPrimitive.content]!!
             val flags = scenario["flags"]!!.jsonObject
             assertEquals(flags["commutative"]!!.jsonPrimitive.boolean, policy.commutative)
@@ -130,17 +143,124 @@ class MergeTest {
                 runs++
                 null
             }
-            for (stepEl in scenario["steps"]!!.jsonArray) {
+            for ((stepIndex, stepEl) in scenario["steps"]!!.jsonArray.withIndex()) {
                 val step = stepEl.jsonObject
                 val before = runs
                 mc.merge(step["merge"]!!.jsonPrimitive.int.toLong())
                 val fired = runs > before
                 val expected = step["expected"]!!.jsonObject
-                assertEquals(expected["value"]!!.jsonPrimitive.int.toLong(), mc.get(), policy.name)
-                assertEquals(expected["invalidates"]!!.jsonPrimitive.boolean, fired, policy.name)
+                val siteId = "$fixturePath|scenarios[$scenarioIndex].steps[$stepIndex].expected"
+                val skip = siteId == skippedSite
+                if (!skip) {
+                    check(visitedSites.add(siteId)) { "$siteId: assertion block visited more than once" }
+                    if (siteId == duplicatedSite) {
+                        check(visitedSites.add(siteId)) { "$siteId: assertion block visited more than once" }
+                    }
+                }
+                val keys =
+                    AssertionKeys(
+                        siteId,
+                        if (skip) JsonObject(emptyMap()) else expectationTransform(siteId, expected),
+                        fixturePath,
+                        rungZeroBind = bindCanonicalBlocks,
+                    )
+                keys.assertLong("value") { mc.get() }
+                keys.assertBoolean("invalidates") { fired }
+                keys.requireAllSatisfied()
             }
             seen++
         }
         assertEquals(3, seen)
+        assertEquals(declaredSites, visitedSites, "$fixturePath: exact assertion-block sites")
+        assertEquals(15, visitedSites.size, "$fixturePath: assertion-block site pin")
+    }
+
+    @Test
+    fun `merge expectation families reject fixture value mutations`() {
+        data class Mutation(
+            val family: String,
+            val siteId: String,
+            val replacement: String,
+        )
+
+        val fixturePath = "collections/mergecell_algebra.json"
+        val mutations =
+            listOf(
+                Mutation("value", "$fixturePath|scenarios[0].steps[0].expected", "999"),
+                Mutation("invalidates", "$fixturePath|scenarios[0].steps[0].expected", "false"),
+            )
+        assertEquals(setOf("value", "invalidates"), mutations.map { it.family }.toSet(), "merge mutation matrix")
+
+        try {
+            val raw = Files.readString(ConformanceFixtures.path(fixturePath))
+            fixtureOverride = { raw }
+            bindCanonicalBlocks = false
+            for (mutation in mutations) {
+                val replacement: JsonElement = Json.parseToJsonElement(mutation.replacement)
+                val canonical = ConformanceFixtures.blockSitesOf(fixturePath, raw).getValue(mutation.siteId)
+                assertTrue(canonical.getValue(mutation.family) != replacement, "${mutation.family}: mutation changes value")
+                var hits = 0
+                expectationTransform = { siteId, expected ->
+                    if (siteId == mutation.siteId) {
+                        hits++
+                        JsonObject(expected + (mutation.family to replacement))
+                    } else {
+                        expected
+                    }
+                }
+                val failure = assertFails("${mutation.family}: changed fixture value survived production replay") {
+                    mergecell_algebra_fixture()
+                }
+                assertEquals(1, hits, "${mutation.family}: target site visited exactly once")
+                assertTrue(
+                    failure.message.orEmpty().contains(mutation.family),
+                    "${mutation.family}: production failure must name family, got ${failure.message}",
+                )
+            }
+        } finally {
+            resetMutationMode()
+        }
+    }
+
+    @Test
+    fun `merge structural guards reject unknown skipped duplicate and repeated twin sites`() {
+        val fixturePath = "collections/mergecell_algebra.json"
+        val raw = Files.readString(ConformanceFixtures.path(fixturePath))
+        val twinSite = "$fixturePath|scenarios[2].steps[1].expected"
+        try {
+            fixtureOverride = { raw }
+            bindCanonicalBlocks = false
+
+            expectationTransform = { siteId, expected ->
+                if (siteId == "$fixturePath|scenarios[0].steps[0].expected") {
+                    JsonObject(expected + ("unknown_top_level" to Json.parseToJsonElement("true")))
+                } else {
+                    expected
+                }
+            }
+            assertFails("unknown top-level expectation key must fail") { mergecell_algebra_fixture() }
+
+            expectationTransform = { _, expected -> expected }
+            skippedSite = twinSite
+            val skipped = assertFails("skipping one repeated-content twin must fail exact-site equality") {
+                mergecell_algebra_fixture()
+            }
+            assertTrue(skipped.message.orEmpty().contains("exact assertion-block sites"), skipped.message)
+
+            skippedSite = null
+            duplicatedSite = twinSite
+            val duplicated = assertFails("duplicate structural site must fail") { mergecell_algebra_fixture() }
+            assertTrue(duplicated.message.orEmpty().contains("visited more than once"), duplicated.message)
+        } finally {
+            resetMutationMode()
+        }
+    }
+
+    private fun resetMutationMode() {
+        fixtureOverride = null
+        expectationTransform = { _, expected -> expected }
+        bindCanonicalBlocks = true
+        skippedSite = null
+        duplicatedSite = null
     }
 }

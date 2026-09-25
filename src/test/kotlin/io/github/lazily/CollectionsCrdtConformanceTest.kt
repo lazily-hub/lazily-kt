@@ -2,6 +2,7 @@ package io.github.lazily
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
@@ -11,8 +12,10 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
+import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFails
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -29,9 +32,53 @@ import kotlin.test.assertTrue
 class CollectionsCrdtConformanceTest {
     private val json = Json
 
+    private var fixtureOverride: ((String) -> JsonObject)? = null
+    private var expectationTransform: (String, JsonObject) -> JsonObject = { _, expected -> expected }
+    private var bindCanonicalBlocks = true
+
     private fun loadFixture(name: String): JsonObject {
+        fixtureOverride?.let { return it(name) }
         val text = ConformanceFixtures.read("collections/$name")
         return json.parseToJsonElement(text).jsonObject
+    }
+
+    private fun assertionKeys(
+        fixturePath: String,
+        sitePath: String,
+        expected: JsonObject,
+        visitedSites: MutableSet<String>,
+    ): AssertionKeys {
+        val siteId = "$fixturePath|$sitePath"
+        check(visitedSites.add(siteId)) { "$siteId: assertion block visited more than once" }
+        return AssertionKeys(
+            siteId,
+            expectationTransform(siteId, expected),
+            fixturePath,
+            rungZeroBind = bindCanonicalBlocks,
+        )
+    }
+
+    private fun assertExactSites(
+        fixturePath: String,
+        fixture: JsonObject,
+        expectedCount: Int,
+        visitedSites: Set<String>,
+    ) {
+        val declared = ConformanceFixtures.blockSitesOf(fixturePath, fixture).keys
+        assertEquals(expectedCount, declared.size, "$fixturePath: assertion-block site pin")
+        assertEquals(declared, visitedSites, "$fixturePath: exact assertion-block sites")
+    }
+
+    private fun requireExactlyOneAction(
+        step: JsonObject,
+        standalone: Set<String>,
+        where: String,
+    ) {
+        val actions = standalone.filter(step::containsKey) + listOfNotNull("op".takeIf(step::containsKey))
+        check(actions.size == 1) { "$where: expected exactly one recognized action, got $actions in $step" }
+        check(!step.containsKey("on") || step.containsKey("op")) {
+            "$where: `on` is only a target modifier for an `op`, never an action by itself"
+        }
     }
 
     // -- StableId -----------------------------------------------------------
@@ -63,65 +110,86 @@ class CollectionsCrdtConformanceTest {
 
     @Test
     fun `conformance stableid alignment`() {
+        val fixturePath = "collections/stableid_alignment.json"
         val fixture = loadFixture("stableid_alignment.json")
-        for (s in ConformanceScenarios.of("collections/stableid_alignment.json", fixture)) {
+        val visitedSites = linkedSetOf<String>()
+        for ((scenarioIndex, s) in ConformanceScenarios.indexed(fixturePath, fixture)) {
             val name = s.getValue("name").jsonPrimitive.content
+            val expect = s.getValue("expect").jsonObject
+            val keys = assertionKeys(fixturePath, "scenarios[$scenarioIndex].expect", expect, visitedSites)
 
             // Scenario 1 & 2: key equality over a single `blocks` list.
             val blocksEl = s["blocks"]
             if (blocksEl != null) {
                 val blocks = blocksEl.jsonArray.map { block(it.jsonObject) }
-                val keys = blocks.map { blockKey(it) }
-                val expect = s.getValue("expect").jsonObject
-                expect["key_equal"]?.jsonArray?.forEach { pair ->
-                    val (i, j) = pair.jsonArray.map { it.jsonPrimitive.int }
-                    assertEquals(keys[i], keys[j], "$name: key_equal[$i,$j]")
+                val blockKeys = blocks.map { blockKey(it) }
+                keys.assertKeyWith("key_equal") { rawPairs ->
+                    rawPairs.jsonArray.forEach { pair ->
+                        val (i, j) = pair.jsonArray.map { it.jsonPrimitive.int }
+                        assertEquals(blockKeys[i], blockKeys[j], "$name: key_equal[$i,$j]")
+                    }
                 }
-                expect["key_not_equal"]?.jsonArray?.forEach { pair ->
-                    val (i, j) = pair.jsonArray.map { it.jsonPrimitive.int }
-                    assertFalse(keys[i] == keys[j], "$name: key_not_equal[$i,$j]")
+                keys.assertKeyWith("key_not_equal") { rawPairs ->
+                    rawPairs.jsonArray.forEach { pair ->
+                        val (i, j) = pair.jsonArray.map { it.jsonPrimitive.int }
+                        assertFalse(blockKeys[i] == blockKeys[j], "$name: key_not_equal[$i,$j]")
+                    }
                 }
+                keys.requireAllSatisfied()
                 continue
             }
 
             val oldBlocks = blocksOf(s, "old")
             val newBlocks = blocksOf(s, "new")
-            val expect = s.getValue("expect").jsonObject
 
             // Scenario 6: assign_stable_keys flows identity through edit.
-            val keyFlow = expect["new_key_equals_old_key"]
-            if (keyFlow != null) {
+            if (keys.has("new_key_equals_old_key")) {
                 val oldKeys = oldBlocks.map { blockKey(it).asString() }
                 val newKeys = assignStableKeys(oldBlocks, newBlocks)
-                keyFlow.jsonArray.forEach { pair ->
-                    val (ni, oi) = pair.jsonArray.map { it.jsonPrimitive.int }
-                    assertEquals(oldKeys[oi], newKeys[ni], "$name: new[$ni] key == old[$oi] key")
+                keys.assertKeyWith("new_key_equals_old_key") { keyFlow ->
+                    keyFlow.jsonArray.forEach { pair ->
+                        val (ni, oi) = pair.jsonArray.map { it.jsonPrimitive.int }
+                        assertEquals(oldKeys[oi], newKeys[ni], "$name: new_key_equals_old_key[$ni,$oi]")
+                    }
                 }
+                keys.requireAllSatisfied()
                 continue
             }
 
             // Scenarios 3/4/5: align(old, new) → matches + removed.
             val alignment = align(oldBlocks, newBlocks)
-            expect["matches"]?.jsonArray?.forEachIndexed { ni, mEl ->
-                val want = mEl.jsonPrimitive.content
-                val got =
-                    when (val m = alignment.newMatches[ni]) {
-                        is Match.Same -> "Same:${m.old}"
-                        is Match.Edited -> "Edited:${m.old}"
-                        is Match.Inserted -> "Inserted"
+            val editedSimilarities = mutableListOf<Float>()
+            keys.assertKeyWith("matches") { rawMatches ->
+                rawMatches.jsonArray.forEachIndexed { ni, mEl ->
+                    val want = mEl.jsonPrimitive.content
+                    val got =
+                        when (val m = alignment.newMatches[ni]) {
+                            is Match.Same -> "Same:${m.old}"
+                            is Match.Edited -> "Edited:${m.old}"
+                            is Match.Inserted -> "Inserted"
+                        }
+                    assertEquals(want, got, "$name: matches[$ni]")
+                    if (want.startsWith("Edited")) {
+                        editedSimilarities += (alignment.newMatches[ni] as Match.Edited).similarity
                     }
-                assertEquals(want, got, "$name: match[$ni]")
-                if (want.startsWith("Edited")) {
-                    val sim = (alignment.newMatches[ni] as Match.Edited).similarity
-                    val min = expect["similarity_min"]?.jsonPrimitive?.floatOrNull
-                    if (min != null) assertTrue(sim >= min, "$name: similarity $sim >= $min")
                 }
             }
-            expect["removed"]?.jsonArray?.let { wantRemoved ->
-                val gotRemoved = alignment.removed
-                assertEquals(wantRemoved.map { it.jsonPrimitive.int }, gotRemoved, "$name: removed")
+            keys.assertKeyWith("similarity_min") { rawMin ->
+                val primitive = rawMin as? JsonPrimitive
+                check(primitive != null && !primitive.isString) { "$name: similarity_min must be a JSON number" }
+                val min = requireNotNull(primitive.floatOrNull) { "$name: similarity_min must be numeric" }
+                check(min.isFinite()) { "$name: similarity_min must be finite" }
+                assertTrue(editedSimilarities.isNotEmpty(), "$name: similarity_min has no edited match to constrain")
+                for (similarity in editedSimilarities) {
+                    assertTrue(similarity >= min, "$name: similarity_min requires $similarity >= $min")
+                }
             }
+            keys.assertKeyWith("removed") { wantRemoved ->
+                assertEquals(wantRemoved.jsonArray.map { it.jsonPrimitive.int }, alignment.removed, "$name: removed")
+            }
+            keys.requireAllSatisfied()
         }
+        assertExactSites(fixturePath, fixture, 6, visitedSites)
     }
 
     private val JsonPrimitive.floatOrNull: Float?
@@ -157,8 +225,10 @@ class CollectionsCrdtConformanceTest {
 
     @Test
     fun `conformance textcrdt convergence`() {
+        val fixturePath = "collections/textcrdt_convergence.json"
         val fixture = loadFixture("textcrdt_convergence.json")
-        for (s in ConformanceScenarios.of("collections/textcrdt_convergence.json", fixture)) {
+        val visitedSites = linkedSetOf<String>()
+        for ((scenarioIndex, s) in ConformanceScenarios.indexed(fixturePath, fixture)) {
             val name = s.getValue("name").jsonPrimitive.content
             val replicas = LinkedHashMap<String, TextRepl>()
             val (defaultName, defaultRepl) = seedTextCrdt(s)
@@ -166,6 +236,7 @@ class CollectionsCrdtConformanceTest {
 
             for (stepEl in s.getValue("steps").jsonArray) {
                 val step = stepEl.jsonObject
+                requireExactlyOneAction(step, setOf("fork", "clone", "merge"), "$name text step")
                 when {
                     step["fork"] != null -> {
                         val newName = step.getValue("fork").jsonPrimitive.content
@@ -188,39 +259,45 @@ class CollectionsCrdtConformanceTest {
                         applyTextOp(replicas.getValue(target).crdt, step)
                     }
                     step["op"] != null -> applyTextOp(replicas.getValue(defaultName).crdt, step)
+                    else -> error("$name: unrecognized text action $step")
                 }
             }
 
             val expect = s.getValue("expect").jsonObject
+            val keys = assertionKeys(fixturePath, "scenarios[$scenarioIndex].expect", expect, visitedSites)
             val primary = replicas.getValue(defaultName).crdt
-            expect["text"]?.let { assertEquals(it.jsonPrimitive.content, primary.text(), "$name: text") }
-            expect["len"]?.let { assertEquals(it.jsonPrimitive.int, primary.len(), "$name: len") }
-            expect["tombstone_count"]?.let {
-                assertEquals(it.jsonPrimitive.int, primary.tombstoneCount(), "$name: tombstone_count")
+            keys.assertString("text") { primary.text() }
+            keys.assertInt("len") { primary.len() }
+            keys.assertInt("tombstone_count") { primary.tombstoneCount() }
+            keys.assertKeyWith("a_starts_with") { want ->
+                assertTrue(primary.text().startsWith(want.jsonPrimitive.content), "$name: a_starts_with")
             }
-            expect["a_starts_with"]?.let {
-                assertTrue(primary.text().startsWith(it.jsonPrimitive.content), "$name: a_starts_with")
+            keys.assertKeyWith("a_ends_with") { want ->
+                assertTrue(primary.text().endsWith(want.jsonPrimitive.content), "$name: a_ends_with")
             }
-            expect["a_ends_with"]?.let {
-                assertTrue(primary.text().endsWith(it.jsonPrimitive.content), "$name: a_ends_with")
+            keys.assertKeyWith("texts_equal") { rawPairs ->
+                rawPairs.jsonArray.forEach { pair ->
+                    val (x, y) = pair.jsonArray.map { it.jsonPrimitive.content }
+                    assertEquals(
+                        replicas.getValue(x).crdt.text(),
+                        replicas.getValue(y).crdt.text(),
+                        "$name: texts_equal[$x,$y]",
+                    )
+                }
             }
-            expect["texts_equal"]?.jsonArray?.forEach { pair ->
-                val (x, y) = pair.jsonArray.map { it.jsonPrimitive.content }
-                assertEquals(
-                    replicas.getValue(x).crdt.text(),
-                    replicas.getValue(y).crdt.text(),
-                    "$name: texts_equal[$x,$y]",
-                )
-            }
+            keys.requireAllSatisfied()
         }
+        assertExactSites(fixturePath, fixture, 7, visitedSites)
     }
 
     // -- TextCrdt delta sync (#lztextsync) ----------------------------------
 
     @Test
     fun `conformance textcrdt delta sync`() {
+        val fixturePath = "collections/textcrdt_delta_sync.json"
         val fixture = loadFixture("textcrdt_delta_sync.json")
-        for (s in ConformanceScenarios.of("collections/textcrdt_delta_sync.json", fixture)) {
+        val visitedSites = linkedSetOf<String>()
+        for ((scenarioIndex, s) in ConformanceScenarios.indexed(fixturePath, fixture)) {
             val name = s.getValue("name").jsonPrimitive.content
             val replicas = LinkedHashMap<String, TextRepl>()
             val (defaultName, defaultRepl) = seedTextCrdt(s)
@@ -228,6 +305,11 @@ class CollectionsCrdtConformanceTest {
 
             for (stepEl in s.getValue("steps").jsonArray) {
                 val step = stepEl.jsonObject
+                requireExactlyOneAction(
+                    step,
+                    setOf("fork", "new", "snapshot", "delta", "exchange"),
+                    "$name delta step",
+                )
                 when {
                     step["fork"] != null -> {
                         val newName = step.getValue("fork").jsonPrimitive.content
@@ -284,37 +366,41 @@ class CollectionsCrdtConformanceTest {
                         applyTextOp(replicas.getValue(target).crdt, step)
                     }
                     step["op"] != null -> applyTextOp(replicas.getValue(defaultName).crdt, step)
+                    else -> error("$name: unrecognized delta action $step")
                 }
             }
 
             val expect = s.getValue("expect").jsonObject
-            expect["text_on"]?.jsonObject?.forEach { (repl, textEl) ->
-                assertEquals(
-                    textEl.jsonPrimitive.content,
-                    replicas.getValue(repl).crdt.text(),
-                    "$name: text_on[$repl]",
-                )
+            val keys = assertionKeys(fixturePath, "scenarios[$scenarioIndex].expect", expect, visitedSites)
+            keys.sub("text_on") { textOn ->
+                for (replica in textOn.keys.sorted()) {
+                    textOn.assertString(replica) { replicas.getValue(replica).crdt.text() }
+                }
             }
-            expect["texts_equal"]?.jsonArray?.forEach { pair ->
-                val (x, y) = pair.jsonArray.map { it.jsonPrimitive.content }
-                assertEquals(
-                    replicas.getValue(x).crdt.text(),
-                    replicas.getValue(y).crdt.text(),
-                    "$name: texts_equal[$x,$y]",
-                )
+            keys.assertKeyWith("texts_equal") { rawPairs ->
+                rawPairs.jsonArray.forEach { pair ->
+                    val (x, y) = pair.jsonArray.map { it.jsonPrimitive.content }
+                    assertEquals(
+                        replicas.getValue(x).crdt.text(),
+                        replicas.getValue(y).crdt.text(),
+                        "$name: texts_equal[$x,$y]",
+                    )
+                }
             }
-            expect["version_vector_on"]?.jsonObject?.forEach { (repl, vvEl) ->
-                val want =
-                    vvEl.jsonObject.entries.associate { (peer, counter) ->
-                        peer.toLong() to counter.jsonPrimitive.long
+            keys.sub("version_vector_on") { vectors ->
+                for (replica in vectors.keys.sorted()) {
+                    val actual = replicas.getValue(replica).crdt.versionVector()
+                    vectors.sub(replica) { vector ->
+                        assertEquals(vector.keys, actual.keys.map { it.toString() }.toSet(), "$name: version vector peers")
+                        for (peer in vector.keys.sorted()) {
+                            vector.assertLong(peer) { actual.getValue(peer.toLong()) }
+                        }
                     }
-                assertEquals(
-                    want,
-                    replicas.getValue(repl).crdt.versionVector(),
-                    "$name: version_vector_on[$repl]",
-                )
+                }
             }
+            keys.requireAllSatisfied()
         }
+        assertExactSites(fixturePath, fixture, 4, visitedSites)
     }
 
     private fun applyTextOp(
@@ -352,8 +438,10 @@ class CollectionsCrdtConformanceTest {
 
     @Test
     fun `conformance seqcrdt convergence`() {
+        val fixturePath = "collections/seqcrdt_convergence.json"
         val fixture = loadFixture("seqcrdt_convergence.json")
-        for (s in ConformanceScenarios.of("collections/seqcrdt_convergence.json", fixture)) {
+        val visitedSites = linkedSetOf<String>()
+        for ((scenarioIndex, s) in ConformanceScenarios.indexed(fixturePath, fixture)) {
             val name = s.getValue("name").jsonPrimitive.content
             val replicas = LinkedHashMap<String, SeqRepl>()
             val defaultPeer =
@@ -384,6 +472,7 @@ class CollectionsCrdtConformanceTest {
 
             for (stepEl in s.getValue("steps").jsonArray) {
                 val step = stepEl.jsonObject
+                requireExactlyOneAction(step, setOf("fork", "clone", "merge"), "$name sequence step")
                 when {
                     step["fork"] != null -> {
                         val newName = step.getValue("fork").jsonPrimitive.content
@@ -407,10 +496,12 @@ class CollectionsCrdtConformanceTest {
                         applySeqOp(replicas.getValue(target).crdt, step)
                     }
                     step["op"] != null -> applySeqOp(replicas.getValue("a").crdt, step)
+                    else -> error("$name: unrecognized sequence action $step")
                 }
             }
 
             val expect = s.getValue("expect").jsonObject
+            val keys = assertionKeys(fixturePath, "scenarios[$scenarioIndex].expect", expect, visitedSites)
             // Default target: an explicit `on`, else the first orders_equal
             // replica (the merged result), else the main replica "a".
             val defaultTarget =
@@ -427,45 +518,62 @@ class CollectionsCrdtConformanceTest {
                     else -> "a"
                 }
             val primary = replicas.getValue(defaultTarget).crdt
-            expect["order"]?.jsonArray?.let {
-                assertEquals(it.map { e -> e.jsonPrimitive.content }, primary.order(), "$name: order")
+            if (keys.has("on")) {
+                keys.excuseKey("on", "selects the replica whose observables the sibling keys assert")
             }
-            expect["get"]?.jsonObject?.forEach { (k, v) ->
-                assertEquals(seqValue(v), primary.get(k), "$name: get[$k]")
-            }
-            expect["len"]?.let { assertEquals(it.jsonPrimitive.int, primary.order().size, "$name: len") }
-            expect["contains_all"]?.jsonArray?.forEach { id ->
-                assertTrue(primary.contains(id.jsonPrimitive.content), "$name: contains_all ${id.jsonPrimitive.content}")
-            }
-            expect["order_on"]?.jsonObject?.forEach { (repl, orderEl) ->
-                assertEquals(
-                    orderEl.jsonArray.map { it.jsonPrimitive.content },
-                    replicas.getValue(repl).crdt.order(),
-                    "$name: order_on[$repl]",
-                )
-            }
-            expect["get_on"]?.jsonObject?.forEach { (repl, gets) ->
-                gets.jsonObject.forEach { (k, v) ->
-                    assertEquals(seqValue(v), replicas.getValue(repl).crdt.get(k), "$name: get_on[$repl][$k]")
+            keys.assertStrings("order") { primary.order() }
+            keys.sub("get") { gets ->
+                for (id in gets.keys.sorted()) {
+                    gets.assertKeyWith(id) { want -> assertEquals(seqValue(want), primary.get(id), "$name: get[$id]") }
                 }
             }
-            expect["orders_equal"]?.jsonArray?.forEach { pair ->
-                val (x, y) = pair.jsonArray.map { it.jsonPrimitive.content }
-                assertEquals(
-                    replicas.getValue(x).crdt.order(),
-                    replicas.getValue(y).crdt.order(),
-                    "$name: orders_equal[$x,$y]",
-                )
+            keys.assertInt("len") { primary.order().size }
+            keys.assertKeyWith("contains_all") { rawIds ->
+                rawIds.jsonArray.forEach { id ->
+                    assertTrue(primary.contains(id.jsonPrimitive.content), "$name: contains_all ${id.jsonPrimitive.content}")
+                }
             }
-            expect["not_contains_on"]?.jsonObject?.forEach { (repl, ids) ->
-                ids.jsonArray.forEach { id ->
-                    assertFalse(
-                        replicas.getValue(repl).crdt.contains(id.jsonPrimitive.content),
-                        "$name: not_contains_on[$repl][${id.jsonPrimitive.content}]",
+            keys.sub("order_on") { orders ->
+                for (replica in orders.keys.sorted()) {
+                    orders.assertStrings(replica) { replicas.getValue(replica).crdt.order() }
+                }
+            }
+            keys.sub("get_on") { getsOn ->
+                for (replica in getsOn.keys.sorted()) {
+                    getsOn.sub(replica) { gets ->
+                        for (id in gets.keys.sorted()) {
+                            gets.assertKeyWith(id) { want ->
+                                assertEquals(seqValue(want), replicas.getValue(replica).crdt.get(id), "$name: get_on[$replica][$id]")
+                            }
+                        }
+                    }
+                }
+            }
+            keys.assertKeyWith("orders_equal") { rawPairs ->
+                rawPairs.jsonArray.forEach { pair ->
+                    val (x, y) = pair.jsonArray.map { it.jsonPrimitive.content }
+                    assertEquals(
+                        replicas.getValue(x).crdt.order(),
+                        replicas.getValue(y).crdt.order(),
+                        "$name: orders_equal[$x,$y]",
                     )
                 }
             }
+            keys.sub("not_contains_on") { absentOn ->
+                for (replica in absentOn.keys.sorted()) {
+                    absentOn.assertKeyWith(replica) { rawIds ->
+                        rawIds.jsonArray.forEach { id ->
+                            assertFalse(
+                                replicas.getValue(replica).crdt.contains(id.jsonPrimitive.content),
+                                "$name: not_contains_on[$replica][${id.jsonPrimitive.content}]",
+                            )
+                        }
+                    }
+                }
+            }
+            keys.requireAllSatisfied()
         }
+        assertExactSites(fixturePath, fixture, 8, visitedSites)
     }
 
     private fun applySeqOp(
@@ -487,8 +595,10 @@ class CollectionsCrdtConformanceTest {
 
     @Test
     fun `conformance semtree incremental`() {
+        val fixturePath = "collections/semtree_incremental.json"
         val fixture = loadFixture("semtree_incremental.json")
-        for (s in ConformanceScenarios.of("collections/semtree_incremental.json", fixture)) {
+        val visitedSites = linkedSetOf<String>()
+        for ((scenarioIndex, s) in ConformanceScenarios.indexed(fixturePath, fixture)) {
             val name = s.getValue("name").jsonPrimitive.content
             val foldName = s.getValue("fold").jsonPrimitive.content
             val fold = semFold(foldName)
@@ -500,12 +610,29 @@ class CollectionsCrdtConformanceTest {
 
             // expect_initial
             val expectInitial = s.getValue("expect_initial").jsonObject
-            for ((node, v) in expectInitial) {
-                assertEquals(v.jsonPrimitive.int, sums.nodeValue(ctx, node), "$name: initial $node")
+            val initialKeys =
+                assertionKeys(
+                    fixturePath,
+                    "scenarios[$scenarioIndex].expect_initial",
+                    expectInitial,
+                    visitedSites,
+                )
+            for (node in initialKeys.keys.sorted()) {
+                initialKeys.assertInt(node) { checkNotNull(sums.nodeValue(ctx, node)) }
             }
+            initialKeys.requireAllSatisfied()
 
             val edit = s["edit"]?.jsonObject
             val expectAfter = s["expect_after"]?.jsonObject
+            val afterKeys =
+                expectAfter?.let {
+                    assertionKeys(
+                        fixturePath,
+                        "scenarios[$scenarioIndex].expect_after",
+                        it,
+                        visitedSites,
+                    )
+                }
             val memoGuard = expectAfter?.get("downstream_consumer_reran") != null
 
             if (edit != null && memoGuard) {
@@ -527,17 +654,17 @@ class CollectionsCrdtConformanceTest {
 
                 tree.setValue(edit.getValue("id").jsonPrimitive.content, edit.getValue("value").jsonPrimitive.int)
                 ctx.get(observer)
-                val reran = expectAfter!!.getValue("downstream_consumer_reran").jsonPrimitive.boolean
-                assertEquals(if (reran) 2 else 1, calls, "$name: downstream_consumer_reran=$reran")
-                assertEquals(
-                    expectAfter.getValue("root").jsonPrimitive.int,
-                    sums.value(ctx),
-                    "$name: memo-guard root unchanged",
-                )
+                afterKeys!!.assertKeyWith("downstream_consumer_reran") { rawReran ->
+                    val reran = rawReran.jsonPrimitive.boolean
+                    assertEquals(if (reran) 2 else 1, calls, "$name: downstream_consumer_reran=$reran")
+                }
+                for (node in afterKeys.keys.sorted() - "downstream_consumer_reran") {
+                    afterKeys.assertInt(node) { checkNotNull(sums.nodeValue(ctx, node)) }
+                }
             } else if (edit != null) {
                 val siblingA = sums.node("a")
                 tree.setValue(edit.getValue("id").jsonPrimitive.content, edit.getValue("value").jsonPrimitive.int)
-                for ((node, v) in expectAfter!!) {
+                for (node in afterKeys!!.keys.sorted()) {
                     when (node) {
                         // BOTH directions, and the node's EXISTENCE first
                         // (`#lzflagcoercion`). This arm used to run only when the
@@ -548,32 +675,202 @@ class CollectionsCrdtConformanceTest {
                         // rather than by its cache state — which is precisely the
                         // second defect lazily-go found beside the flag coercion.
                         "sibling_a_cached" -> {
-                            val wantCached = v.jsonPrimitive.boolean
                             assertNotNull(
                                 siblingA,
                                 "$name: the fixture asserts sibling 'a' cache state, but this tree " +
                                     "carries no derived slot for 'a' — absence must not answer for it",
                             )
-                            assertEquals(
-                                wantCached,
-                                ctx.isSet(siblingA),
-                                "$name: sibling 'a' derived slot cached=$wantCached",
-                            )
+                            afterKeys.assertBoolean(node) { ctx.isSet(siblingA) }
                         }
-                        else -> assertEquals(v.jsonPrimitive.int, sums.nodeValue(ctx, node), "$name: after $node")
+                        else -> afterKeys.assertInt(node) { checkNotNull(sums.nodeValue(ctx, node)) }
                     }
                 }
             }
 
             s["remove_child"]?.jsonObject?.let { rc ->
                 tree.remove(rc.getValue("child").jsonPrimitive.content)
-                assertEquals(
-                    expectAfter!!.getValue("root").jsonPrimitive.int,
-                    sums.value(ctx),
-                    "$name: after remove root",
+                for (node in afterKeys!!.keys.sorted()) {
+                    afterKeys.assertInt(node) { checkNotNull(sums.nodeValue(ctx, node)) }
+                }
+            }
+            afterKeys?.requireAllSatisfied()
+        }
+        assertExactSites(fixturePath, fixture, 6, visitedSites)
+    }
+
+    @Test
+    fun `collections crdt expectation families reject fixture value mutations`() {
+        data class Mutation(
+            val id: String,
+            val key: String,
+            val fixture: String,
+            val siteId: String,
+            val replacement: String,
+            val run: CollectionsCrdtConformanceTest.() -> Unit,
+        )
+
+        val mutations =
+            listOf(
+                Mutation("stable.key_equal", "key_equal", "stableid_alignment.json", "collections/stableid_alignment.json|scenarios[0].expect", "[[0,2]]") { `conformance stableid alignment`() },
+                Mutation("stable.key_not_equal", "key_not_equal", "stableid_alignment.json", "collections/stableid_alignment.json|scenarios[0].expect", "[[0,1]]") { `conformance stableid alignment`() },
+                Mutation("stable.new_key_equals_old_key", "new_key_equals_old_key", "stableid_alignment.json", "collections/stableid_alignment.json|scenarios[5].expect", "[[0,0]]") { `conformance stableid alignment`() },
+                Mutation("stable.matches", "matches", "stableid_alignment.json", "collections/stableid_alignment.json|scenarios[2].expect", """["Inserted","Same:0","Same:1"]""") { `conformance stableid alignment`() },
+                Mutation("stable.similarity_min", "similarity_min", "stableid_alignment.json", "collections/stableid_alignment.json|scenarios[3].expect", "0.99") { `conformance stableid alignment`() },
+                Mutation("stable.removed", "removed", "stableid_alignment.json", "collections/stableid_alignment.json|scenarios[4].expect", "[0]") { `conformance stableid alignment`() },
+                Mutation("text.text", "text", "textcrdt_convergence.json", "collections/textcrdt_convergence.json|scenarios[0].expect", "\"wrong\"") { `conformance textcrdt convergence`() },
+                Mutation("text.len", "len", "textcrdt_convergence.json", "collections/textcrdt_convergence.json|scenarios[0].expect", "99") { `conformance textcrdt convergence`() },
+                Mutation("text.tombstone_count", "tombstone_count", "textcrdt_convergence.json", "collections/textcrdt_convergence.json|scenarios[4].expect", "99") { `conformance textcrdt convergence`() },
+                Mutation("text.a_starts_with", "a_starts_with", "textcrdt_convergence.json", "collections/textcrdt_convergence.json|scenarios[1].expect", "\"wrong\"") { `conformance textcrdt convergence`() },
+                Mutation("text.a_ends_with", "a_ends_with", "textcrdt_convergence.json", "collections/textcrdt_convergence.json|scenarios[1].expect", "\"wrong\"") { `conformance textcrdt convergence`() },
+                Mutation("text.texts_equal", "texts_equal", "textcrdt_convergence.json", "collections/textcrdt_convergence.json|scenarios[3].expect", "[[\"ab\",\"a\"]]") { `conformance textcrdt convergence`() },
+                Mutation("delta.text_on", "text_on", "textcrdt_delta_sync.json", "collections/textcrdt_delta_sync.json|scenarios[1].expect", "{\"a1\":\"wrong\"}") { `conformance textcrdt delta sync`() },
+                Mutation("delta.texts_equal", "texts_equal", "textcrdt_delta_sync.json", "collections/textcrdt_delta_sync.json|scenarios[1].expect", "[[\"a1\",\"a\"]]") { `conformance textcrdt delta sync`() },
+                Mutation("delta.version_vector_on", "version_vector_on", "textcrdt_delta_sync.json", "collections/textcrdt_delta_sync.json|scenarios[0].expect", "{\"a\":{\"1\":999},\"b\":{\"1\":4,\"2\":5}}") { `conformance textcrdt delta sync`() },
+                Mutation("seq.order", "order", "seqcrdt_convergence.json", "collections/seqcrdt_convergence.json|scenarios[0].expect", "[\"wrong\"]") { `conformance seqcrdt convergence`() },
+                Mutation("seq.get", "get", "seqcrdt_convergence.json", "collections/seqcrdt_convergence.json|scenarios[0].expect", "{\"b\":999}") { `conformance seqcrdt convergence`() },
+                Mutation("seq.len", "len", "seqcrdt_convergence.json", "collections/seqcrdt_convergence.json|scenarios[1].expect", "99") { `conformance seqcrdt convergence`() },
+                Mutation("seq.contains_all", "contains_all", "seqcrdt_convergence.json", "collections/seqcrdt_convergence.json|scenarios[2].expect", "[\"missing\"]") { `conformance seqcrdt convergence`() },
+                Mutation("seq.order_on", "order_on", "seqcrdt_convergence.json", "collections/seqcrdt_convergence.json|scenarios[3].expect", "{\"merged\":[\"wrong\"]}") { `conformance seqcrdt convergence`() },
+                Mutation("seq.get_on", "get_on", "seqcrdt_convergence.json", "collections/seqcrdt_convergence.json|scenarios[4].expect", "{\"merged\":{\"a\":999}}") { `conformance seqcrdt convergence`() },
+                Mutation("seq.orders_equal", "orders_equal", "seqcrdt_convergence.json", "collections/seqcrdt_convergence.json|scenarios[2].expect", "[[\"a2\",\"a\"]]") { `conformance seqcrdt convergence`() },
+                Mutation("seq.not_contains_on", "not_contains_on", "seqcrdt_convergence.json", "collections/seqcrdt_convergence.json|scenarios[5].expect", "{\"ab\":[\"a\"]}") { `conformance seqcrdt convergence`() },
+                Mutation("semtree.node_value", "root", "semtree_incremental.json", "collections/semtree_incremental.json|scenarios[0].expect_initial", "999") { `conformance semtree incremental`() },
+                Mutation("semtree.downstream_consumer_reran", "downstream_consumer_reran", "semtree_incremental.json", "collections/semtree_incremental.json|scenarios[1].expect_after", "true") { `conformance semtree incremental`() },
+                Mutation("semtree.sibling_a_cached", "sibling_a_cached", "semtree_incremental.json", "collections/semtree_incremental.json|scenarios[0].expect_after", "false") { `conformance semtree incremental`() },
+            )
+        assertEquals(
+            setOf(
+                "stable.key_equal",
+                "stable.key_not_equal",
+                "stable.new_key_equals_old_key",
+                "stable.matches",
+                "stable.similarity_min",
+                "stable.removed",
+                "text.text",
+                "text.len",
+                "text.tombstone_count",
+                "text.a_starts_with",
+                "text.a_ends_with",
+                "text.texts_equal",
+                "delta.text_on",
+                "delta.texts_equal",
+                "delta.version_vector_on",
+                "seq.order",
+                "seq.get",
+                "seq.len",
+                "seq.contains_all",
+                "seq.order_on",
+                "seq.get_on",
+                "seq.orders_equal",
+                "seq.not_contains_on",
+                "semtree.node_value",
+                "semtree.downstream_consumer_reran",
+                "semtree.sibling_a_cached",
+            ),
+            mutations.map { it.id }.toSet(),
+            "CRDT mutation matrix families",
+        )
+
+        try {
+            fixtureOverride = { name -> rawFixture(name) }
+            bindCanonicalBlocks = false
+            for (mutation in mutations) {
+                val replacement: JsonElement = json.parseToJsonElement(mutation.replacement)
+                val raw = Files.readString(ConformanceFixtures.path("collections/${mutation.fixture}"))
+                val canonical =
+                    ConformanceFixtures
+                        .blockSitesOf("collections/${mutation.fixture}", raw)
+                        .getValue(mutation.siteId)
+                assertTrue(canonical.getValue(mutation.key) != replacement, "${mutation.id}: mutation changes value")
+                var hits = 0
+                expectationTransform = { siteId, expected ->
+                    if (siteId == mutation.siteId) {
+                        hits++
+                        JsonObject(expected + (mutation.key to replacement))
+                    } else {
+                        expected
+                    }
+                }
+                val failure = assertFails("${mutation.id}: changed fixture value survived production replay") {
+                    mutation.run(this)
+                }
+                assertEquals(1, hits, "${mutation.id}: target site visited exactly once")
+                assertTrue(
+                    failure.message.orEmpty().contains(mutation.key),
+                    "${mutation.id}: production failure must name family '${mutation.key}', got ${failure.message}",
                 )
             }
+        } finally {
+            resetMutationMode()
         }
+    }
+
+    @Test
+    fun `text delta and sequence action discriminators reject unknown keys`() {
+        data class ActionMutation(
+            val id: String,
+            val fixture: String,
+            val scenario: Int,
+            val step: Int,
+            val run: CollectionsCrdtConformanceTest.() -> Unit,
+        )
+
+        val mutations =
+            listOf(
+                ActionMutation("text", "textcrdt_convergence.json", 0, 0) { `conformance textcrdt convergence`() },
+                ActionMutation("delta", "textcrdt_delta_sync.json", 0, 0) { `conformance textcrdt delta sync`() },
+                ActionMutation("sequence", "seqcrdt_convergence.json", 0, 0) { `conformance seqcrdt convergence`() },
+            )
+        try {
+            bindCanonicalBlocks = false
+            expectationTransform = { _, expected -> expected }
+            for (mutation in mutations) {
+                fixtureOverride = { name ->
+                    val raw = rawFixture(name)
+                    if (name == mutation.fixture) {
+                        rewriteScenarioStepKey(raw, mutation.scenario, mutation.step, "op", "unknown_${mutation.id}_action")
+                    } else {
+                        raw
+                    }
+                }
+                val failure = assertFails("${mutation.id}: unknown action discriminator survived production replay") {
+                    mutation.run(this)
+                }
+                assertTrue(
+                    failure.message.orEmpty().contains("exactly one recognized action"),
+                    "${mutation.id}: expected fail-closed dispatcher, got ${failure.message}",
+                )
+            }
+        } finally {
+            resetMutationMode()
+        }
+    }
+
+    private fun rawFixture(name: String): JsonObject =
+        json.parseToJsonElement(Files.readString(ConformanceFixtures.path("collections/$name"))).jsonObject
+
+    private fun rewriteScenarioStepKey(
+        fixture: JsonObject,
+        scenarioIndex: Int,
+        stepIndex: Int,
+        oldKey: String,
+        newKey: String,
+    ): JsonObject {
+        val scenarios = fixture.getValue("scenarios").jsonArray.toMutableList()
+        val scenario = scenarios[scenarioIndex].jsonObject
+        val steps = scenario.getValue("steps").jsonArray.toMutableList()
+        val step = LinkedHashMap(steps[stepIndex].jsonObject)
+        val value = checkNotNull(step.remove(oldKey)) { "missing action key '$oldKey'" }
+        step[newKey] = value
+        steps[stepIndex] = JsonObject(step)
+        scenarios[scenarioIndex] = JsonObject(scenario + ("steps" to JsonArray(steps)))
+        return JsonObject(fixture + ("scenarios" to JsonArray(scenarios)))
+    }
+
+    private fun resetMutationMode() {
+        fixtureOverride = null
+        expectationTransform = { _, expected -> expected }
+        bindCanonicalBlocks = true
     }
 
     private fun semFold(name: String): SemFold<Int, Int> =

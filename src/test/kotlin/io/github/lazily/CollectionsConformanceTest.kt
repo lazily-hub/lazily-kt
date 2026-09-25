@@ -2,16 +2,17 @@ package io.github.lazily
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFails
 import kotlin.test.assertFalse
-import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 /**
@@ -29,9 +30,30 @@ import kotlin.test.assertTrue
 class CollectionsConformanceTest {
     private val json = Json
 
+    private var fixtureOverride: ((String) -> JsonObject)? = null
+    private var expectationTransform: (String, JsonObject) -> JsonObject = { _, expected -> expected }
+    private var bindCanonicalBlocks = true
+
     private fun loadFixture(name: String): JsonObject {
+        fixtureOverride?.let { return it(name) }
         val text = ConformanceFixtures.read("collections/$name")
         return json.parseToJsonElement(text).jsonObject
+    }
+
+    private fun assertionKeys(
+        fixturePath: String,
+        sitePath: String,
+        expected: JsonObject,
+        visitedSites: MutableSet<String>,
+    ): AssertionKeys {
+        val siteId = "$fixturePath|$sitePath"
+        check(visitedSites.add(siteId)) { "$siteId: assertion block visited more than once" }
+        return AssertionKeys(
+            siteId,
+            expectationTransform(siteId, expected),
+            fixturePath,
+            rungZeroBind = bindCanonicalBlocks,
+        )
     }
 
     private fun strings(element: JsonArray): List<String> = element.map { it.jsonPrimitive.content }
@@ -100,7 +122,7 @@ class CollectionsConformanceTest {
 
     private fun assertExpected(
         h: Harness,
-        expected: JsonObject,
+        expected: AssertionKeys,
         readers: Readers,
     ) {
         // REQUIRED, not presence-gated (`#lzsiblingrunnermasking`). `if ("order" in
@@ -109,14 +131,12 @@ class CollectionsConformanceTest {
         // ordering. CollectionsFamilyConformanceTest reads it as
         // `expected["order"]!!` over the SAME two fixtures, so the family runner
         // was the only thing standing between that drop and a green suite.
-        assertEquals(strings(expected.getValue("order").jsonArray), h.map.keysNow(), "order")
-        if ("membership" in expected) {
-            val want = strings(expected.getValue("membership").jsonArray).toSet()
-            assertEquals(want, h.map.keysNow().toSet(), "membership")
+        expected.assertStrings("order") { h.map.keysNow() }
+        expected.assertKeyWith("membership") { want ->
+            assertEquals(strings(want.jsonArray).toSet(), h.map.keysNow().toSet(), "membership")
         }
-        if ("values" in expected) {
-            val vals = expected.getValue("values").jsonObject
-            for ((k, v) in vals) assertEquals(v.jsonPrimitive.int, h.map.get(k), "value $k")
+        expected.sub("values") { values ->
+            for (key in values.keys.sorted()) values.assertInt(key) { h.map.get(key)!! }
         }
         // The matrix is the contract, so its ABSENCE is a fixture-shape violation
         // and never a step that checks no invalidation (`#lzsiblingrunnermasking`).
@@ -124,54 +144,40 @@ class CollectionsConformanceTest {
         // `expected.invalidates` and counts the matrices it ran; this runner
         // skipped the whole block silently, so a fixture that lost it would have
         // reddened only the family runner.
-        val inv =
-            (
-                expected["invalidates"]
-                    ?: error("expected.invalidates is missing — the matrix is the contract")
-                ).jsonObject
-        val membershipInvalidated = inv.getValue("membership").jsonPrimitive.boolean
-        val orderInvalidated = inv.getValue("order").jsonPrimitive.boolean
-        // Required, not defaulted: `?: emptyList()` made a `value` key dropped
-        // upstream read as "nothing was invalidated", so the whole per-key half
-        // of the matrix could vanish and every reader would be asserted to have
-        // stayed cached (#lzflagcoercion).
-        val valueKeys =
-            (
-                inv["value"]
-                    ?: error("expected.invalidates is missing 'value' — the matrix is the contract")
-                ).jsonArray.map { it.jsonPrimitive.content }
-        for (key in readers.valueReaders.keys) {
-            val invalidated = key in valueKeys
-            assertEquals(
-                !invalidated,
-                h.ctx.isSet(readers.valueReaders.getValue(key)),
-                "value reader '$key' invalidated=$invalidated",
-            )
+        expected.sub("invalidates") { inv ->
+            // Required, not defaulted: `?: emptyList()` made a `value` key dropped
+            // upstream read as "nothing was invalidated", so the whole per-key half
+            // of the matrix could vanish and every reader would be asserted to have
+            // stayed cached (#lzflagcoercion).
+            inv.assertKeyWith("value") { rawValueKeys ->
+                val valueKeys = rawValueKeys.jsonArray.map { it.jsonPrimitive.content }.toSet()
+                assertTrue(
+                    valueKeys.all(readers.valueReaders::containsKey),
+                    "expected.invalidates.value names unknown reader(s): ${valueKeys - readers.valueReaders.keys}",
+                )
+                for (key in readers.valueReaders.keys) {
+                    val invalidated = key in valueKeys
+                    assertEquals(
+                        !invalidated,
+                        h.ctx.isSet(readers.valueReaders.getValue(key)),
+                        "value reader '$key' invalidated=$invalidated",
+                    )
+                }
+            }
+            inv.assertBoolean("membership") { !h.ctx.isSet(readers.membership) }
+            inv.assertBoolean("order") { !h.ctx.isSet(readers.order) }
         }
-        assertEquals(!membershipInvalidated, h.ctx.isSet(readers.membership), "membership invalidate mismatch")
-        assertEquals(!orderInvalidated, h.ctx.isSet(readers.order), "order invalidate mismatch")
-        val handleStable = expected["handle_stable"]?.jsonObject
-        if (handleStable != null) {
+        expected.sub("handle_stable") { handleStable ->
             // BOTH directions (`#lzflagcoercion`). The true-only arm left
             // `handle_stable: { k: false }` compared by nothing — the fixture read
             // as "this handle was re-minted" and the runner asserted neither that
             // nor its opposite. CollectionsFamilyConformanceTest already ran both
             // halves over the same fixtures, which is the only reason a planted
             // `false` reddened anything at all.
-            for ((key, stable) in handleStable) {
-                val wantStable = stable.jsonPrimitive.boolean
+            for (key in handleStable.keys.sorted()) {
                 val before = h.handles.getValue(key)
                 val after = h.map.value(key).id
-                if (wantStable) {
-                    assertEquals(before, after, "handle stable for $key")
-                } else {
-                    assertNotEquals(
-                        before,
-                        after,
-                        "handle for $key should have been re-minted - a `handle_stable: false` " +
-                            "claim is a re-mint, and it has to be asserted as one",
-                    )
-                }
+                handleStable.assertBoolean(key) { before == after }
             }
         }
     }
@@ -205,20 +211,34 @@ class CollectionsConformanceTest {
      * The count is read back from the fixture, so there is no number to re-pin.
      */
     private fun replayOrdering(name: String) {
+        val fixturePath = "collections/$name"
         val fixture = loadFixture(name)
+        val declaredSites = ConformanceFixtures.blockSitesOf(fixturePath, fixture).keys
+        val visitedSites = linkedSetOf<String>()
         val h = harness(fixture.getValue("initial").jsonObject)
         val steps = fixture.getValue("steps").jsonArray
         assertTrue(steps.isNotEmpty(), "$name declares no steps — a zero-step replay is not a pass")
         var executed = 0
-        for (step in steps) {
+        for ((stepIndex, step) in steps.withIndex()) {
             val stepObj = step.jsonObject
             // Fresh readers per step: the effect is measured from a clean state.
             val readers = primeReaders(h)
             applyOp(h, stepObj.getValue("op").jsonObject)
-            assertExpected(h, stepObj.getValue("expected").jsonObject, readers)
+            val expected = stepObj.getValue("expected").jsonObject
+            val keys = assertionKeys(fixturePath, "steps[$stepIndex].expected", expected, visitedSites)
+            assertExpected(h, keys, readers)
+            keys.requireAllSatisfied()
             executed++
         }
         assertEquals(steps.size, executed, "$name: loaded ${steps.size} steps but executed $executed")
+        assertEquals(declaredSites, visitedSites, "$fixturePath: exact assertion-block sites")
+        val expectedSiteCount =
+            when (name) {
+                "cellmap_atomic_move.json" -> 3
+                "cellmap_independence.json" -> 4
+                else -> error("no assertion-site pin for $name")
+            }
+        assertEquals(expectedSiteCount, visitedSites.size, "$fixturePath: assertion-block site pin")
     }
 
     @Test
@@ -229,6 +249,7 @@ class CollectionsConformanceTest {
 
     @Test
     fun `conformance keyed reconciliation lis`() {
+        val fixturePath = "collections/keyed_reconciliation_lis.json"
         val fixture = loadFixture("keyed_reconciliation_lis.json")
         val recon = fixture.getValue("reconcile").jsonObject
         val prior = reconState(recon.getValue("prior").jsonObject)
@@ -236,43 +257,178 @@ class CollectionsConformanceTest {
 
         val ops = reconcile(prior, target)
         val expected = fixture.getValue("expected").jsonObject
+        val siteId = "$fixturePath|expected"
+        val visitedSites = linkedSetOf<String>()
+        val keys = assertionKeys(fixturePath, "expected", expected, visitedSites)
 
         // Assert the op set matches the canonical fixture (remove d, move a after c).
-        val expectedOps =
-            expected.getValue("ops").jsonArray.map { opEl ->
+        keys.assertKeyWith("ops") { rawOps ->
+            val expectedOps = rawOps.jsonArray.map { opEl ->
                 val op = opEl.jsonObject
                 when (op.getValue("type").jsonPrimitive.content) {
-                    "remove" -> ReconOp.Remove(op.getValue("key").jsonPrimitive.content)
+                    "remove" -> {
+                        assertEquals(setOf("type", "key"), op.keys, "remove op fields")
+                        ReconOp.Remove(op.getValue("key").jsonPrimitive.content)
+                    }
                     "move" -> {
                         val key = op.getValue("key").jsonPrimitive.content
                         val anchor =
                             if ("after" in op) {
+                                assertEquals(setOf("type", "key", "after"), op.keys, "move-after op fields")
                                 ReconOp.Anchor.After(op.getValue("after").jsonPrimitive.content)
                             } else {
+                                assertEquals(setOf("type", "key", "before"), op.keys, "move-before op fields")
                                 ReconOp.Anchor.Before(op.getValue("before").jsonPrimitive.content)
                             }
                         ReconOp.Move(key, anchor)
                     }
-                    "insert" -> ReconOp.Insert(op.getValue("key").jsonPrimitive.content)
-                    "update" -> ReconOp.Update(op.getValue("key").jsonPrimitive.content)
+                    "insert" -> {
+                        assertEquals(setOf("type", "key"), op.keys, "insert op fields")
+                        ReconOp.Insert(op.getValue("key").jsonPrimitive.content)
+                    }
+                    "update" -> {
+                        assertEquals(setOf("type", "key"), op.keys, "update op fields")
+                        ReconOp.Update(op.getValue("key").jsonPrimitive.content)
+                    }
                     else -> error("unknown reconcile op")
                 }
             }
-        assertEquals(expectedOps, ops)
+            assertEquals(expectedOps, ops, "$siteId: ops")
+        }
 
         // Result order.
-        assertEquals(
-            strings(expected.getValue("result_order").jsonArray),
-            target.order,
-        )
+        keys.assertStrings("result_order") { target.order }
 
         // Stable keys not invalidated.
-        val stableKeys = expected.getValue("stable_keys_not_invalidated").jsonArray.map { it.jsonPrimitive.content }
         val priorIndex = prior.order.withIndex().associate { (i, k) -> k to i }
         val kept = target.order.filter { it in priorIndex }
         val lis = longestIncreasingSubsequenceIndices(kept.map { priorIndex.getValue(it) }).toSet()
         val computedStable = kept.mapIndexedNotNull { i, k -> if (i in lis) k else null }
-        assertEquals(stableKeys, computedStable, "stable (LIS) keys match fixture")
+        keys.assertStrings("stable_keys_not_invalidated") { computedStable }
+        keys.requireAllSatisfied()
+        assertEquals(setOf(siteId), visitedSites, "$fixturePath: exact assertion-block sites")
+        assertEquals(setOf(siteId), ConformanceFixtures.blockSitesOf(fixturePath, fixture).keys)
+    }
+
+    @Test
+    fun `collections expectation families reject fixture value mutations`() {
+        data class Mutation(
+            val family: String,
+            val fixture: String,
+            val siteId: String,
+            val replacement: String,
+            val run: CollectionsConformanceTest.() -> Unit,
+        )
+
+        val mutations =
+            listOf(
+                Mutation(
+                    "order",
+                    "cellmap_atomic_move.json",
+                    "collections/cellmap_atomic_move.json|steps[0].expected",
+                    """["wrong"]""",
+                ) { `conformance cellmap atomic move`() },
+                Mutation(
+                    "membership",
+                    "cellmap_atomic_move.json",
+                    "collections/cellmap_atomic_move.json|steps[0].expected",
+                    """["wrong"]""",
+                ) { `conformance cellmap atomic move`() },
+                Mutation(
+                    "values",
+                    "cellmap_atomic_move.json",
+                    "collections/cellmap_atomic_move.json|steps[2].expected",
+                    """{"a":999}""",
+                ) { `conformance cellmap atomic move`() },
+                Mutation(
+                    "invalidates",
+                    "cellmap_atomic_move.json",
+                    "collections/cellmap_atomic_move.json|steps[0].expected",
+                    """{"value":[],"membership":true,"order":true}""",
+                ) { `conformance cellmap atomic move`() },
+                Mutation(
+                    "handle_stable",
+                    "cellmap_atomic_move.json",
+                    "collections/cellmap_atomic_move.json|steps[0].expected",
+                    """{"b":false}""",
+                ) { `conformance cellmap atomic move`() },
+                Mutation(
+                    "ops",
+                    "keyed_reconciliation_lis.json",
+                    "collections/keyed_reconciliation_lis.json|expected",
+                    "[]",
+                ) { `conformance keyed reconciliation lis`() },
+                Mutation(
+                    "result_order",
+                    "keyed_reconciliation_lis.json",
+                    "collections/keyed_reconciliation_lis.json|expected",
+                    """["wrong"]""",
+                ) { `conformance keyed reconciliation lis`() },
+                Mutation(
+                    "stable_keys_not_invalidated",
+                    "keyed_reconciliation_lis.json",
+                    "collections/keyed_reconciliation_lis.json|expected",
+                    """["wrong"]""",
+                ) { `conformance keyed reconciliation lis`() },
+            )
+        assertEquals(
+            setOf("order", "membership", "values", "invalidates", "handle_stable", "ops", "result_order", "stable_keys_not_invalidated"),
+            mutations.map { it.family }.toSet(),
+            "collections mutation matrix",
+        )
+
+        try {
+            fixtureOverride = { name ->
+                val path = "collections/$name"
+                json.parseToJsonElement(Files.readString(ConformanceFixtures.path(path))).jsonObject
+            }
+            bindCanonicalBlocks = false
+            for (mutation in mutations) {
+                val replacement: JsonElement = json.parseToJsonElement(mutation.replacement)
+                val canonical =
+                    ConformanceFixtures
+                        .blockSitesOf(
+                            "collections/${mutation.fixture}",
+                            Files.readString(ConformanceFixtures.path("collections/${mutation.fixture}")),
+                        ).getValue(mutation.siteId)
+                assertTrue(canonical.getValue(mutation.family) != replacement, "${mutation.family}: mutation changes value")
+                var hits = 0
+                expectationTransform = { siteId, expected ->
+                    if (siteId == mutation.siteId) {
+                        hits++
+                        JsonObject(expected + (mutation.family to replacement))
+                    } else {
+                        expected
+                    }
+                }
+                val failure = assertFails("${mutation.family}: changed fixture value survived production replay") { mutation.run(this) }
+                assertEquals(1, hits, "${mutation.family}: target site visited exactly once")
+                assertTrue(
+                    failure.message.orEmpty().contains(mutation.family),
+                    "${mutation.family}: production failure must name family, got ${failure.message}",
+                )
+            }
+        } finally {
+            fixtureOverride = null
+            expectationTransform = { _, expected -> expected }
+            bindCanonicalBlocks = true
+        }
+    }
+
+    @Test
+    fun `primary collections fixture site pin`() {
+        val names =
+            listOf(
+                "cellmap_atomic_move.json",
+                "cellmap_independence.json",
+                "keyed_reconciliation_lis.json",
+            )
+        val declared =
+            names.sumOf { name ->
+                val path = "collections/$name"
+                ConformanceFixtures.blockSitesOf(path, loadFixture(name)).size
+            }
+        assertEquals(8, declared, "primary collections assertion-block site pin")
     }
 
     private fun reconState(obj: JsonObject): ReconcileState {

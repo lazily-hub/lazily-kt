@@ -12,12 +12,14 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
+import java.nio.file.Files
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFails
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -78,7 +80,49 @@ class QueueFamilyConformanceTest {
             }.toSet()
     private val skipped = emptyMap<Capability, String>()
 
-    private fun fixture(name: String): JsonObject = Json.parseToJsonElement(ConformanceFixtures.read("collections/$name")).jsonObject
+    private var fixtureOverride: ((String) -> JsonObject)? = null
+    private var expectationTransform: (String, JsonObject) -> JsonObject = { _, expected -> expected }
+    private var bindCanonicalBlocks = true
+
+    private fun fixture(name: String): JsonObject =
+        fixtureOverride?.invoke(name)
+            ?: Json.parseToJsonElement(ConformanceFixtures.read("collections/$name")).jsonObject
+
+    private fun assertionKeys(
+        name: String,
+        stepIndex: Int,
+        expected: JsonObject,
+        flavor: Flavor,
+        visitedSites: MutableSet<String>?,
+        bindSite: Boolean = true,
+    ): AssertionKeys {
+        val fixturePath = "collections/$name"
+        val siteId = "$fixturePath|steps[$stepIndex].expected"
+        if (bindSite && visitedSites != null) {
+            check(visitedSites.add(siteId)) { "$siteId: assertion block visited more than once" }
+        }
+        return AssertionKeys(
+            siteId,
+            expectationTransform(siteId, expected),
+            fixturePath,
+            rungZeroBind = bindCanonicalBlocks && bindSite && flavor == Flavor.Sync,
+        )
+    }
+
+    private fun assertExactSites(
+        names: List<String>,
+        expectedCount: Int,
+        visitedSites: Set<String>,
+    ) {
+        val declared =
+            names
+                .flatMap { name ->
+                    val path = "collections/$name"
+                    ConformanceFixtures.blockSitesOf(path, fixture(name)).keys
+                }.toSet()
+        assertEquals(expectedCount, declared.size, "collections assertion-block site pin")
+        assertEquals(declared, visitedSites, "collections exact assertion-block sites")
+    }
 
     /**
      * Steps the corpus DECLARES, read back from the fixtures rather than written down
@@ -362,6 +406,7 @@ class QueueFamilyConformanceTest {
     private fun replayQueue(
         name: String,
         flavor: Flavor,
+        visitedSites: MutableSet<String>?,
     ): Int {
         val fixture = fixture(name)
         queueHarness(flavor, fixture.getValue("initial").jsonObject).use { queue ->
@@ -416,29 +461,25 @@ class QueueFamilyConformanceTest {
                     assertEquals(it, returned, "$flavor $name step $index returns")
                 }
                 val expected = step.getValue("expected").jsonObject
-                val invalidates =
-                    expected.getValue("invalidates").jsonObject
-                for ((kind, rawWant) in invalidates) {
-                    assertEquals(
-                        !rawWant.jsonPrimitive.boolean,
-                        queue.readerIsSet(kind),
-                        "$flavor $name step $index invalidates.$kind",
-                    )
+                val keys = assertionKeys(name, index, expected, flavor, visitedSites, bindSite = false)
+                keys.sub("invalidates") { invalidates ->
+                    for (kind in invalidates.keys.sorted()) {
+                        invalidates.assertBoolean(kind) { !queue.readerIsSet(kind) }
+                    }
                 }
-                expected["elements"]?.jsonArray?.let {
-                    assertEquals(it.map { e -> e.jsonPrimitive.content }, queue.elements())
-                }
-                expected["head"]?.let {
-                    assertEquals(if (it is JsonNull) null else it.jsonPrimitive.content, queue.head())
+                keys.assertStrings("elements") { queue.elements() }
+                keys.assertKeyWith("head") { want ->
+                    assertEquals(if (want is JsonNull) null else want.jsonPrimitive.content, queue.head())
                 }
                 // `intOrNull?.let` decoded a wrong-typed `len` to null and then skipped
                 // the comparison on it, so `len: 1.5` asserted nothing and read exactly
                 // like an absent key. `.int` throws instead (`#lzflagcoercion`) — the
                 // three boolean keys below already did.
-                expected["len"]?.let { assertEquals(it.jsonPrimitive.int, queue.len()) }
-                expected["is_empty"]?.jsonPrimitive?.let { assertEquals(it.boolean, queue.isEmpty()) }
-                expected["is_full"]?.jsonPrimitive?.let { assertEquals(it.boolean, queue.isFull()) }
-                expected["closed"]?.jsonPrimitive?.let { assertEquals(it.boolean, queue.isClosed()) }
+                keys.assertInt("len") { queue.len() }
+                keys.assertBoolean("is_empty") { queue.isEmpty() }
+                keys.assertBoolean("is_full") { queue.isFull() }
+                keys.assertBoolean("closed") { queue.isClosed() }
+                keys.requireAllSatisfied()
                 queue.primeReaders()
                 executed++
             }
@@ -450,7 +491,7 @@ class QueueFamilyConformanceTest {
     @Test
     fun `all five QueueCell fixtures replay per flavor`() {
         for (flavor in Flavor.entries) {
-            val steps = queueFixtures.sumOf { replayQueue(it, flavor) }
+            val steps = queueFixtures.sumOf { replayQueue(it, flavor, null) }
             assertTrue(steps > 0, "$flavor replayed zero QueueCell steps")
             assertEquals(declaredSteps(queueFixtures), steps, "every declared QueueCell step must run against $flavor")
         }
@@ -687,6 +728,7 @@ class QueueFamilyConformanceTest {
     private fun replayTopic(
         name: String,
         flavor: Flavor,
+        visitedSites: MutableSet<String>?,
     ): Int {
         val fixture = fixture(name)
         topicHarness(flavor, parseTopicInitial(fixture.getValue("initial").jsonObject)).use { topic ->
@@ -704,6 +746,7 @@ class QueueFamilyConformanceTest {
                 val step = raw.jsonObject
                 assertFalse(step.containsKey("invalidates"), "$name step $index uses step.invalidates")
                 val expected = step.getValue("expected").jsonObject
+                val keys = assertionKeys(name, index, expected, flavor, visitedSites)
                 val invalidates = expected.getValue("invalidates").jsonObject
                 val before = invalidates.keys.associateWith(topic::handle)
                 before.values.filterNotNull().forEach(topic::prime)
@@ -738,40 +781,36 @@ class QueueFamilyConformanceTest {
                         else -> error("$flavor $name step $index: unknown topic op")
                     }
                 step["returns"]?.let { assertEquals(it, returned, "$flavor $name step $index returns") }
-                for ((id, rawWant) in invalidates) {
-                    val handle = before[id] ?: topic.handle(id)
-                    assertNotNull(handle, "$flavor $name step $index has no reader for $id")
-                    assertEquals(
-                        !rawWant.jsonPrimitive.boolean,
-                        topic.isSet(handle),
-                        "$flavor $name step $index invalidates.$id",
-                    )
+                keys.sub("invalidates") { expectedInvalidates ->
+                    for (id in expectedInvalidates.keys.sorted()) {
+                        val handle = before[id] ?: topic.handle(id)
+                        assertNotNull(handle, "$flavor $name step $index has no reader for $id")
+                        expectedInvalidates.assertBoolean(id) { !topic.isSet(handle) }
+                    }
                 }
-                assertEquals(expected.getValue("base_offset").jsonPrimitive.long, topic.baseOffset())
-                assertEquals(
-                    expected.getValue("elements").jsonArray.map { it.jsonPrimitive.content },
-                    topic.elements(),
-                )
+                keys.assertLong("base_offset") { topic.baseOffset() }
+                keys.assertStrings("elements") { topic.elements() }
+                keys.sub("subscriptions") { expectedSubs ->
+                    assertEquals(expectedSubs.keys, topic.subscriptionIds())
+                    for (id in expectedSubs.keys.sorted()) {
+                        val got = assertNotNull(topic.subscription(id))
+                        expectedSubs.sub(id) { want ->
+                            want.assertLong("cursor") { got.cursor }
+                            want.assertKeyWith("durability") { raw ->
+                                assertEquals(parseDurability(raw.jsonPrimitive.content), got.durability)
+                            }
+                            want.assertBoolean("connected") { got.connected }
+                        }
+                    }
+                }
+                keys.sub("reads") { reads ->
+                    for (id in reads.keys.sorted()) {
+                        reads.assertStrings(id) { topic.readStream(id) }
+                    }
+                }
                 val expectedSubs = expected.getValue("subscriptions").jsonObject
-                assertEquals(expectedSubs.keys, topic.subscriptionIds())
-                for ((id, rawSub) in expectedSubs) {
-                    val want = rawSub.jsonObject
-                    val got = assertNotNull(topic.subscription(id))
-                    assertEquals(want.getValue("cursor").jsonPrimitive.long, got.cursor)
-                    assertEquals(
-                        parseDurability(want.getValue("durability").jsonPrimitive.content),
-                        got.durability,
-                    )
-                    assertEquals(want.getValue("connected").jsonPrimitive.boolean, got.connected)
-                }
-                for ((id, rawRead) in expected.getValue("reads").jsonObject) {
-                    assertEquals(
-                        rawRead.jsonArray.map { it.jsonPrimitive.content },
-                        topic.readStream(id),
-                        "$flavor $name step $index reads.$id",
-                    )
-                }
                 expectedSubs.keys.mapNotNull(topic::handle).forEach(topic::prime)
+                keys.requireAllSatisfied()
                 executed++
             }
             check(executed == steps.size) { "$flavor $name: loaded ${steps.size} steps but executed $executed" }
@@ -781,11 +820,13 @@ class QueueFamilyConformanceTest {
 
     @Test
     fun `all four TopicCell fixtures replay per flavor`() {
+        val visitedSites = linkedSetOf<String>()
         for (flavor in Flavor.entries) {
-            val steps = topicFixtures.sumOf { replayTopic(it, flavor) }
+            val steps = topicFixtures.sumOf { replayTopic(it, flavor, visitedSites.takeIf { flavor == Flavor.Sync }) }
             assertTrue(steps > 0, "$flavor replayed zero TopicCell steps")
             assertEquals(declaredSteps(topicFixtures), steps, "every declared TopicCell step must run against $flavor")
         }
+        assertExactSites(topicFixtures, 29, visitedSites)
     }
 
     // -- WorkQueueCell -----------------------------------------------------
@@ -1049,6 +1090,7 @@ class QueueFamilyConformanceTest {
     private fun replayWork(
         name: String,
         flavor: Flavor,
+        visitedSites: MutableSet<String>?,
     ): Int {
         val fixture = fixture(name)
         workHarness(flavor, fixture.getValue("initial").jsonObject).use { queue ->
@@ -1088,7 +1130,7 @@ class QueueFamilyConformanceTest {
                     }
                 assertEquals(step.getValue("returns"), returned, "$flavor $name step $index returns")
                 val expected = step.getValue("expected").jsonObject
-                val workInvalidates = expected.getValue("invalidates").jsonObject
+                val keys = assertionKeys(name, index, expected, flavor, visitedSites)
                 // Iterating the fixture's keys catches a kind the corpus ADDS or
                 // RENAMES (`isSet` resolves through a map that throws) and is blind
                 // to one it DROPS. WorkQueueConformanceTest read the four by name,
@@ -1096,51 +1138,60 @@ class QueueFamilyConformanceTest {
                 // half the other missed, over these same two fixtures
                 // (`#lzsiblingrunnermasking`). The set equality supplies the other
                 // half here so neither runner depends on its sibling.
-                assertEquals(
-                    workInvalidationKinds,
-                    workInvalidates.keys,
-                    "$flavor $name step $index expected.invalidates reader kinds",
-                )
-                for ((kind, rawWant) in workInvalidates) {
+                keys.sub("invalidates") { invalidates ->
                     assertEquals(
-                        !rawWant.jsonPrimitive.boolean,
-                        queue.isSet(kind),
-                        "$flavor $name step $index invalidates.$kind",
+                        workInvalidationKinds,
+                        invalidates.keys,
+                        "$flavor $name step $index expected.invalidates reader kinds",
                     )
+                    for (kind in invalidates.keys.sorted()) {
+                        invalidates.assertBoolean(kind) { !queue.isSet(kind) }
+                    }
                 }
-                val reads = expected.getValue("reads").jsonObject
-                assertEquals(reads.getValue("pending_len").jsonPrimitive.int, queue.pendingLen())
-                assertEquals(reads.getValue("is_empty").jsonPrimitive.boolean, queue.isEmpty())
-                assertEquals(reads.getValue("in_flight_len").jsonPrimitive.int, queue.inFlightLen())
-                assertEquals(reads.getValue("dead_letter_len").jsonPrimitive.int, queue.deadLetterLen())
-                val expectedPending = expected.getValue("pending").jsonArray
-                assertEquals(expectedPending.size, queue.pendingItems().size)
-                queue.pendingItems().zip(expectedPending).forEach { (got, rawItem) ->
-                    val want = rawItem.jsonObject
-                    assertEquals(want.getValue("item_id").jsonPrimitive.long, got.itemId)
-                    assertEquals(want.getValue("value").jsonPrimitive.content, got.value)
-                    assertEquals(want.getValue("attempts").jsonPrimitive.int, got.attempts)
+                keys.sub("reads") { reads ->
+                    reads.assertInt("pending_len") { queue.pendingLen() }
+                    reads.assertBoolean("is_empty") { queue.isEmpty() }
+                    reads.assertInt("in_flight_len") { queue.inFlightLen() }
+                    reads.assertInt("dead_letter_len") { queue.deadLetterLen() }
                 }
-                val expectedInFlight = expected.getValue("in_flight").jsonArray
-                assertEquals(expectedInFlight.size, queue.inFlight().size)
-                queue.inFlight().zip(expectedInFlight).forEach { (got, rawDelivery) ->
-                    assertEquals(rawDelivery, deliveryJson(got))
+                keys.assertKeyWith("pending") { rawPending ->
+                    val expectedPending = rawPending.jsonArray
+                    assertEquals(expectedPending.size, queue.pendingItems().size, "$flavor $name step $index: pending size")
+                    queue.pendingItems().zip(expectedPending).forEach { (got, rawItem) ->
+                        val want = rawItem.jsonObject
+                        assertEquals(setOf("item_id", "value", "attempts"), want.keys, "$name: pending fields")
+                        assertEquals(want.getValue("item_id").jsonPrimitive.long, got.itemId, "$name: pending item_id")
+                        assertEquals(want.getValue("value").jsonPrimitive.content, got.value, "$name: pending value")
+                        assertEquals(want.getValue("attempts").jsonPrimitive.int, got.attempts, "$name: pending attempts")
+                    }
                 }
-                val expectedDead = expected.getValue("dead_letters").jsonArray
-                assertEquals(expectedDead.size, queue.deadLetters().size)
-                queue.deadLetters().zip(expectedDead).forEach { (got, rawDead) ->
-                    val want = rawDead.jsonObject
-                    assertEquals(want.getValue("item_id").jsonPrimitive.long, got.itemId)
-                    assertEquals(want.getValue("value").jsonPrimitive.content, got.value)
-                    assertEquals(want.getValue("attempts").jsonPrimitive.int, got.attempts)
-                    assertEquals(
-                        want.getValue("reason").jsonPrimitive.content,
-                        when (got.reason) {
-                            WorkQueueDeadLetterReason.Nack -> "nack"
-                            WorkQueueDeadLetterReason.Expired -> "expired"
-                        },
-                    )
+                keys.assertKeyWith("in_flight") { rawInFlight ->
+                    val expectedInFlight = rawInFlight.jsonArray
+                    assertEquals(expectedInFlight.size, queue.inFlight().size, "$flavor $name step $index: in_flight size")
+                    queue.inFlight().zip(expectedInFlight).forEach { (got, rawDelivery) ->
+                        assertEquals(rawDelivery, deliveryJson(got), "$name: in_flight delivery")
+                    }
                 }
+                keys.assertKeyWith("dead_letters") { rawDeadLetters ->
+                    val expectedDead = rawDeadLetters.jsonArray
+                    assertEquals(expectedDead.size, queue.deadLetters().size, "$flavor $name step $index: dead_letters size")
+                    queue.deadLetters().zip(expectedDead).forEach { (got, rawDead) ->
+                        val want = rawDead.jsonObject
+                        assertEquals(setOf("item_id", "value", "attempts", "reason"), want.keys, "$name: dead_letters fields")
+                        assertEquals(want.getValue("item_id").jsonPrimitive.long, got.itemId, "$name: dead_letters item_id")
+                        assertEquals(want.getValue("value").jsonPrimitive.content, got.value, "$name: dead_letters value")
+                        assertEquals(want.getValue("attempts").jsonPrimitive.int, got.attempts, "$name: dead_letters attempts")
+                        assertEquals(
+                            want.getValue("reason").jsonPrimitive.content,
+                            when (got.reason) {
+                                WorkQueueDeadLetterReason.Nack -> "nack"
+                                WorkQueueDeadLetterReason.Expired -> "expired"
+                            },
+                            "$name: dead_letters reason",
+                        )
+                    }
+                }
+                keys.requireAllSatisfied()
                 queue.prime()
                 executed++
             }
@@ -1151,10 +1202,122 @@ class QueueFamilyConformanceTest {
 
     @Test
     fun `both WorkQueueCell fixtures replay per flavor`() {
+        val visitedSites = linkedSetOf<String>()
         for (flavor in Flavor.entries) {
-            val steps = workFixtures.sumOf { replayWork(it, flavor) }
+            val steps = workFixtures.sumOf { replayWork(it, flavor, visitedSites.takeIf { flavor == Flavor.Sync }) }
             assertTrue(steps > 0, "$flavor replayed zero WorkQueueCell steps")
             assertEquals(declaredSteps(workFixtures), steps, "every declared WorkQueueCell step must run against $flavor")
+        }
+        assertExactSites(workFixtures, 18, visitedSites)
+    }
+
+    @Test
+    fun `topic and work expectation families reject fixture value mutations`() {
+        data class Mutation(
+            val id: String,
+            val family: String,
+            val fixture: String,
+            val siteId: String,
+            val replacement: String,
+            val topic: Boolean,
+        )
+
+        val topicFixture = "topiccell_broadcast_cursor_isolation.json"
+        val topicSite = "collections/$topicFixture|steps[0].expected"
+        val workFixture = "workqueue_competing_delivery.json"
+        val workSite0 = "collections/$workFixture|steps[0].expected"
+        val mutations =
+            listOf(
+                Mutation("topic.base_offset", "base_offset", topicFixture, topicSite, "99", true),
+                Mutation("topic.elements", "elements", topicFixture, topicSite, "[\"wrong\"]", true),
+                Mutation(
+                    "topic.subscriptions",
+                    "subscriptions",
+                    topicFixture,
+                    topicSite,
+                    "{\"alpha\":{\"durability\":\"durable\",\"connected\":true,\"cursor\":99},\"beta\":{\"durability\":\"durable\",\"connected\":true,\"cursor\":0}}",
+                    true,
+                ),
+                Mutation("topic.reads", "reads", topicFixture, topicSite, "{\"alpha\":[\"wrong\"],\"beta\":[\"a\"]}", true),
+                Mutation("topic.invalidates", "invalidates", topicFixture, topicSite, "{\"alpha\":false,\"beta\":true}", true),
+                Mutation("work.pending", "pending", workFixture, workSite0, "[{\"item_id\":0,\"value\":\"wrong\",\"attempts\":0}]", false),
+                Mutation(
+                    "work.in_flight",
+                    "in_flight",
+                    workFixture,
+                    "collections/$workFixture|steps[2].expected",
+                    "[{\"delivery_id\":0,\"item_id\":0,\"value\":\"a\",\"worker\":\"alpha\",\"attempt\":1,\"deadline\":999}]",
+                    false,
+                ),
+                Mutation(
+                    "work.dead_letters",
+                    "dead_letters",
+                    "workqueue_lease_deadletter.json",
+                    "collections/workqueue_lease_deadletter.json|steps[6].expected",
+                    "[{\"item_id\":0,\"value\":\"poison\",\"attempts\":2,\"reason\":\"nack\"}]",
+                    false,
+                ),
+                Mutation("work.reads", "reads", workFixture, workSite0, "{\"pending_len\":99,\"is_empty\":false,\"in_flight_len\":0,\"dead_letter_len\":0}", false),
+                Mutation("work.invalidates", "invalidates", workFixture, workSite0, "{\"pending_len\":false,\"is_empty\":true,\"in_flight_len\":false,\"dead_letter_len\":false}", false),
+            )
+        assertEquals(
+            setOf(
+                "topic.base_offset",
+                "topic.elements",
+                "topic.subscriptions",
+                "topic.reads",
+                "topic.invalidates",
+                "work.pending",
+                "work.in_flight",
+                "work.dead_letters",
+                "work.reads",
+                "work.invalidates",
+            ),
+            mutations.map { it.id }.toSet(),
+            "topic/work mutation matrix families",
+        )
+        // Other primary evaluators pin 8 cellmap/reconcile + 2 merge + 26 CRDT + 7 queue.
+        assertEquals(53, 8 + 2 + 26 + 7 + mutations.size, "collections executable expectation-family mutation total")
+
+        try {
+            fixtureOverride = { name ->
+                Json.parseToJsonElement(
+                    Files.readString(ConformanceFixtures.path("collections/$name")),
+                ).jsonObject
+            }
+            bindCanonicalBlocks = false
+            for (mutation in mutations) {
+                val replacement = Json.parseToJsonElement(mutation.replacement)
+                val fixturePath = "collections/${mutation.fixture}"
+                val raw = Files.readString(ConformanceFixtures.path(fixturePath))
+                val canonical = ConformanceFixtures.blockSitesOf(fixturePath, raw).getValue(mutation.siteId)
+                assertTrue(canonical.getValue(mutation.family) != replacement, "${mutation.id}: mutation changes value")
+                var hits = 0
+                expectationTransform = { siteId, expected ->
+                    if (siteId == mutation.siteId) {
+                        hits++
+                        JsonObject(expected + (mutation.family to replacement))
+                    } else {
+                        expected
+                    }
+                }
+                val failure = assertFails("${mutation.id}: changed fixture value survived production replay") {
+                    if (mutation.topic) {
+                        replayTopic(mutation.fixture, Flavor.Sync, linkedSetOf())
+                    } else {
+                        replayWork(mutation.fixture, Flavor.Sync, linkedSetOf())
+                    }
+                }
+                assertEquals(1, hits, "${mutation.id}: target site visited exactly once")
+                assertTrue(
+                    failure.message.orEmpty().contains(mutation.family),
+                    "${mutation.id}: production failure must name family '${mutation.family}', got ${failure.message}",
+                )
+            }
+        } finally {
+            fixtureOverride = null
+            expectationTransform = { _, expected -> expected }
+            bindCanonicalBlocks = true
         }
     }
 

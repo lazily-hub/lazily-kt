@@ -67,59 +67,70 @@ class WorkQueueConformanceTest {
     private fun assertInvalidations(
         ctx: Context,
         queue: WorkQueueCell<String>,
-        expected: JsonObject,
+        invalidates: AssertionKeys,
     ) {
-        val invalidates = expected.getValue("invalidates").jsonObject
         assertEquals(invalidationKinds, invalidates.keys, "expected.invalidates reader kinds")
-        assertEquals(invalidates.getValue("pending_len").jsonPrimitive.boolean, !ctx.isSet(queue.readers.pendingLen))
-        assertEquals(invalidates.getValue("is_empty").jsonPrimitive.boolean, !ctx.isSet(queue.readers.isEmpty))
-        assertEquals(invalidates.getValue("in_flight_len").jsonPrimitive.boolean, !ctx.isSet(queue.readers.inFlightLen))
-        assertEquals(invalidates.getValue("dead_letter_len").jsonPrimitive.boolean, !ctx.isSet(queue.readers.deadLetterLen))
+        invalidates.assertBoolean("pending_len") { !ctx.isSet(queue.readers.pendingLen) }
+        invalidates.assertBoolean("is_empty") { !ctx.isSet(queue.readers.isEmpty) }
+        invalidates.assertBoolean("in_flight_len") { !ctx.isSet(queue.readers.inFlightLen) }
+        invalidates.assertBoolean("dead_letter_len") { !ctx.isSet(queue.readers.deadLetterLen) }
     }
 
     private fun assertState(
         queue: WorkQueueCell<String>,
-        expected: JsonObject,
+        expected: AssertionKeys,
     ) {
-        val expectedPending = expected.getValue("pending").jsonArray
-        assertEquals(expectedPending.size, queue.pendingItems().size)
-        queue.pendingItems().zip(expectedPending).forEach { (actual, raw) ->
-            val item = raw.jsonObject
-            assertEquals(item.getValue("item_id").jsonPrimitive.long, actual.itemId)
-            assertEquals(item.getValue("value").jsonPrimitive.content, actual.value)
-            assertEquals(item.getValue("attempts").jsonPrimitive.int, actual.attempts)
+        expected.assertKeyWith("pending") { rawPending ->
+            val expectedPending = rawPending.jsonArray
+            assertEquals(expectedPending.size, queue.pendingItems().size)
+            queue.pendingItems().zip(expectedPending).forEach { (actual, raw) ->
+                val item = raw.jsonObject
+                assertEquals(setOf("item_id", "value", "attempts"), item.keys)
+                assertEquals(item.getValue("item_id").jsonPrimitive.long, actual.itemId)
+                assertEquals(item.getValue("value").jsonPrimitive.content, actual.value)
+                assertEquals(item.getValue("attempts").jsonPrimitive.int, actual.attempts)
+            }
         }
 
-        val expectedInFlight = expected.getValue("in_flight").jsonArray
-        assertEquals(expectedInFlight.size, queue.inFlightDeliveries().size)
-        queue.inFlightDeliveries().zip(expectedInFlight).forEach { (actual, raw) ->
-            assertDelivery(actual, raw.jsonObject)
+        expected.assertKeyWith("in_flight") { rawInFlight ->
+            val expectedInFlight = rawInFlight.jsonArray
+            assertEquals(expectedInFlight.size, queue.inFlightDeliveries().size)
+            queue.inFlightDeliveries().zip(expectedInFlight).forEach { (actual, raw) ->
+                assertDelivery(actual, raw.jsonObject)
+            }
         }
 
-        val expectedDeadLetters = expected.getValue("dead_letters").jsonArray
-        assertEquals(expectedDeadLetters.size, queue.deadLetterItems().size)
-        queue.deadLetterItems().zip(expectedDeadLetters).forEach { (actual, raw) ->
-            val dead = raw.jsonObject
-            assertEquals(dead.getValue("item_id").jsonPrimitive.long, actual.itemId)
-            assertEquals(dead.getValue("value").jsonPrimitive.content, actual.value)
-            assertEquals(dead.getValue("attempts").jsonPrimitive.int, actual.attempts)
-            val reason =
-                when (actual.reason) {
-                    WorkQueueDeadLetterReason.Nack -> "nack"
-                    WorkQueueDeadLetterReason.Expired -> "expired"
-                }
-            assertEquals(dead.getValue("reason").jsonPrimitive.content, reason)
+        expected.assertKeyWith("dead_letters") { rawDeadLetters ->
+            val expectedDeadLetters = rawDeadLetters.jsonArray
+            assertEquals(expectedDeadLetters.size, queue.deadLetterItems().size)
+            queue.deadLetterItems().zip(expectedDeadLetters).forEach { (actual, raw) ->
+                val dead = raw.jsonObject
+                assertEquals(setOf("item_id", "value", "attempts", "reason"), dead.keys)
+                assertEquals(dead.getValue("item_id").jsonPrimitive.long, actual.itemId)
+                assertEquals(dead.getValue("value").jsonPrimitive.content, actual.value)
+                assertEquals(dead.getValue("attempts").jsonPrimitive.int, actual.attempts)
+                val reason =
+                    when (actual.reason) {
+                        WorkQueueDeadLetterReason.Nack -> "nack"
+                        WorkQueueDeadLetterReason.Expired -> "expired"
+                    }
+                assertEquals(dead.getValue("reason").jsonPrimitive.content, reason)
+            }
         }
 
-        val reads = expected.getValue("reads").jsonObject
-        assertEquals(reads.getValue("pending_len").jsonPrimitive.int, queue.pendingLen())
-        assertEquals(reads.getValue("is_empty").jsonPrimitive.boolean, queue.isEmpty())
-        assertEquals(reads.getValue("in_flight_len").jsonPrimitive.int, queue.inFlightLen())
-        assertEquals(reads.getValue("dead_letter_len").jsonPrimitive.int, queue.deadLetterLen())
+        expected.sub("reads") { reads ->
+            reads.assertInt("pending_len") { queue.pendingLen() }
+            reads.assertBoolean("is_empty") { queue.isEmpty() }
+            reads.assertInt("in_flight_len") { queue.inFlightLen() }
+            reads.assertInt("dead_letter_len") { queue.deadLetterLen() }
+        }
     }
 
     private fun runFixture(name: String) {
+        val fixturePath = "collections/$name"
         val fixture = loadFixture(name)
+        val declaredSites = ConformanceFixtures.blockSitesOf(fixturePath, fixture).keys
+        val visitedSites = linkedSetOf<String>()
         val initial = fixture.getValue("initial").jsonObject
         val ctx = Context()
         val queue =
@@ -191,11 +202,21 @@ class WorkQueueConformanceTest {
             }
 
             val expected = step.getValue("expected").jsonObject
-            assertInvalidations(ctx, queue, expected)
-            assertState(queue, expected)
+            val siteId = "$fixturePath|steps[$index].expected"
+            check(visitedSites.add(siteId)) { "$siteId: sibling assertion block visited more than once" }
+            val keys = AssertionKeys(siteId, expected, fixturePath, rungZeroBind = false)
+            keys.sub("invalidates") { assertInvalidations(ctx, queue, it) }
+            assertState(queue, keys)
+            keys.requireAllSatisfied()
             executed++
         }
         assertEquals(steps.size, executed, "$name: loaded ${steps.size} steps but executed $executed")
+        assertEquals(declaredSites, visitedSites, "$fixturePath: exact sibling assertion-block sites")
+        assertEquals(
+            if (name == "workqueue_competing_delivery.json") 10 else 8,
+            visitedSites.size,
+            "$fixturePath: sibling assertion-block site pin",
+        )
     }
 
     @Test

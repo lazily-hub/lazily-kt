@@ -3,9 +3,7 @@ package io.github.lazily
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
@@ -13,6 +11,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFails
 import kotlin.test.assertTrue
 
 /**
@@ -42,6 +41,7 @@ private fun orderDigest(keys: List<String>): Int {
 
 class CollectionsFamilyConformanceTest {
     private val json = Json { ignoreUnknownKeys = true }
+    private var expectationTransform: (String, JsonObject) -> JsonObject = { _, expected -> expected }
 
     private fun loadFixture(name: String): JsonObject {
         ConformanceFixtures.requireRoot()
@@ -300,7 +300,9 @@ class CollectionsFamilyConformanceTest {
     private fun replay(
         flavor: Flavor,
         fixtureName: String,
+        visitedSites: MutableSet<String>?,
     ) {
+        val fixturePath = "collections/$fixtureName"
         val fixture = loadFixture(fixtureName)
 
         fun where(i: Int) = "${flavor.name} $fixtureName step $i"
@@ -327,6 +329,11 @@ class CollectionsFamilyConformanceTest {
             val step = rawStep.jsonObject
             val op = step["op"]!!.jsonObject
             val expected = step["expected"]!!.jsonObject
+            val siteId = "$fixturePath|steps[$i].expected"
+            if (visitedSites != null) {
+                check(visitedSites.add(siteId)) { "$siteId: assertion block visited more than once" }
+            }
+            val keys = AssertionKeys(siteId, expectationTransform(siteId, expected), fixturePath, rungZeroBind = false)
 
             // Rebuild + settle readers from the CURRENT key set so each step's
             // invalidation is measured against a fully settled graph.
@@ -382,13 +389,9 @@ class CollectionsFamilyConformanceTest {
             }
 
             val gotOrder = flavor.keysUntracked()
-            assertEquals(
-                strings(expected["order"]!!.jsonArray),
-                gotOrder,
-                "${where(i)}: order diverged",
-            )
+            keys.assertStrings("order") { gotOrder }
 
-            expected["membership"]?.let {
+            keys.assertKeyWith("membership") {
                 assertEquals(
                     strings(it.jsonArray).toSet(),
                     gotOrder.toSet(),
@@ -396,20 +399,15 @@ class CollectionsFamilyConformanceTest {
                 )
             }
 
-            expected["values"]?.jsonObject?.forEach { (key, want) ->
-                assertEquals(
-                    want.jsonPrimitive.int,
-                    flavor.valueUntracked(key),
-                    "${where(i)}: value for $key diverged",
-                )
+            keys.sub("values") { values ->
+                for (key in values.keys.sorted()) {
+                    values.assertInt(key) { flavor.valueUntracked(key)!! }
+                }
             }
 
             // The invalidation matrix, read from expected.invalidates - where the
             // fixtures actually nest it. lazily-rs read it off the step instead,
             // so its assertion never ran once.
-            val invalidates =
-                expected["invalidates"]?.jsonObject
-                    ?: error("${where(i)}: expected.invalidates is missing - the matrix is the contract")
             matrices += 1
 
             // Every sub-key REQUIRED, none defaulted (`#lzflagcoercion`). `?: emptySet()`
@@ -417,77 +415,101 @@ class CollectionsFamilyConformanceTest {
             // "nothing invalidated" — the weakest possible expectation, installed
             // silently. `invalidates` itself is already required just above, and a
             // half-present matrix is no more of a contract than an absent one.
-            fun matrix(key: String): JsonElement =
-                invalidates[key]
-                    ?: error(
-                        "${where(i)}: expected.invalidates is missing '$key' - a sub-key absent " +
-                            "from the matrix used to default to the weakest expectation, so " +
-                            "dropping it upstream silently disarmed this half of the contract",
-                    )
-
-            val dirty = strings(matrix("value").jsonArray).toSet()
             val survivors = gotOrder.toSet()
-            for ((key, drive) in valueReaders) {
-                if (key !in survivors) continue // removed: no entry left to read
-                val recomputed = drive() != baseline[key]
-                if (key in dirty) {
-                    assertTrue(
-                        recomputed,
-                        "${where(i)}: value reader for $key should have been invalidated",
-                    )
-                } else {
-                    assertTrue(
-                        !recomputed,
-                        "${where(i)}: value reader for $key should have stayed cached - " +
-                            "per-entry independence is the whole point",
-                    )
+            keys.sub("invalidates") { invalidates ->
+                invalidates.assertKeyWith("value") { rawDirty ->
+                    val dirty = strings(rawDirty.jsonArray).toSet()
+                    assertTrue(dirty.all(valueReaders::containsKey), "${where(i)}: invalidates.value names unknown readers")
+                    for ((key, drive) in valueReaders) {
+                        if (key !in survivors) continue // removed: no entry left to read
+                        val recomputed = drive() != baseline[key]
+                        if (key in dirty) {
+                            assertTrue(
+                                recomputed,
+                                "${where(i)}: value reader for $key should have been invalidated",
+                            )
+                        } else {
+                            assertTrue(
+                                !recomputed,
+                                "${where(i)}: value reader for $key should have stayed cached - " +
+                                    "per-entry independence is the whole point",
+                            )
+                        }
+                    }
                 }
+                invalidates.assertBoolean("membership") { membership() != membershipBase }
+                invalidates.assertBoolean("order") { order() != orderBase }
             }
-
-            assertEquals(
-                matrix("membership").jsonPrimitive.boolean,
-                membership() != membershipBase,
-                "${where(i)}: membership reader invalidation mismatch - " +
-                    "a pure reorder must NOT invalidate set-identity readers",
-            )
-            assertEquals(
-                matrix("order").jsonPrimitive.boolean,
-                order() != orderBase,
-                "${where(i)}: order reader invalidation mismatch",
-            )
 
             // Handle stability: the law separating an atomic move from a remove +
             // re-mint. A reorder keeps the entry's node, so dependents and lineage
             // survive.
-            expected["handle_stable"]?.jsonObject?.forEach { (key, wantStable) ->
-                val after = flavor.entryIdentity(key)
-                val before = idsBefore[key]
-                if (wantStable.jsonPrimitive.boolean) {
-                    assertTrue(
-                        before != null && after == before,
-                        "${where(i)}: handle for $key must survive the move - " +
-                            "a reorder that re-mints is a remove + insert, not a move",
-                    )
-                } else {
-                    assertTrue(after != before, "${where(i)}: handle for $key should have changed")
+            keys.sub("handle_stable") { stable ->
+                for (key in stable.keys.sorted()) {
+                    val before = checkNotNull(idsBefore[key]) {
+                        "${where(i)}: handle_stable names unknown preexisting key '$key'"
+                    }
+                    stable.assertBoolean(key) { flavor.entryIdentity(key) == before }
                 }
             }
+            keys.requireAllSatisfied()
         }
 
         assertTrue(
             matrices > 0,
             "${flavor.name}: $fixtureName asserted no invalidation matrix",
         )
+        if (visitedSites != null) {
+            val declared = ConformanceFixtures.blockSitesOf(fixturePath, fixture).keys
+            assertEquals(declared, visitedSites, "$fixturePath: exact sibling assertion-block sites")
+        }
     }
 
     @Test
     fun `atomic move contract binds every flavor`() {
-        for (build in flavors()) replay(build(), "cellmap_atomic_move.json")
+        val visitedSites = linkedSetOf<String>()
+        for ((index, build) in flavors().withIndex()) {
+            replay(build(), "cellmap_atomic_move.json", visitedSites.takeIf { index == 0 })
+        }
+        assertEquals(3, visitedSites.size, "atomic-move sibling site pin")
     }
 
     @Test
     fun `reader independence contract binds every flavor`() {
-        for (build in flavors()) replay(build(), "cellmap_independence.json")
+        val visitedSites = linkedSetOf<String>()
+        for ((index, build) in flavors().withIndex()) {
+            replay(build(), "cellmap_independence.json", visitedSites.takeIf { index == 0 })
+        }
+        assertEquals(4, visitedSites.size, "reader-independence sibling site pin")
+    }
+
+    @Test
+    fun `unknown handle stability key fails sibling production replay`() {
+        val targetSite = "collections/cellmap_atomic_move.json|steps[0].expected"
+        var hits = 0
+        try {
+            expectationTransform = { siteId, expected ->
+                if (siteId == targetSite) {
+                    hits++
+                    JsonObject(
+                        expected +
+                            (
+                                "handle_stable" to
+                                    json.parseToJsonElement("""{"unknown":false}""")
+                                ),
+                    )
+                } else {
+                    expected
+                }
+            }
+            val failure = assertFails("unknown handle_stable key must fail the sibling runner") {
+                replay(SyncFlavor(), "cellmap_atomic_move.json", linkedSetOf())
+            }
+            assertEquals(1, hits, "target sibling assertion site visited exactly once")
+            assertTrue(failure.message.orEmpty().contains("unknown preexisting key"), failure.message)
+        } finally {
+            expectationTransform = { _, expected -> expected }
+        }
     }
 
     /**

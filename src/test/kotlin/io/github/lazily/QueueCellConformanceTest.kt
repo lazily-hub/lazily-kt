@@ -1,6 +1,7 @@
 package io.github.lazily
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -9,8 +10,10 @@ import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFails
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -31,7 +34,12 @@ import kotlin.test.assertTrue
 class QueueCellConformanceTest {
     private val json = Json
 
+    private var fixtureOverride: ((String) -> JsonObject)? = null
+    private var expectationTransform: (String, JsonObject) -> JsonObject = { _, expected -> expected }
+    private var bindCanonicalBlocks = true
+
     private fun loadFixture(name: String): JsonObject {
+        fixtureOverride?.let { return it(name) }
         val text = ConformanceFixtures.read("collections/$name")
         return json.parseToJsonElement(text).jsonObject
     }
@@ -154,9 +162,9 @@ class QueueCellConformanceTest {
     private fun assertInvalidation(
         ctx: Context,
         readers: Readers,
-        invalidates: JsonObject,
+        invalidates: AssertionKeys,
     ) {
-        for ((kind, rawWant) in invalidates) {
+        for (kind in invalidates.keys.sorted()) {
             val reader =
                 readers.byKind[kind]
                     ?: error(
@@ -165,13 +173,7 @@ class QueueCellConformanceTest {
                             "nobody resolves is a row asserted by nothing — wire the reader, " +
                             "never skip the row (#lzsiblingrunnermasking)",
                     )
-            val expectedInv = rawWant.jsonPrimitive.boolean
-            val cached = ctx.isSet(reader)
-            if (expectedInv) {
-                assertFalse(cached, "reader `$kind` should have been invalidated but stayed cached")
-            } else {
-                assertTrue(cached, "reader `$kind` should have stayed cached but was invalidated")
-            }
+            invalidates.assertBoolean(kind) { !ctx.isSet(reader) }
         }
         // Re-materialize all readers so the next step starts from a known-cached
         // state regardless of which were invalidated.
@@ -181,16 +183,10 @@ class QueueCellConformanceTest {
     /** Assert the observable queue state after a step. */
     private fun assertState(
         q: QueueCell<V, VecDequeStorage<V>>,
-        expected: JsonObject,
+        expected: AssertionKeys,
     ) {
-        expected["elements"]?.jsonArray?.let { want ->
-            assertEquals(
-                want.map { it.jsonPrimitive.content },
-                q.elements(),
-                "elements mismatch",
-            )
-        }
-        expected["head"]?.let { headEl ->
+        expected.assertStrings("elements") { q.elements() }
+        expected.assertKeyWith("head") { headEl ->
             val want: V? = if (headEl is JsonNull) null else headEl.jsonPrimitive.content
             assertEquals(want, q.head(), "head mismatch")
         }
@@ -201,18 +197,10 @@ class QueueCellConformanceTest {
         // carried: the arm ran zero comparisons and the suite stayed green.
         // `.int` / `.boolean` throw on the same input, which is the whole point,
         // and it is what QueueFamilyConformanceTest already does for these keys.
-        expected["len"]?.let {
-            assertEquals(it.jsonPrimitive.int, q.len(), "len mismatch")
-        }
-        expected["is_empty"]?.let {
-            assertEquals(it.jsonPrimitive.boolean, q.isEmpty(), "is_empty mismatch")
-        }
-        expected["is_full"]?.let {
-            assertEquals(it.jsonPrimitive.boolean, q.isFull(), "is_full mismatch")
-        }
-        expected["closed"]?.let {
-            assertEquals(it.jsonPrimitive.boolean, q.isClosed(), "closed mismatch")
-        }
+        expected.assertInt("len") { q.len() }
+        expected.assertBoolean("is_empty") { q.isEmpty() }
+        expected.assertBoolean("is_full") { q.isFull() }
+        expected.assertBoolean("closed") { q.isClosed() }
     }
 
     /**
@@ -232,7 +220,11 @@ class QueueCellConformanceTest {
      * the loop cannot see it. The counter is compared to the length the fixture
      * declared, so there is no number to re-pin.
      */
-    private fun runFixture(fixture: JsonObject) {
+    private fun runFixture(name: String) {
+        val fixturePath = "collections/$name"
+        val fixture = loadFixture(name)
+        val declaredSites = ConformanceFixtures.blockSitesOf(fixturePath, fixture).keys
+        val visitedSites = linkedSetOf<String>()
         val ctx = Context()
         val q = buildInitial(ctx, fixture.getValue("initial").jsonObject)
         val readers = makeReaders(ctx, q)
@@ -253,7 +245,15 @@ class QueueCellConformanceTest {
             val op = step.getValue("op").jsonObject
             val opType = op.getValue("type").jsonPrimitive.content
             val expected = step.getValue("expected").jsonObject
-            val invalidates = expected.getValue("invalidates").jsonObject
+            val siteId = "$fixturePath|steps[$i].expected"
+            check(visitedSites.add(siteId)) { "$siteId: assertion block visited more than once" }
+            val keys =
+                AssertionKeys(
+                    siteId,
+                    expectationTransform(siteId, expected),
+                    fixturePath,
+                    rungZeroBind = bindCanonicalBlocks,
+                )
 
             val gotReturns: kotlinx.serialization.json.JsonElement =
                 when (opType) {
@@ -302,7 +302,7 @@ class QueueCellConformanceTest {
                 }
 
             // Assert the observable state.
-            assertState(q, expected)
+            assertState(q, keys)
 
             // Assert the `returns` value (element or error label).
             step["returns"]?.let { want ->
@@ -310,24 +310,54 @@ class QueueCellConformanceTest {
             }
 
             // Assert the per-reader-kind invalidation matrix.
-            assertInvalidation(ctx, readers, invalidates)
+            keys.sub("invalidates") { assertInvalidation(ctx, readers, it) }
+            keys.requireAllSatisfied()
             executed++
         }
 
         check(executed == steps.size) {
             "loaded ${steps.size} steps but executed $executed"
         }
+        assertEquals(declaredSites, visitedSites, "$fixturePath: exact assertion-block sites")
+        val expectedSiteCount =
+            when (name) {
+                "queuecell_bounded_backpressure.json" -> 5
+                "queuecell_closure_lifecycle.json" -> 8
+                "queuecell_mpsc_multi_writer.json" -> 6
+                "queuecell_popped_head_observation.json" -> 7
+                "queuecell_spsc_push_pop.json" -> 5
+                else -> error("no assertion-site pin for $name")
+            }
+        assertEquals(expectedSiteCount, visitedSites.size, "$fixturePath: assertion-block site pin")
     }
 
-    @Test fun `conformance spsc push pop`() = runFixture(loadFixture("queuecell_spsc_push_pop.json"))
+    @Test fun `conformance spsc push pop`() = runFixture("queuecell_spsc_push_pop.json")
 
-    @Test fun `conformance popped head observation`() = runFixture(loadFixture("queuecell_popped_head_observation.json"))
+    @Test fun `conformance popped head observation`() = runFixture("queuecell_popped_head_observation.json")
 
-    @Test fun `conformance mpsc multi writer`() = runFixture(loadFixture("queuecell_mpsc_multi_writer.json"))
+    @Test fun `conformance mpsc multi writer`() = runFixture("queuecell_mpsc_multi_writer.json")
 
-    @Test fun `conformance bounded backpressure`() = runFixture(loadFixture("queuecell_bounded_backpressure.json"))
+    @Test fun `conformance bounded backpressure`() = runFixture("queuecell_bounded_backpressure.json")
 
-    @Test fun `conformance closure lifecycle`() = runFixture(loadFixture("queuecell_closure_lifecycle.json"))
+    @Test fun `conformance closure lifecycle`() = runFixture("queuecell_closure_lifecycle.json")
+
+    @Test
+    fun `primary queue fixture site pin`() {
+        val names =
+            listOf(
+                "queuecell_bounded_backpressure.json",
+                "queuecell_closure_lifecycle.json",
+                "queuecell_mpsc_multi_writer.json",
+                "queuecell_popped_head_observation.json",
+                "queuecell_spsc_push_pop.json",
+            )
+        val declared =
+            names.sumOf { name ->
+                val path = "collections/$name"
+                ConformanceFixtures.blockSitesOf(path, loadFixture(name)).size
+            }
+        assertEquals(31, declared, "primary queue assertion-block site pin")
+    }
 
     // -----------------------------------------------------------------------
     // Direct (non-fixture) tests of the backpressure effect wiring — the
@@ -503,6 +533,90 @@ class QueueCellConformanceTest {
         assertNullError(storage.tryPush(2), "push 2")
         assertNullError(storage.tryPush(3), "push 3")
         assertEquals(listOf(1, 2, 3), storage.elements(), "elements in FIFO order")
+    }
+
+    @Test
+    fun `queue expectation families reject fixture value mutations`() {
+        data class Mutation(
+            val family: String,
+            val siteId: String,
+            val replacement: String,
+        )
+
+        val fixture = "queuecell_spsc_push_pop.json"
+        val fixturePath = "collections/$fixture"
+        val siteId = "$fixturePath|steps[0].expected"
+        val mutations =
+            listOf(
+                Mutation("elements", siteId, "[\"wrong\"]"),
+                Mutation("head", siteId, "\"wrong\""),
+                Mutation("len", siteId, "99"),
+                Mutation("is_empty", siteId, "true"),
+                Mutation("is_full", siteId, "true"),
+                Mutation("closed", siteId, "true"),
+                Mutation(
+                    "invalidates",
+                    siteId,
+                    "{\"head\":false,\"len\":true,\"is_empty\":true,\"is_full\":false,\"closed\":false}",
+                ),
+            )
+        assertEquals(
+            setOf("elements", "head", "len", "is_empty", "is_full", "closed", "invalidates"),
+            mutations.map { it.family }.toSet(),
+            "queue mutation matrix",
+        )
+
+        try {
+            val raw = Files.readString(ConformanceFixtures.path(fixturePath))
+            fixtureOverride = { name ->
+                json.parseToJsonElement(
+                    Files.readString(ConformanceFixtures.path("collections/$name")),
+                ).jsonObject
+            }
+            bindCanonicalBlocks = false
+            for (mutation in mutations) {
+                val replacement: JsonElement = json.parseToJsonElement(mutation.replacement)
+                val canonical = ConformanceFixtures.blockSitesOf(fixturePath, raw).getValue(mutation.siteId)
+                assertTrue(canonical.getValue(mutation.family) != replacement, "${mutation.family}: mutation changes value")
+                var hits = 0
+                expectationTransform = { actualSite, expected ->
+                    if (actualSite == mutation.siteId) {
+                        hits++
+                        JsonObject(expected + (mutation.family to replacement))
+                    } else {
+                        expected
+                    }
+                }
+                val failure = assertFails("${mutation.family}: changed fixture value survived production replay") {
+                    runFixture(fixture)
+                }
+                assertEquals(1, hits, "${mutation.family}: target site visited exactly once")
+                assertTrue(
+                    failure.message.orEmpty().contains(mutation.family),
+                    "${mutation.family}: production failure must name family, got ${failure.message}",
+                )
+            }
+
+            expectationTransform = { actualSite, expected ->
+                if (actualSite == siteId) {
+                    val invalidates = expected.getValue("invalidates").jsonObject
+                    JsonObject(
+                        expected +
+                            (
+                                "invalidates" to
+                                    JsonObject(invalidates + ("unknown_reader" to JsonPrimitive(false)))
+                                ),
+                    )
+                } else {
+                    expected
+                }
+            }
+            assertFails("unknown nested invalidation key must fail production replay") { runFixture(fixture) }
+        } finally {
+            fixtureOverride = null
+            expectationTransform = { _, expected -> expected }
+            bindCanonicalBlocks = true
+        }
     }
 
     private companion object {
