@@ -38,7 +38,7 @@ class CoordinationConformanceTest {
     private fun checkInval(
         ctx: Context,
         obs: Computed<Any>,
-        step: JsonObject,
+        expected: AssertionKeys,
         reader: String,
     ) {
         val wasCached = ctx.isSet(obs)
@@ -48,13 +48,9 @@ class CoordinationConformanceTest {
         // otherwise be compared by nothing (#lzsubblockkeyset). The nested
         // tracker owns the whole sub-block, so an unobserved reader kind fails
         // as an unconsumed key.
-        step["expected"]!!
-            .jsonObject
-            .getValue("invalidates")
-            .jsonObject
-            .consumingNested("expected.invalidates[$reader]") { inv ->
-                inv.assertBoolean(reader) { !wasCached }
-            }
+        expected.sub("invalidates") { inv ->
+            inv.assertBoolean(reader) { !wasCached }
+        }
     }
 
     @Test
@@ -63,7 +59,7 @@ class CoordinationConformanceTest {
         val ctx = Context()
         val lease = LeaseCell<Long>(ctx)
         val obs = observe(ctx, lease.holderCell)
-        for (element in steps(fx)) {
+        for ((index, element) in steps(fx).withIndex()) {
             val step = element.jsonObject
             val op = step["op"]!!.jsonObject
             val now = op["now"]!!.jsonPrimitive.long
@@ -85,11 +81,16 @@ class CoordinationConformanceTest {
                 // scenario books as replayed while naming behaviour never exercised.
                 else -> error("lease.json: unknown op type '${op["type"]!!.jsonPrimitive.content}'")
             }
-            val exp = step["expected"]!!.jsonObject
-            assertEquals(exp["holder"]!!.jsonPrimitive.longOrNull, lease.holder(now))
-            assertEquals(exp["held"]!!.jsonPrimitive.boolean, lease.isHeld(now))
-            assertEquals(exp["fence"]!!.jsonPrimitive.long, lease.fence())
-            checkInval(ctx, obs, step, "holder")
+            step.getValue("expected").jsonObject.consuming(
+                "coordination/lease.json steps[$index].expected",
+            ) { expected ->
+                expected.assertKeyOutcome("holder") { want ->
+                    want.jsonPrimitive.longOrNull == lease.holder(now)
+                }
+                expected.assertBoolean("held") { lease.isHeld(now) }
+                expected.assertLong("fence") { lease.fence() }
+                checkInval(ctx, obs, expected, "holder")
+            }
         }
     }
 
@@ -100,7 +101,7 @@ class CoordinationConformanceTest {
         val me = fx["config"]!!.jsonObject["me"]!!.jsonPrimitive.long
         val leader = LeaderCell<Long>(ctx, me)
         val obs = observe(ctx, leader.currentLeaderCell)
-        for (element in steps(fx)) {
+        for ((index, element) in steps(fx).withIndex()) {
             val step = element.jsonObject
             val op = step["op"]!!.jsonObject
             val now = op["now"]!!.jsonPrimitive.long
@@ -111,10 +112,15 @@ class CoordinationConformanceTest {
                     "tick" -> leader.tick(now)
                     else -> error("bad op")
                 }
-            val exp = step["expected"]!!.jsonObject
-            assertEquals(exp["role"]!!.jsonPrimitive.content, role.name)
-            assertEquals(exp["current_leader"]!!.jsonPrimitive.longOrNull, leader.currentLeader(now))
-            checkInval(ctx, obs, step, "current_leader")
+            step.getValue("expected").jsonObject.consuming(
+                "coordination/leader.json steps[$index].expected",
+            ) { expected ->
+                expected.assertString("role") { role.name }
+                expected.assertKeyOutcome("current_leader") { want ->
+                    want.jsonPrimitive.longOrNull == leader.currentLeader(now)
+                }
+                checkInval(ctx, obs, expected, "current_leader")
+            }
         }
     }
 
@@ -124,7 +130,7 @@ class CoordinationConformanceTest {
         val ctx = Context()
         val lock = LockCell<Long>(ctx)
         val obs = observe(ctx, lock.isLockedCell)
-        for (element in steps(fx)) {
+        for ((index, element) in steps(fx).withIndex()) {
             val step = element.jsonObject
             val op = step["op"]!!.jsonObject
             val now = op["now"]?.jsonPrimitive?.longOrNull ?: 0
@@ -143,10 +149,13 @@ class CoordinationConformanceTest {
                 // Fail closed on an unrecognised op (`#lzscenariobodyskip`).
                 else -> error("lock.json: unknown op type '${op["type"]!!.jsonPrimitive.content}'")
             }
-            val exp = step["expected"]!!.jsonObject
-            assertEquals(exp["is_locked"]!!.jsonPrimitive.boolean, lock.isLocked(now))
-            assertEquals(exp["fence"]!!.jsonPrimitive.long, lock.fence())
-            checkInval(ctx, obs, step, "is_locked")
+            step.getValue("expected").jsonObject.consuming(
+                "coordination/lock.json steps[$index].expected",
+            ) { expected ->
+                expected.assertBoolean("is_locked") { lock.isLocked(now) }
+                expected.assertLong("fence") { lock.fence() }
+                checkInval(ctx, obs, expected, "is_locked")
+            }
         }
     }
 
@@ -157,7 +166,7 @@ class CoordinationConformanceTest {
         val cap = fx["config"]!!.jsonObject["capacity"]!!.jsonPrimitive.long
         val sem = SemaphoreCell(ctx, cap)
         val obs = observe(ctx, sem.permitsAvailableCell)
-        for (element in steps(fx)) {
+        for ((index, element) in steps(fx).withIndex()) {
             val step = element.jsonObject
             when (step["op"]!!.jsonObject["type"]!!.jsonPrimitive.content) {
                 // `.boolean`, never `booleanOrNull` — see ResilienceConformanceTest
@@ -175,9 +184,12 @@ class CoordinationConformanceTest {
                             "'${step["op"]!!.jsonObject["type"]!!.jsonPrimitive.content}'",
                     )
             }
-            val exp = step["expected"]!!.jsonObject
-            assertEquals(exp["permits_available"]!!.jsonPrimitive.long, sem.permitsAvailable())
-            checkInval(ctx, obs, step, "permits_available")
+            step.getValue("expected").jsonObject.consuming(
+                "coordination/semaphore.json steps[$index].expected",
+            ) { expected ->
+                expected.assertLong("permits_available") { sem.permitsAvailable() }
+                checkInval(ctx, obs, expected, "permits_available")
+            }
         }
     }
 
@@ -188,7 +200,7 @@ class CoordinationConformanceTest {
         val total = fx["config"]!!.jsonObject["total"]!!.jsonPrimitive.long
         val q = BarrierCell.quorum<Long>(ctx, total)
         val obs = observe(ctx, q.isOpenCell)
-        for (element in steps(fx)) {
+        for ((index, element) in steps(fx).withIndex()) {
             val step = element.jsonObject
             // The runner drives `arrive` unconditionally, so read the discriminator
             // and refuse anything the fixture did not name (`#lzscenariobodyskip`) —
@@ -197,10 +209,13 @@ class CoordinationConformanceTest {
             if (opType != "vote") error("quorum.json: unknown op type '$opType'")
             val got = q.arrive(step["op"]!!.jsonObject["peer"]!!.jsonPrimitive.long)
             assertEquals(step["returns"]!!.jsonPrimitive.boolean, got)
-            val exp = step["expected"]!!.jsonObject
-            assertEquals(exp["votes"]!!.jsonPrimitive.long, q.count())
-            assertEquals(exp["is_open"]!!.jsonPrimitive.boolean, q.isOpen())
-            checkInval(ctx, obs, step, "is_open")
+            step.getValue("expected").jsonObject.consuming(
+                "coordination/quorum.json steps[$index].expected",
+            ) { expected ->
+                expected.assertLong("votes") { q.count() }
+                expected.assertBoolean("is_open") { q.isOpen() }
+                checkInval(ctx, obs, expected, "is_open")
+            }
         }
     }
 }
