@@ -13,6 +13,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionException
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -23,22 +24,29 @@ class PortableStdlibConformanceTest {
 
     @Test
     fun canonicalFixturesReplayProductionPrimitives() {
+        var visitedBlockCount = 0
         listOf("timer.json", "timeout.json", "revision_barrier.json").forEach { name ->
+            val fixturePath = "stdlib/$name"
             val fixture =
                 json
                     .parseToJsonElement(
-                        ConformanceFixtures.read("stdlib/$name"),
+                        ConformanceFixtures.read(fixturePath),
                     ).jsonObject
             assertFixtureBookkeeping(fixture)
-            ConformanceScenarios.of("stdlib/$name", fixture).forEach { scenario ->
+            val declaredSites = ConformanceFixtures.blockSitesOf(fixturePath, fixture).keys
+            val visitedSites = linkedSetOf<String>()
+            ConformanceScenarios.indexed(fixturePath, fixture).forEach { (scenarioIndex, scenario) ->
                 when (fixture.string("feature")) {
-                    "stdlib_timer_v1" -> replayTimer(scenario)
-                    "stdlib_timeout_v1" -> replayTimeout(scenario)
-                    "stdlib_revision_barrier_v1" -> replayBarrier(scenario)
+                    "stdlib_timer_v1" -> replayTimer(fixturePath, scenarioIndex, scenario, visitedSites)
+                    "stdlib_timeout_v1" -> replayTimeout(fixturePath, scenarioIndex, scenario, visitedSites)
+                    "stdlib_revision_barrier_v1" -> replayBarrier(fixturePath, scenarioIndex, scenario, visitedSites)
                     else -> error("unsupported stdlib feature ${fixture.string("feature")}")
                 }
             }
+            assertEquals(declaredSites, visitedSites, "$fixturePath: exact assertion-block sites")
+            visitedBlockCount += visitedSites.size
         }
+        assertEquals(54, visitedBlockCount, "stdlib assertion-block site count")
     }
 
     @Test
@@ -156,6 +164,118 @@ class PortableStdlibConformanceTest {
         assertEquals(RevisionBarrierOutcome.Disposed, observation.join().outcome)
     }
 
+    @Test
+    fun timeoutClockRegressionAndCancellationUnavailableLatchBeforeAdaptersRunAgain() {
+        val regressed = Timeout<String>(5uL, 10uL)
+        var operationCalls = 0
+        var cancellationCalls = 0
+        assertEquals(
+            TimeoutOutcome.Pending,
+            regressed
+                .poll(
+                    8uL,
+                    operation = {
+                        operationCalls += 1
+                        TimeoutOperation.Pending
+                    },
+                    cancellation = {
+                        cancellationCalls += 1
+                        TimeoutCancellation.Pending
+                    },
+                ).outcome,
+        )
+        operationCalls = 0
+        cancellationCalls = 0
+        val regression =
+            regressed.poll(
+                7uL,
+                operation = {
+                    operationCalls += 1
+                    TimeoutOperation.Completed("must not run")
+                },
+                cancellation = {
+                    cancellationCalls += 1
+                    TimeoutCancellation.Cancelled
+                },
+            )
+        assertEquals(TimeoutOutcome.Unavailable, regression.outcome)
+        assertEquals(StdlibUnavailableReason.ClockRegression, regression.reason)
+        assertEquals(0, operationCalls)
+        assertEquals(0, cancellationCalls)
+        assertEquals(regression, regressed.poll(9uL, { error("terminal operation") }, { error("terminal cancellation") }))
+
+        val unavailable =
+            Timeout<String>(0uL, 10uL).poll(
+                1uL,
+                operation = { TimeoutOperation.Pending },
+                cancellation = { TimeoutCancellation.Unavailable },
+            )
+        assertEquals(TimeoutOutcome.Unavailable, unavailable.outcome)
+        assertEquals(StdlibUnavailableReason.CancellationUnavailable, unavailable.reason)
+    }
+
+    @Test
+    fun registerRecheckDeadlineWinsBeforeRevisionMutation() {
+        val barrier = RevisionBarrier(revision = 0uL, requiredRevision = 1uL, deadline = 5uL)
+        val timedOut = barrier.registerRecheck(now = 5uL, observedRevision = 1uL, predicate = true)
+        assertEquals(RevisionBarrierOutcome.TimedOut, timedOut.outcome)
+        assertEquals(0uL, timedOut.revision)
+        assertEquals(0uL, timedOut.generation)
+        assertEquals(timedOut, barrier.advance(revision = 2uL, predicate = true))
+    }
+
+    @Test
+    fun futureAdaptersExposeTypedUnavailableAndExceptionalCompletion() {
+        val operationUnavailable =
+            Timeout<String>(0uL, 10uL)
+                .pollFuture(
+                    1uL,
+                    operation = { CompletableFuture.completedFuture(TimeoutOperation.Unavailable) },
+                    cancellation = { CompletableFuture.completedFuture(TimeoutCancellation.Pending) },
+                ).join()
+        assertEquals(TimeoutOutcome.Unavailable, operationUnavailable.outcome)
+        assertEquals(StdlibUnavailableReason.OperationUnavailable, operationUnavailable.reason)
+
+        val cancellationUnavailable =
+            Timeout<String>(0uL, 10uL)
+                .pollFuture(
+                    1uL,
+                    operation = { CompletableFuture.completedFuture(TimeoutOperation.Pending) },
+                    cancellation = { CompletableFuture.completedFuture(TimeoutCancellation.Unavailable) },
+                ).join()
+        assertEquals(TimeoutOutcome.Unavailable, cancellationUnavailable.outcome)
+        assertEquals(StdlibUnavailableReason.CancellationUnavailable, cancellationUnavailable.reason)
+
+        val barrierUnavailable =
+            RevisionBarrier(0uL, 1uL, null)
+                .observeFuture(0uL, predicate = false) {
+                    CompletableFuture.completedFuture(TimeoutCancellation.Unavailable)
+                }.join()
+        assertEquals(RevisionBarrierOutcome.Unavailable, barrierUnavailable.outcome)
+        assertEquals(StdlibUnavailableReason.CancellationUnavailable, barrierUnavailable.reason)
+
+        var cancellationStarted = false
+        val synchronousFailure =
+            Timeout<String>(0uL, 10uL).pollFuture(
+                1uL,
+                operation = { throw IllegalStateException("operation failed") },
+                cancellation = {
+                    cancellationStarted = true
+                    CompletableFuture.completedFuture(TimeoutCancellation.Pending)
+                },
+            )
+        val synchronousThrown = assertFailsWith<CompletionException> { synchronousFailure.join() }
+        assertTrue(synchronousThrown.cause is IllegalStateException)
+        assertTrue(cancellationStarted, "both future adapters must start before either result is inspected")
+
+        val asynchronousFailure = CompletableFuture<TimeoutCancellation>()
+        val failedBarrier =
+            RevisionBarrier(0uL, 1uL, null).observeFuture(0uL, predicate = false) { asynchronousFailure }
+        asynchronousFailure.completeExceptionally(IllegalArgumentException("cancellation failed"))
+        val asynchronousThrown = assertFailsWith<CompletionException> { failedBarrier.join() }
+        assertTrue(asynchronousThrown.cause is IllegalArgumentException)
+    }
+
     private fun assertFixtureBookkeeping(fixture: JsonObject) {
         val scenarios = fixture.required("scenarios").jsonArray
         val scenarioIds = scenarios.map { it.jsonObject.string("id") }.toSet()
@@ -185,7 +305,12 @@ class PortableStdlibConformanceTest {
         }
     }
 
-    private fun replayTimer(scenario: JsonObject) {
+    private fun replayTimer(
+        fixturePath: String,
+        scenarioIndex: Int,
+        scenario: JsonObject,
+        visitedSites: MutableSet<String>,
+    ) {
         var timer: Timer? = null
         scenario.required("steps").jsonArray.forEachIndexed { index, stepElement ->
             val step = stepElement.jsonObject
@@ -213,11 +338,16 @@ class PortableStdlibConformanceTest {
 
                     else -> error("unsupported timer op ${step.string("op")}")
                 }
-            assertStep(scenario, index, step, actual)
+            assertStep(fixturePath, scenarioIndex, index, step, actual, visitedSites)
         }
     }
 
-    private fun replayTimeout(scenario: JsonObject) {
+    private fun replayTimeout(
+        fixturePath: String,
+        scenarioIndex: Int,
+        scenario: JsonObject,
+        visitedSites: MutableSet<String>,
+    ) {
         var timeout: Timeout<String>? = null
         scenario.required("steps").jsonArray.forEachIndexed { index, stepElement ->
             val step = stepElement.jsonObject
@@ -265,11 +395,16 @@ class PortableStdlibConformanceTest {
 
                     else -> error("unsupported timeout op ${step.string("op")}")
                 }
-            assertStep(scenario, index, step, actual)
+            assertStep(fixturePath, scenarioIndex, index, step, actual, visitedSites)
         }
     }
 
-    private fun replayBarrier(scenario: JsonObject) {
+    private fun replayBarrier(
+        fixturePath: String,
+        scenarioIndex: Int,
+        scenario: JsonObject,
+        visitedSites: MutableSet<String>,
+    ) {
         var barrier: RevisionBarrier? = null
         scenario.required("steps").jsonArray.forEachIndexed { index, stepElement ->
             val step = stepElement.jsonObject
@@ -318,21 +453,52 @@ class PortableStdlibConformanceTest {
                     observation,
                     cancellationCalls.takeIf { step.string("op") == "observe" },
                 )
-            assertStep(scenario, index, step, actual)
+            assertStep(fixturePath, scenarioIndex, index, step, actual, visitedSites)
         }
     }
 
     private fun assertStep(
-        scenario: JsonObject,
-        index: Int,
+        fixturePath: String,
+        scenarioIndex: Int,
+        stepIndex: Int,
         step: JsonObject,
         actual: JsonObject,
+        visitedSites: MutableSet<String>,
     ) {
-        assertEquals(
-            step.required("expect").jsonObject,
-            actual,
-            "${scenario.string("id")} step $index",
-        )
+        val siteId = "$fixturePath|scenarios[$scenarioIndex].steps[$stepIndex].expect"
+        check(visitedSites.add(siteId)) { "$siteId: assertion block visited more than once" }
+        val expected = AssertionKeys(siteId, step.required("expect").jsonObject, fixturePath)
+
+        // Key-set equality is deliberately bidirectional. AssertionKeys catches a
+        // fixture key this runner forgot, while this comparison also catches an
+        // observation field the fixture forgot to declare.
+        assertEquals(expected.keys, actual.keys, "$siteId: whole-block key set")
+
+        val outcome = actual.string("outcome")
+        expected.assertKeyValue("outcome") { actual.required("outcome") }
+        when (outcome) {
+            "pending" -> expected.assertKeyValue("deadline") { actual.required("deadline") }
+            "fired" -> expected.assertKeyValue("fired_at") { actual.required("fired_at") }
+            "completed" -> expected.assertKeyValue("value") { actual.required("value") }
+            "unavailable" -> {
+                expected.assertKeyValue("reason") { actual.required("reason") }
+                // Timer clock regression preserves its live deadline; constructor
+                // overflow has none. The fixture decides which shape applies.
+                expected.assertKeyValue("deadline") { actual.required("deadline") }
+            }
+
+            "timed_out", "cancelled", "satisfied", "disposed" -> Unit
+            else -> error("$siteId: unsupported observed outcome '$outcome'")
+        }
+
+        // These are outcome-independent observables within their respective
+        // primitive. Optional AssertionKeys reads do not evaluate the actual
+        // accessor when a fixture omits the key.
+        expected.assertKeyValue("operation_calls") { actual.required("operation_calls") }
+        expected.assertKeyValue("cancellation_calls") { actual.required("cancellation_calls") }
+        expected.assertKeyValue("revision") { actual.required("revision") }
+        expected.assertKeyValue("generation") { actual.required("generation") }
+        expected.requireAllSatisfied()
     }
 
     private fun timerObservation(observation: TimerObservation): JsonObject =
