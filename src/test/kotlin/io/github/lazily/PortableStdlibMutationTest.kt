@@ -11,6 +11,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -35,18 +36,23 @@ class PortableStdlibMutationTest {
     @Test
     fun everyDeclaredMutationKillsEveryRequiredScenario() {
         var pairCount = 0
+        var declaredEntryCount = 0
+        var appliedEntryCount = 0
         fixtureNames.forEach { name ->
             val fixture = load(name)
             val baseline = independentFailures(fixture, null).failed
             assertEquals(emptySet(), baseline, "stdlib/$name: unperturbed replay already fails")
             val mutations = fixture.required("mutations").jsonArray
             assertTrue(mutations.isNotEmpty(), "stdlib/$name: empty mutation ledger")
+            declaredEntryCount += mutations.size
             var fixturePairCount = 0
             mutations.forEach { element ->
                 val mutation = element.jsonObject
                 val operator = mutation.string("operator")
-                val mustFail = mutation.required("must_fail").jsonArray.map { it.jsonPrimitive.content }.toSet()
+                val mustFailList = mutation.required("must_fail").jsonArray.map { it.jsonPrimitive.content }
+                val mustFail = mustFailList.toSet()
                 assertTrue(mustFail.isNotEmpty(), "stdlib/$name: $operator names no scenario")
+                assertEquals(mustFailList.size, mustFail.size, "stdlib/$name: $operator repeats must_fail IDs")
 
                 val result = independentFailures(fixture, operator)
                 assertTrue(
@@ -65,6 +71,7 @@ class PortableStdlibMutationTest {
                     "stdlib/$name: mutation '$operator' claims a scenario that already fails unperturbed",
                 )
                 fixturePairCount += mustFail.size
+                appliedEntryCount += 1
             }
             assertTrue(
                 fixturePairCount >= fixture.required("mutation_floor").jsonPrimitive.int,
@@ -72,11 +79,16 @@ class PortableStdlibMutationTest {
             )
             pairCount += fixturePairCount
         }
-        assertTrue(pairCount >= 15, "applied only $pairCount mutation/scenario pairs")
+        assertEquals(declaredEntryCount, appliedEntryCount, "not every declared mutation was applied")
+        assertTrue(pairCount > 0, "no mutation/scenario pairs were applied")
     }
 
-    private fun load(name: String): JsonObject =
-        json.parseToJsonElement(ConformanceFixtures.read("stdlib/$name")).jsonObject
+    private fun load(name: String): JsonObject {
+        ConformanceFixtures.requireRoot()
+        return json
+            .parseToJsonElement(Files.readString(ConformanceFixtures.path("stdlib/$name")))
+            .jsonObject
+    }
 
     private fun independentFailures(
         fixture: JsonObject,
@@ -84,7 +96,10 @@ class PortableStdlibMutationTest {
     ): MutationResult {
         val mutation = Mutation(operator)
         val failed = linkedSetOf<String>()
-        fixture.required("scenarios").jsonArray.forEach { element ->
+        val scenarios = fixture.required("scenarios").jsonArray
+        val scenarioIds = scenarios.map { it.jsonObject.string("id") }
+        require(scenarioIds.size == scenarioIds.toSet().size) { "duplicate stdlib scenario IDs" }
+        scenarios.forEach { element ->
             val scenario = element.jsonObject
             val state = ModelState()
             scenario.required("steps").jsonArray.forEach { stepElement ->
