@@ -1,6 +1,7 @@
 package io.github.lazily
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.int
@@ -86,6 +87,23 @@ class IngressFamilyConformanceTest {
             LedgerRow("thread-safe", "ThreadSafeIngressCell", shipped = true),
             LedgerRow("async", "AsyncIngressCell", shipped = true),
         )
+
+    private val scopeFields =
+        listOf(
+            "lifecycle",
+            "generation",
+            "delivered_through",
+            "buffered",
+            "window",
+            "readiness",
+            "consecutive_errors",
+            "authority",
+            "retry",
+        )
+    private val authorityFields = listOf("generation", "delivered_through", "stamped_at")
+    private val retryFields = listOf("attempt", "backoff", "resume_from")
+    private val receiptFields = listOf("accepted", "dropped", "error")
+    private val invalidationFields = listOf("value", "readiness", "authority", "retry")
 
     // -- The flavor-neutral model ------------------------------------------
 
@@ -654,8 +672,12 @@ class IngressFamilyConformanceTest {
                 }
 
                 val after = snapshot(model, keyList)
-                assertState(model, step.getValue("expected").jsonObject, where)
-                assertInvalidation(step.getValue("expected").jsonObject, before, after, where)
+                step.getValue("expected").jsonObject.consuming(
+                    "ingress/$name steps[$index].expected ($flavor $opType)",
+                ) { expected ->
+                    assertState(model, expected, keyList, where)
+                    assertInvalidation(expected, before, after, where)
+                }
                 materialize(model, keyList)
                 executed++
             }
@@ -668,89 +690,102 @@ class IngressFamilyConformanceTest {
 
     private fun assertState(
         model: IngressModel,
-        expected: JsonObject,
+        expected: AssertionKeys,
+        allKeys: List<String>,
         where: String,
     ) {
-        for ((key, rawWant) in expected.getValue("scopes").jsonObject) {
-            val want = rawWant.jsonObject
-            val view = model.view(key) ?: error("$where: scope $key absent")
-            assertEquals(
-                lifecycleOf(want.getValue("lifecycle").jsonPrimitive.content),
-                view.lifecycle,
-                "$where: $key lifecycle",
-            )
-            assertEquals(
-                want.getValue("generation").jsonPrimitive.long,
-                view.generation,
-                "$where: $key generation",
-            )
-            assertEquals(
-                want.getValue("delivered_through").jsonPrimitive.longOrNull,
-                view.deliveredThrough,
-                "$where: $key watermark",
-            )
-            assertEquals(
-                want.getValue("buffered").jsonPrimitive.int,
-                view.buffered,
-                "$where: $key buffered",
-            )
-            assertEquals(
-                want.getValue("consecutive_errors").jsonPrimitive.int,
-                view.consecutiveErrors,
-                "$where: $key consecutive errors",
-            )
-            assertEquals(
-                want.getValue("window").jsonPrimitive.longOrNull,
-                model.value(key),
-                "$where: $key window",
-            )
-            assertEquals(
-                readinessOf(want.getValue("readiness").jsonPrimitive.content),
-                model.readiness(key),
-                "$where: $key readiness",
-            )
-            val wantAuthority = want.getValue("authority") as? JsonObject
-            assertEquals(
-                wantAuthority?.let {
-                    IngressAuthority(
-                        it.getValue("generation").jsonPrimitive.long,
-                        it.getValue("delivered_through").jsonPrimitive.longOrNull,
-                        it.getValue("stamped_at").jsonPrimitive.long,
-                    )
-                },
-                model.authority(key),
-                "$where: $key authority",
-            )
-            val wantRetry = want.getValue("retry") as? JsonObject
-            assertEquals(
-                wantRetry?.let {
-                    IngressRetry(
-                        it.getValue("attempt").jsonPrimitive.int,
-                        it.getValue("backoff").jsonPrimitive.long,
-                        it.getValue("resume_from").jsonPrimitive.long,
-                    )
-                },
-                model.retry(key),
-                "$where: $key retry",
-            )
+        expected.assertKeySet("scopes") { allKeys.filter { model.view(it) != null } }
+        expected.sub("scopes") { scopes ->
+            for (key in scopes.keys) {
+                val view = model.view(key) ?: error("$where: scope $key absent")
+                val value = model.value(key)
+                val readiness = model.readiness(key)
+                val authority = model.authority(key)
+                val retry = model.retry(key)
+
+                scopes.assertKeySet(key) { scopeFields }
+                scopes.sub(key) { want ->
+                    want.assertKeyOutcome("lifecycle") {
+                        lifecycleOf(it.jsonPrimitive.content) == view.lifecycle
+                    }
+                    want.assertKeyOutcome("generation") {
+                        it.jsonPrimitive.long == view.generation
+                    }
+                    want.assertKeyOutcome("delivered_through") {
+                        it.jsonPrimitive.longOrNull == view.deliveredThrough
+                    }
+                    want.assertKeyOutcome("buffered") {
+                        it.jsonPrimitive.int == view.buffered
+                    }
+                    want.assertKeyOutcome("window") {
+                        it.jsonPrimitive.longOrNull == value
+                    }
+                    want.assertKeyOutcome("readiness") {
+                        readinessOf(it.jsonPrimitive.content) == readiness
+                    }
+                    want.assertKeyOutcome("consecutive_errors") {
+                        it.jsonPrimitive.int == view.consecutiveErrors
+                    }
+
+                    when (want["authority"]) {
+                        is JsonObject -> {
+                            want.assertKeySet("authority") { authorityFields }
+                            want.sub("authority") { authorityWant ->
+                                authorityWant.assertKeyOutcome("generation") {
+                                    it.jsonPrimitive.long == authority?.generation
+                                }
+                                authorityWant.assertKeyOutcome("delivered_through") {
+                                    it.jsonPrimitive.longOrNull == authority?.deliveredThrough
+                                }
+                                authorityWant.assertKeyOutcome("stamped_at") {
+                                    it.jsonPrimitive.long == authority?.stampedAt
+                                }
+                            }
+                        }
+                        JsonNull ->
+                            want.assertKeyOutcome("authority") {
+                                it is JsonNull && authority == null
+                            }
+                        else -> error("$where: $key authority must be an object or null")
+                    }
+
+                    when (want["retry"]) {
+                        is JsonObject -> {
+                            want.assertKeySet("retry") { retryFields }
+                            want.sub("retry") { retryWant ->
+                                retryWant.assertKeyOutcome("attempt") {
+                                    it.jsonPrimitive.int == retry?.attempt
+                                }
+                                retryWant.assertKeyOutcome("backoff") {
+                                    it.jsonPrimitive.long == retry?.backoff
+                                }
+                                retryWant.assertKeyOutcome("resume_from") {
+                                    it.jsonPrimitive.long == retry?.resumeFrom
+                                }
+                            }
+                        }
+                        JsonNull ->
+                            want.assertKeyOutcome("retry") {
+                                it is JsonNull && retry == null
+                            }
+                        else -> error("$where: $key retry must be an object or null")
+                    }
+                }
+            }
         }
 
-        val receipts = expected.getValue("receipts").jsonObject
-        assertEquals(
-            receipts.getValue("accepted").jsonPrimitive.int,
-            model.acceptedLen(),
-            "$where: accepted receipts",
-        )
-        assertEquals(
-            receipts.getValue("dropped").jsonPrimitive.int,
-            model.droppedLen(),
-            "$where: dropped receipts",
-        )
-        assertEquals(
-            receipts.getValue("error").jsonPrimitive.int,
-            model.errorsLen(),
-            "$where: error receipts",
-        )
+        expected.assertKeySet("receipts") { receiptFields }
+        expected.sub("receipts") { receipts ->
+            receipts.assertKeyOutcome("accepted") {
+                it.jsonPrimitive.int == model.acceptedLen()
+            }
+            receipts.assertKeyOutcome("dropped") {
+                it.jsonPrimitive.int == model.droppedLen()
+            }
+            receipts.assertKeyOutcome("error") {
+                it.jsonPrimitive.int == model.errorsLen()
+            }
+        }
     }
 
     /**
@@ -758,38 +793,38 @@ class IngressFamilyConformanceTest {
      * from valid to invalid across the op; `false` means it stayed valid.
      */
     private fun assertInvalidation(
-        expected: JsonObject,
+        expected: AssertionKeys,
         before: ValiditySnapshot,
         after: ValiditySnapshot,
         where: String,
     ) {
-        val kinds = listOf("value", "readiness", "authority", "retry")
-        val want = expected.getValue("invalidates").jsonObject
-        for ((key, rawScope) in want.getValue("scopes").jsonObject) {
-            val wantScope = rawScope.jsonObject
-            val beforeScope = requireNotNull(before.scopes[key]) { "$where: unprobed key $key" }
-            val afterScope = requireNotNull(after.scopes[key]) { "$where: unprobed key $key" }
-            kinds.forEachIndexed { slot, kind ->
-                val invalidated = beforeScope[slot] && !afterScope[slot]
-                assertEquals(
-                    wantScope.getValue(kind).jsonPrimitive.boolean,
-                    invalidated,
-                    "$where: $key.$kind invalidation " +
-                        "(was valid=${beforeScope[slot]}, now valid=${afterScope[slot]})",
-                )
+        expected.assertKeySet("invalidates") { setOf("scopes", "receipts") }
+        expected.sub("invalidates") { invalidates ->
+            invalidates.sub("scopes") { scopes ->
+                for (key in scopes.keys) {
+                    val beforeScope = requireNotNull(before.scopes[key]) { "$where: unprobed key $key" }
+                    val afterScope = requireNotNull(after.scopes[key]) { "$where: unprobed key $key" }
+                    scopes.assertKeySet(key) { invalidationFields }
+                    scopes.sub(key) { wantScope ->
+                        invalidationFields.forEachIndexed { slot, kind ->
+                            val invalidated = beforeScope[slot] && !afterScope[slot]
+                            wantScope.assertKeyOutcome(kind) {
+                                it.jsonPrimitive.boolean == invalidated
+                            }
+                        }
+                    }
+                }
             }
-        }
-        listOf("accepted", "dropped", "error").forEachIndexed { slot, channel ->
-            val invalidated = before.receipts[slot] && !after.receipts[slot]
-            assertEquals(
-                want
-                    .getValue("receipts")
-                    .jsonObject
-                    .getValue(channel)
-                    .jsonPrimitive.boolean,
-                invalidated,
-                "$where: receipts.$channel invalidation",
-            )
+
+            invalidates.assertKeySet("receipts") { receiptFields }
+            invalidates.sub("receipts") { receipts ->
+                receiptFields.forEachIndexed { slot, channel ->
+                    val invalidated = before.receipts[slot] && !after.receipts[slot]
+                    receipts.assertKeyOutcome(channel) {
+                        it.jsonPrimitive.boolean == invalidated
+                    }
+                }
+            }
         }
     }
 
