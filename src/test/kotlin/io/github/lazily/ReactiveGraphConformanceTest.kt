@@ -16,6 +16,7 @@ import java.nio.file.Files
 import java.util.Collections
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFails
 import kotlin.test.assertTrue
 import kotlin.test.fail
 
@@ -1039,6 +1040,10 @@ class ReactiveGraphConformanceTest {
         fixture: String,
         steps: List<JsonObject>,
         tail: JsonObject?,
+        trackStepAssertions: Boolean,
+        stepPathPrefix: String,
+        visitedStepSites: MutableSet<String>?,
+        mutateExpectation: (String, JsonObject) -> JsonObject,
     ): Report {
         val report = Report()
         var stepIdx = 0
@@ -1047,18 +1052,66 @@ class ReactiveGraphConformanceTest {
             key: String,
             got: Any?,
             want: JsonElement?,
-        ) {
+        ): Boolean {
             report.checks++
-            if (!jsonEq(got, want)) report.failures.add("#$stepIdx:$key — got $got, want $want")
+            val passed = jsonEq(got, want)
+            if (!passed) report.failures.add("#$stepIdx:$key — got $got, want $want")
+            return passed
         }
 
         fun checkList(
             key: String,
             got: List<String>,
             want: List<String>,
-        ) {
+        ): Boolean {
             report.checks++
-            if (got != want) report.failures.add("#$stepIdx:$key — got $got, want $want")
+            val passed = got == want
+            if (!passed) report.failures.add("#$stepIdx:$key — got $got, want $want")
+            return passed
+        }
+
+        /**
+         * Route one scalar/array expectation through the tracker on the first
+         * execution-model pass, and through the identical accumulating comparison
+         * on the remaining passes. The comparison result is the assertion evidence:
+         * a swallowed divergence must not book the key as satisfied.
+         */
+        fun assertExpected(
+            expect: JsonObject,
+            keys: AssertionKeys?,
+            key: String,
+            comparison: (JsonElement) -> Boolean,
+        ) {
+            if (keys == null) {
+                expect[key]?.let(comparison)
+            } else {
+                keys.assertKeyOutcome(key, comparison)
+            }
+        }
+
+        /**
+         * Route an object-valued expectation through a child tracker. This checks
+         * the nested id key set in both directions; a newly-added node id cannot be
+         * consumed by nothing while the parent key still appears asserted.
+         */
+        fun assertExpectedEntries(
+            expect: JsonObject,
+            keys: AssertionKeys?,
+            key: String,
+            comparison: (String, JsonElement) -> Boolean,
+        ) {
+            if (keys == null) {
+                val entries = expect[key]?.jsonObject ?: return
+                for (id in entries.keys.sorted()) {
+                    comparison(id, entries.getValue(id))
+                }
+            } else {
+                keys.sub(key) { entries ->
+                    for (id in entries.keys.sorted()) {
+                        entries.assertKeyOutcome(id) { want -> comparison(id, want) }
+                    }
+                }
+            }
         }
 
         for (i in steps.indices) {
@@ -1175,131 +1228,133 @@ class ReactiveGraphConformanceTest {
             model.settle()
             val observed = model.runLog.toList().subList(runsBefore, model.runLog.size)
 
-            // WHY THIS BLOCK IS NOT YET BOUND TO AN AssertionKeys, AND WHAT THE
-            // SHAPE WILL BE WHEN IT IS (#lzktreactivemodelfailures).
-            //
-            // Every other conformance runner in this repo wraps its assertion
-            // block in `consuming(where) { }` and lets AssertionKeys throw. This
-            // one does not, and the reason is a real asymmetry rather than an
-            // oversight, so it is written down here where someone reading a
-            // failure will be looking.
-            //
-            // This runner replays the whole corpus once PER EXECUTION MODEL
-            // (`runCorpus` is called once for each), and `check` below
-            // ACCUMULATES divergences into `report.failures` instead of throwing
-            // at the first one. That is deliberate: a value divergence is a
-            // property of ONE model, and when the sync model disagrees with the
-            // fixture it is worth knowing whether the async and the batched
-            // models agree too. Failing fast would hide two thirds of that.
-            //
-            // A COVERAGE defect is the opposite kind of fact. "This runner never
-            // read `observed_count`" is a property of the RUNNER, not of any
-            // model — it is identical in all three passes by construction, so
-            // accumulating it three times reports the same thing three times, and
-            // failing fast on it is correct. The two therefore do not conflict;
-            // they answer different questions and want different failure modes.
-            //
-            // So the settled shape is: run the tracker over this block ONCE —
-            // gated on the first model's pass — and let `requireAllSatisfied`
-            // throw, while every per-model value comparison keeps going through
-            // `check` and the accumulator. The tracker hands the fixture's value
-            // to `check` via AssertionKeys.assertKeyOutcome, which books a key
-            // asserted only when the comparison PASSED; assertKeyWith would book
-            // it the moment the comparison ran, which in an accumulating runner
-            // degrades rung 3 to "a comparison happened".
-            //
-            // Landing that is the MIGRATION of this runner's 88 sites, tracked as
-            // #lzktbindpending, and it cannot be done by halves: a tracker over
-            // this block throws immediately unless all thirteen key families
-            // below are routed through it in the same change. The decision and
-            // the tracker surface it needs are in place; the wiring is not.
-            val expect = step["expect"]?.jsonObject ?: continue
+            val canonicalExpect = step["expect"]?.jsonObject ?: continue
+            val siteId = "$area/$fixture|$stepPathPrefix[$i].expect"
+            val expect = mutateExpectation(siteId, canonicalExpect)
             val unknown = (expect.keys - KNOWN_EXPECT_KEYS).sorted()
             check(unknown.isEmpty()) {
                 "$fixture#$i: unrecognised assertion key(s) $unknown — refusing to report " +
                     "green against an assertion this runner does not evaluate"
             }
 
-            // Sorted so evaluation order is deterministic and matches the
-            // reference runner's. Load-bearing, not cosmetic: `dependents_of`
-            // sorts before `read`, and a lazy binding re-registers edges when it
-            // recomputes, so reading first would change the degree the same step
-            // then asserts.
-            for (key in expect.keys.sorted()) {
-                val want = expect[key]
-                when (key) {
-                    "note" -> {}
-                    // Sorts FIRST of every key these fixtures use, which is
-                    // load-bearing: `readable` and `value` both perform a read,
-                    // and on a de-eagered signal a read triggers the lazy
-                    // recompute that would make a conforming and a
-                    // non-conforming binding agree. `dispose_signal`'s
-                    // discriminating step asserts both keys on one step, and the
-                    // count has to be sampled before the read.
-                    "computes_of" -> for (id in want!!.jsonObject.keys.sorted()) {
-                        check("computes_of.$id", model.computesOf(id), want.jsonObject[id])
-                    }
-                    "dependents_of" -> for (id in want!!.jsonObject.keys.sorted()) {
-                        check("dependents_of.$id", model.dependentsOf(id), want.jsonObject[id])
-                    }
-                    "dependencies_of" -> for (id in want!!.jsonObject.keys.sorted()) {
-                        check("dependencies_of.$id", model.dependenciesOf(id), want.jsonObject[id])
-                    }
-                    "error" -> {
-                        // Any non-null error code means "this op must fail";
-                        // null means "must not". The runner does not model error
-                        // identity — the fixtures carry the code so the contract
-                        // is legible, and each binding's own tests pin which
-                        // exception it raises.
-                        val wantError = !(want == null || want is JsonNull)
-                        report.checks++
-                        if (opError != wantError) {
-                            report.failures.add("#$stepIdx:error — got $opError, want $wantError")
+            fun evaluate(keys: AssertionKeys?) {
+                // Sorted so evaluation order is deterministic and matches the
+                // reference runner's. Load-bearing, not cosmetic: `dependents_of`
+                // sorts before `read`, and a lazy binding re-registers edges when it
+                // recomputes, so reading first would change the degree the same step
+                // then asserts.
+                for (key in expect.keys.sorted()) {
+                    when (key) {
+                        "note" ->
+                            keys?.excuseKey(
+                                "note",
+                                "fixture narrative only; every executable obligation is carried " +
+                                    "by the sibling assertion keys evaluated in this block",
+                            )
+                        // Sorts FIRST of every key these fixtures use, which is
+                        // load-bearing: `readable` and `value` both perform a read,
+                        // and on a de-eagered signal a read triggers the lazy
+                        // recompute that would make a conforming and a
+                        // non-conforming binding agree. `dispose_signal`'s
+                        // discriminating step asserts both keys on one step, and the
+                        // count has to be sampled before the read.
+                        "computes_of" ->
+                            assertExpectedEntries(expect, keys, key) { id, want ->
+                                check("computes_of.$id", model.computesOf(id), want)
+                            }
+                        "dependents_of" ->
+                            assertExpectedEntries(expect, keys, key) { id, want ->
+                                check("dependents_of.$id", model.dependentsOf(id), want)
+                            }
+                        "dependencies_of" ->
+                            assertExpectedEntries(expect, keys, key) { id, want ->
+                                check("dependencies_of.$id", model.dependenciesOf(id), want)
+                            }
+                        "error" ->
+                            assertExpected(expect, keys, key) { want ->
+                                // Any non-null error code means "this op must fail";
+                                // null means "must not". The runner does not model error
+                                // identity — the fixtures carry the code so the contract
+                                // is legible, and each binding's own tests pin which
+                                // exception it raises.
+                                val wantError = want !is JsonNull
+                                report.checks++
+                                val passed = opError == wantError
+                                if (!passed) {
+                                    report.failures.add(
+                                        "#$stepIdx:error — got $opError, want $wantError",
+                                    )
+                                }
+                                passed
+                            }
+                        // Paired with an `error` expectation the error key is
+                        // authoritative; `value` only applies to a successful read.
+                        // On a `read` op this is the value the op returned. On any
+                        // other op (the signal fixtures assert it on `signal`) it
+                        // means the value of the node the op names, so it is read
+                        // here — after `computes_of`, which sorts first.
+                        // Paired with a NON-NULL `error` the value would be read here
+                        // and then dropped — the read-then-discard shape. No fixture
+                        // in the corpus pairs them, so refuse the combination rather
+                        // than skip it silently (#lzconsumednotasserted).
+                        "value" -> {
+                            val wantsError = expect["error"].let { it != null && it !is JsonNull }
+                            check(!wantsError) {
+                                "$fixture#$i: `value` alongside a non-null `error` would be read and " +
+                                    "never compared. Either the error is authoritative and `value` " +
+                                    "does not belong on this step, or the runner must assert both."
+                            }
+                            val got =
+                                opValue
+                                    ?: readOrError(model, op["id"]!!.jsonPrimitive.content)
+                            assertExpected(expect, keys, key) { want -> check("value", got, want) }
                         }
+                        "read" ->
+                            assertExpectedEntries(expect, keys, key) { id, want ->
+                                check("read.$id", readOrError(model, id), want)
+                            }
+                        "readable" ->
+                            assertExpectedEntries(expect, keys, key) { id, want ->
+                                check("readable.$id", alive(model, id), want)
+                            }
+                        "observed_by" ->
+                            assertExpected(expect, keys, key) { want ->
+                                checkList("observed_by", observed, strs(want))
+                            }
+                        "observed_count" ->
+                            assertExpected(expect, keys, key) { want ->
+                                check("observed_count", observed.size, want)
+                            }
+                        // Only effects run a cleanup callback, so the expected order
+                        // is projected onto its effect entries.
+                        "cleanup_order" ->
+                            assertExpected(expect, keys, key) { want ->
+                                checkList(
+                                    "cleanup_order",
+                                    model.cleanupLog.toList(),
+                                    strs(want).filter { model.kindOf(it) == Kind.EFFECT },
+                                )
+                            }
+                        "scope_owned_count" ->
+                            assertExpectedEntries(expect, keys, key) { name, want ->
+                                check("scope_owned_count.$name", model.scopeOwned(name), want)
+                            }
+                        else -> error("$fixture#$i: unhandled assertion key '$key'")
                     }
-                    // Paired with an `error` expectation the error key is
-                    // authoritative; `value` only applies to a successful read.
-                    // On a `read` op this is the value the op returned. On any
-                    // other op (the signal fixtures assert it on `signal`) it
-                    // means the value of the node the op names, so it is read
-                    // here — after `computes_of`, which sorts first.
-                    // Paired with a NON-NULL `error` the value would be read here
-                    // and then dropped — the read-then-discard shape. No fixture
-                    // in the corpus pairs them, so refuse the combination rather
-                    // than skip it silently (#lzconsumednotasserted).
-                    "value" -> {
-                        val wantsError = expect["error"].let { it != null && it !is JsonNull }
-                        check(!wantsError) {
-                            "$fixture#$i: `value` alongside a non-null `error` would be read and " +
-                                "never compared. Either the error is authoritative and `value` " +
-                                "does not belong on this step, or the runner must assert both."
-                        }
-                        val got =
-                            opValue
-                                ?: readOrError(model, op["id"]!!.jsonPrimitive.content)
-                        check("value", got, want)
-                    }
-                    "read" -> for (id in want!!.jsonObject.keys.sorted()) {
-                        check("read.$id", readOrError(model, id), want.jsonObject[id])
-                    }
-                    "readable" -> for (id in want!!.jsonObject.keys.sorted()) {
-                        check("readable.$id", alive(model, id), want.jsonObject[id])
-                    }
-                    "observed_by" -> checkList("observed_by", observed, strs(want))
-                    "observed_count" -> check("observed_count", observed.size, want)
-                    // Only effects run a cleanup callback, so the expected order
-                    // is projected onto its effect entries.
-                    "cleanup_order" ->
-                        checkList(
-                            "cleanup_order",
-                            model.cleanupLog.toList(),
-                            strs(want).filter { model.kindOf(it) == Kind.EFFECT },
-                        )
-                    "scope_owned_count" -> for (n in want!!.jsonObject.keys.sorted()) {
-                        check("scope_owned_count.$n", model.scopeOwned(n), want.jsonObject[n])
-                    }
-                    else -> error("$fixture#$i: unhandled assertion key '$key'")
                 }
+            }
+
+            // Coverage is a property of this runner, so one tracked pass is
+            // sufficient. Value comparisons still run and accumulate for every
+            // execution model.
+            if (trackStepAssertions) {
+                val visited = checkNotNull(visitedStepSites) { "tracked replay requires a site ledger" }
+                check(visited.add(siteId)) { "$siteId: assertion block visited more than once" }
+                val keys = AssertionKeys(siteId, expect, "$area/$fixture")
+                evaluate(keys)
+                keys.requireAllSatisfied()
+            } else {
+                evaluate(null)
             }
         }
 
@@ -1323,28 +1378,31 @@ class ReactiveGraphConformanceTest {
             t.sub("final_state") { fin ->
                 fin.sub("dependents_of") { m ->
                     for (id in m.keys.sorted()) {
-                        m.assertKeyWith(id) { want ->
+                        m.assertKeyOutcome(id) { want ->
                             val got = model.dependentsOf(id)
-                            check("final.dependents_of.$id", got, want)
+                            val passed = check("final.dependents_of.$id", got, want)
                             report.observation.degrees[id] = got
+                            passed
                         }
                     }
                 }
                 fin.sub("readable") { m ->
                     for (id in m.keys.sorted()) {
-                        m.assertKeyWith(id) { want ->
+                        m.assertKeyOutcome(id) { want ->
                             val ok = alive(model, id)
-                            check("final.readable.$id", ok, want)
+                            val passed = check("final.readable.$id", ok, want)
                             report.observation.readable[id] = ok
+                            passed
                         }
                     }
                 }
                 fin.sub("read") { m ->
                     for (id in m.keys.sorted()) {
-                        m.assertKeyWith(id) { want ->
+                        m.assertKeyOutcome(id) { want ->
                             val got = readOrError(model, id)
-                            check("final.read.$id", got, want)
+                            val passed = check("final.read.$id", got, want)
                             report.observation.reads[id] = got
+                            passed
                         }
                     }
                 }
@@ -1378,7 +1436,7 @@ class ReactiveGraphConformanceTest {
                     model.settle()
                     report.observation.afterPublishObserved =
                         model.runLog.toList().subList(before, model.runLog.size)
-                    p.assertKeyWith("observed_by") { want ->
+                    p.assertKeyOutcome("observed_by") { want ->
                         checkList(
                             "after_publish.observed_by",
                             report.observation.afterPublishObserved,
@@ -1390,16 +1448,17 @@ class ReactiveGraphConformanceTest {
                     // count them.
                     p.sub("read") { m ->
                         for (id in m.keys.sorted()) {
-                            m.assertKeyWith(id) { want ->
+                            m.assertKeyOutcome(id) { want ->
                                 val got = readOrError(model, id)
-                                check("after_publish.read.$id", got, want)
+                                val passed = check("after_publish.read.$id", got, want)
                                 report.observation.afterPublishReads[id] = got
+                                passed
                             }
                         }
                     }
                     p.sub("dependents_of") { m ->
                         for (id in m.keys.sorted()) {
-                            m.assertKeyWith(id) { want ->
+                            m.assertKeyOutcome(id) { want ->
                                 check("after_publish.dependents_of.$id", model.dependentsOf(id), want)
                             }
                         }
@@ -1460,6 +1519,11 @@ class ReactiveGraphConformanceTest {
     private fun runCorpus(
         create: () -> Model,
         modelName: String,
+        trackStepAssertions: Boolean,
+        visitedStepSites: MutableSet<String>?,
+        fixtureNames: List<String> = FIXTURES.sorted(),
+        readFixture: (String) -> String = { name -> ConformanceFixtures.read("$area/$name") },
+        mutateExpectation: (String, JsonObject) -> JsonObject = { _, expect -> expect },
     ): Triple<Int, Int, Int> {
         val executed = sortedSetOf<String>()
         val skipped = sortedMapOf<String, String>()
@@ -1467,11 +1531,11 @@ class ReactiveGraphConformanceTest {
         var totalOps = 0
         var totalChecks = 0
 
-        for (name in FIXTURES.sorted()) {
+        for (name in fixtureNames) {
             // Every fixture is opened — including skipped ones, whose ops are
             // read from the file rather than assumed. That is what keeps the
             // coverage manifest (and the positive assertions) honest.
-            val fx = json.parseToJsonElement(ConformanceFixtures.read("$area/$name")).jsonObject
+            val fx = json.parseToJsonElement(readFixture(name)).jsonObject
             val unsupported = (opsOf(name, fx) - SUPPORTED_OPS).sorted()
             val reasons = mutableListOf<String>()
             if (unsupported.isNotEmpty()) reasons.add(unsupported.joinToString(", "))
@@ -1493,7 +1557,18 @@ class ReactiveGraphConformanceTest {
                 when (val shape = fx["shape"]?.jsonPrimitive?.content) {
                     "steps" -> {
                         val m = create().also { models.add(it) }
-                        reports.add(replay(m, name, stepsOf(fx), null))
+                        reports.add(
+                            replay(
+                                m,
+                                name,
+                                stepsOf(fx),
+                                null,
+                                trackStepAssertions,
+                                "steps",
+                                visitedStepSites,
+                                mutateExpectation,
+                            ),
+                        )
                     }
                     "scenarios" -> {
                         val tail = fx["expected"]?.jsonObject
@@ -1502,12 +1577,23 @@ class ReactiveGraphConformanceTest {
                         // this class for op-vocabulary analysis and for the
                         // `observationally_equal` name lookup — neither is a replay,
                         // so neither records.
-                        for (sc in ConformanceScenarios.of("$area/$name", fx)) {
+                        for ((scenarioIndex, sc) in ConformanceScenarios.indexed("$area/$name", fx)) {
                             // Each scenario gets its OWN context:
                             // `observationally_equal` is a claim about two
                             // independent worlds, not about one world twice.
                             val m = create().also { models.add(it) }
-                            reports.add(replay(m, name, stepsOf(sc), tail))
+                            reports.add(
+                                replay(
+                                    m,
+                                    name,
+                                    stepsOf(sc),
+                                    tail,
+                                    trackStepAssertions,
+                                    "scenarios[$scenarioIndex].steps",
+                                    visitedStepSites,
+                                    mutateExpectation,
+                                ),
+                            )
                         }
                     }
                     else -> error("$name: unknown fixture shape '$shape'")
@@ -1570,7 +1656,7 @@ class ReactiveGraphConformanceTest {
         }
 
         println(
-            "reactive-graph[$modelName]: ${executed.size}/${FIXTURES.size} fixtures replayed, " +
+            "reactive-graph[$modelName]: ${executed.size}/${fixtureNames.size} fixtures replayed, " +
                 "$totalOps ops, $totalChecks assertions, ${skipped.size} skipped, " +
                 "${divergences.size} divergences",
         )
@@ -1590,27 +1676,166 @@ class ReactiveGraphConformanceTest {
         // fixture that becomes replayable fails here until its entry is removed;
         // a newly-unsupported op or a new parked fixture fails here immediately.
         // Never widen a skip to make a red build green.
+        val expectedSkips = EXPECTED_SKIPS.filterKeys { it in fixtureNames }.toSortedMap()
         assertEquals(
-            EXPECTED_SKIPS.toSortedMap(),
+            expectedSkips,
             skipped,
             "$modelName: skip ledger drifted — a #lzmergefeed fixture became replayable, " +
                 "an entry became stale, or a newly-unsupported op arrived. Update EXPECTED_SKIPS " +
                 "only after confirming the op is genuinely (un)modelled.",
         )
-        val expectedExecuted = (FIXTURES.toSet() - EXPECTED_SKIPS.keys).toSortedSet()
+        val expectedExecuted = (fixtureNames.toSet() - expectedSkips.keys).toSortedSet()
         assertEquals(
             expectedExecuted,
             executed,
-            "found ${FIXTURES.size} fixture(s), expected ${expectedExecuted.size} replayed and " +
-                "${EXPECTED_SKIPS.size} skipped, but did not replay them all. A non-empty " +
+            "found ${fixtureNames.size} fixture(s), expected ${expectedExecuted.size} replayed and " +
+                "${expectedSkips.size} skipped, but did not replay them all. A non-empty " +
                 "fixture directory is not evidence of coverage — skipped: $skipped",
         )
-        assertTrue(
-            "transitive_invalidation_reaches_depth.json" in executed,
-            "the transitive-depth fixture pins the async invalidation cascade and must run " +
-                "against every context",
-        )
+        if ("transitive_invalidation_reaches_depth.json" in fixtureNames) {
+            assertTrue(
+                "transitive_invalidation_reaches_depth.json" in executed,
+                "the transitive-depth fixture pins the async invalidation cascade and must run " +
+                    "against every context",
+            )
+        }
         return Triple(executed.size, totalOps, totalChecks)
+    }
+
+    /**
+     * Mutation proof for the production step-expectation evaluator.
+     *
+     * [AssertionKeys] can prove that a fixture value reached a comparison, but
+     * no tracker can tell whether the comparison ignored that value and returned
+     * `true`. Each executable key family therefore gets one real corpus mutation
+     * through [replay]/[runCorpus]. Every mutation must make the production path
+     * fail and name the mutated family. Raw reads are deliberate: when this test
+     * is selected alone, its intentionally-aborted runs must not declare canonical
+     * blocks they never get far enough to bind.
+     */
+    @Test
+    fun executableStepExpectationFamiliesRejectFixtureValueMutations() {
+        ConformanceFixtures.requireRoot()
+
+        data class Mutation(
+            val key: String,
+            val fixture: String,
+            val siteId: String,
+            val replacementJson: String,
+        )
+
+        val mutations =
+            listOf(
+                Mutation(
+                    "cleanup_order",
+                    "teardown_runs_members_in_reverse_creation_order.json",
+                    "$area/teardown_runs_members_in_reverse_creation_order.json|steps[6].expect",
+                    """["e_first","e_second","e_third"]""",
+                ),
+                Mutation(
+                    "computes_of",
+                    "dispose_signal_reverts_to_lazy.json",
+                    "$area/dispose_signal_reverts_to_lazy.json|steps[1].expect",
+                    """{"sig":2}""",
+                ),
+                Mutation(
+                    "dependencies_of",
+                    "dispose_detaches_edges_both_directions.json",
+                    "$area/dispose_detaches_edges_both_directions.json|steps[4].expect",
+                    """{"mid":2,"sink":1}""",
+                ),
+                Mutation(
+                    "dependents_of",
+                    "churn_returns_to_baseline.json",
+                    "$area/churn_returns_to_baseline.json|steps[1].expect",
+                    """{"topic":9}""",
+                ),
+                Mutation(
+                    "error",
+                    "cross_scope_teardown_hazard.json",
+                    "$area/cross_scope_teardown_hazard.json|steps[13].expect",
+                    "null",
+                ),
+                Mutation(
+                    "observed_by",
+                    "disarm_disposes_nothing.json",
+                    "$area/disarm_disposes_nothing.json|steps[9].expect",
+                    "[]",
+                ),
+                Mutation(
+                    "observed_count",
+                    "churn_returns_to_baseline.json",
+                    "$area/churn_returns_to_baseline.json|steps[3].expect",
+                    "9",
+                ),
+                Mutation(
+                    "read",
+                    "disarm_disposes_nothing.json",
+                    "$area/disarm_disposes_nothing.json|steps[9].expect",
+                    """{"escaped":5,"downstream":9}""",
+                ),
+                Mutation(
+                    "readable",
+                    "churn_returns_to_baseline.json",
+                    "$area/churn_returns_to_baseline.json|steps[5].expect",
+                    """{"topic":false}""",
+                ),
+                Mutation(
+                    "scope_owned_count",
+                    "disarm_disposes_nothing.json",
+                    "$area/disarm_disposes_nothing.json|steps[6].expect",
+                    """{"g":1}""",
+                ),
+                Mutation(
+                    "value",
+                    "cross_scope_teardown_hazard.json",
+                    "$area/cross_scope_teardown_hazard.json|steps[11].expect",
+                    "3",
+                ),
+            )
+
+        assertEquals(
+            KNOWN_EXPECT_KEYS - AssertionKeys.NARRATIVE,
+            mutations.map { it.key }.toSet(),
+            "mutation matrix must cover every executable step expectation family exactly once",
+        )
+
+        for (mutation in mutations) {
+            val path = "$area/${mutation.fixture}"
+            val raw = Files.readString(ConformanceFixtures.path(path))
+            val replacement = json.parseToJsonElement(mutation.replacementJson)
+            val canonicalBlock = ConformanceFixtures.blockSitesOf(path, raw).getValue(mutation.siteId)
+            assertTrue(
+                canonicalBlock.getValue(mutation.key) != replacement,
+                "${mutation.key}: mutation must change the canonical value",
+            )
+
+            var mutationHits = 0
+            val failure =
+                assertFails("${mutation.key}: changed fixture value survived production replay") {
+                    runCorpus(
+                        create = { SyncModel() },
+                        modelName = "Context-mutation-${mutation.key}",
+                        trackStepAssertions = true,
+                        visitedStepSites = linkedSetOf(),
+                        fixtureNames = listOf(mutation.fixture),
+                        readFixture = { raw },
+                        mutateExpectation = { siteId, expect ->
+                            if (siteId != mutation.siteId) {
+                                expect
+                            } else {
+                                mutationHits++
+                                JsonObject(expect + (mutation.key to replacement))
+                            }
+                        },
+                    )
+                }
+            assertEquals(1, mutationHits, "${mutation.key}: target site must be visited exactly once")
+            assertTrue(
+                failure.message.orEmpty().contains(mutation.key),
+                "${mutation.key}: failure must name the mutated family, got: ${failure.message}",
+            )
+        }
     }
 
     @Test
@@ -1634,6 +1859,20 @@ class ReactiveGraphConformanceTest {
                 "unrun (#lzspecconf).",
         )
 
+        val stepSitePattern =
+            Regex(
+                "^reactive-graph/[^|]+\\|(?:scenarios\\[[0-9]+]\\.)?steps\\[[0-9]+]\\.expect$",
+            )
+        val declaredReplayableStepSites =
+            FIXTURES
+                .filterNot { it in EXPECTED_SKIPS }
+                .flatMap { name ->
+                    val path = "$area/$name"
+                    val fixture = json.parseToJsonElement(ConformanceFixtures.read(path))
+                    ConformanceFixtures.blockSitesOf(path, fixture).keys.filter(stepSitePattern::matches)
+                }.toSet()
+        assertEquals(88, declaredReplayableStepSites.size, "reactive-graph replayable step-site pin")
+
         val models: List<Pair<String, () -> Model>> =
             listOf(
                 "Context" to { SyncModel() },
@@ -1645,9 +1884,18 @@ class ReactiveGraphConformanceTest {
         var ops = 0
         var checks = 0
         val failures = mutableListOf<String>()
-        for ((modelName, create) in models) {
+        val visitedStepSites = linkedSetOf<String>()
+        for ((modelIndex, model) in models.withIndex()) {
+            val (modelName, create) = model
             try {
-                val (r, o, c) = runCorpus(create, modelName)
+                val trackStepAssertions = modelIndex == 0
+                val (r, o, c) =
+                    runCorpus(
+                        create,
+                        modelName,
+                        trackStepAssertions,
+                        visitedStepSites.takeIf { trackStepAssertions },
+                    )
                 replayed += r
                 ops += o
                 checks += c
@@ -1659,7 +1907,6 @@ class ReactiveGraphConformanceTest {
                 failures.add("$modelName: ${t.message}")
             }
         }
-
         // Skipped fixtures (#lzmergefeed) never replay against any model, so the
         // expected product is over the replayable set, not the whole corpus.
         val replayable = FIXTURES.size - EXPECTED_SKIPS.size
@@ -1679,6 +1926,12 @@ class ReactiveGraphConformanceTest {
                     "fixtures):\n" + failures.joinToString("\n"),
             )
         }
+
+        assertEquals(
+            declaredReplayableStepSites,
+            visitedStepSites,
+            "reactive-graph exact replayable assertion-block sites",
+        )
 
         assertTrue(
             replayed > 0,
