@@ -38,7 +38,7 @@ class ResilienceConformanceTest {
     private fun checkInval(
         ctx: Context,
         obs: Computed<Any>,
-        step: JsonObject,
+        expected: AssertionKeys,
         reader: String,
     ) {
         val wasCached = ctx.isSet(obs)
@@ -48,13 +48,9 @@ class ResilienceConformanceTest {
         // otherwise be compared by nothing (#lzsubblockkeyset). The nested
         // tracker owns the whole sub-block, so an unobserved reader kind fails
         // as an unconsumed key.
-        step["expected"]!!
-            .jsonObject
-            .getValue("invalidates")
-            .jsonObject
-            .consumingNested("expected.invalidates[$reader]") { inv ->
-                inv.assertBoolean(reader) { !wasCached }
-            }
+        expected.sub("invalidates") { invalidates ->
+            invalidates.assertBoolean(reader) { !wasCached }
+        }
     }
 
     @Test
@@ -70,7 +66,7 @@ class ResilienceConformanceTest {
                 cfg["reset_timeout"]!!.jsonPrimitive.long,
             )
         val obs = observe(ctx, cb.stateCell)
-        for (element in steps(fx)) {
+        for ((index, element) in steps(fx).withIndex()) {
             val step = element.jsonObject
             val op = step["op"]!!.jsonObject
             when (op["type"]!!.jsonPrimitive.content) {
@@ -86,8 +82,12 @@ class ResilienceConformanceTest {
                 // scenario books as replayed while naming behaviour never exercised.
                 else -> error("circuit_breaker.json: unknown op type '${op["type"]!!.jsonPrimitive.content}'")
             }
-            assertEquals(step["expected"]!!.jsonObject["state"]!!.jsonPrimitive.content, cb.state().name)
-            checkInval(ctx, obs, step, "state")
+            step.getValue("expected").jsonObject.consuming(
+                "resilience/circuit_breaker.json steps[$index].expected",
+            ) { expected ->
+                expected.assertString("state") { cb.state().name }
+                checkInval(ctx, obs, expected, "state")
+            }
         }
     }
 
@@ -98,11 +98,19 @@ class ResilienceConformanceTest {
         val cfg = fx["config"]!!.jsonObject
         val r = RetryPolicyCell(ctx, cfg["base"]!!.jsonPrimitive.long, cfg["cap"]!!.jsonPrimitive.long)
         val obs = observe(ctx, r.delayCell)
-        for (element in steps(fx)) {
+        for ((index, element) in steps(fx).withIndex()) {
             val step = element.jsonObject
-            assertEquals(step["returns"]!!.jsonPrimitive.long, r.nextDelay(), "delay")
-            assertEquals(step["expected"]!!.jsonObject["delay"]!!.jsonPrimitive.long, r.delay())
-            checkInval(ctx, obs, step, "delay")
+            val opType = step["op"]!!.jsonObject["type"]!!.jsonPrimitive.content
+            when (opType) {
+                "next" -> assertEquals(step["returns"]!!.jsonPrimitive.long, r.nextDelay(), "delay")
+                else -> error("retry.json: unknown op type '$opType'")
+            }
+            step.getValue("expected").jsonObject.consuming(
+                "resilience/retry.json steps[$index].expected",
+            ) { expected ->
+                expected.assertLong("delay") { r.delay() }
+                checkInval(ctx, obs, expected, "delay")
+            }
         }
     }
 
@@ -112,7 +120,7 @@ class ResilienceConformanceTest {
         val ctx = Context()
         val b = BulkheadCell(ctx, fx["config"]!!.jsonObject["capacity"]!!.jsonPrimitive.long)
         val obs = observe(ctx, b.inUseCell)
-        for (element in steps(fx)) {
+        for ((index, element) in steps(fx).withIndex()) {
             val step = element.jsonObject
             when (step["op"]!!.jsonObject["type"]!!.jsonPrimitive.content) {
                 // `.boolean`, never `booleanOrNull` (`#lzsiblingrunnermasking`).
@@ -129,8 +137,12 @@ class ResilienceConformanceTest {
                             "'${step["op"]!!.jsonObject["type"]!!.jsonPrimitive.content}'",
                     )
             }
-            assertEquals(step["expected"]!!.jsonObject["in_use"]!!.jsonPrimitive.long, b.permitsInUse())
-            checkInval(ctx, obs, step, "in_use")
+            step.getValue("expected").jsonObject.consuming(
+                "resilience/bulkhead.json steps[$index].expected",
+            ) { expected ->
+                expected.assertLong("in_use") { b.permitsInUse() }
+                checkInval(ctx, obs, expected, "in_use")
+            }
         }
     }
 
@@ -140,7 +152,7 @@ class ResilienceConformanceTest {
         val ctx = Context()
         val t = TimeoutCell(ctx)
         val obs = observe(ctx, t.timedOutCell)
-        for (element in steps(fx)) {
+        for ((index, element) in steps(fx).withIndex()) {
             val step = element.jsonObject
             val op = step["op"]!!.jsonObject
             val now = op["now"]!!.jsonPrimitive.long
@@ -158,8 +170,12 @@ class ResilienceConformanceTest {
                     else -> error("timeout.json: unknown op type '${op["type"]!!.jsonPrimitive.content}'")
                 }
             assertEquals(step["returns"]!!.jsonPrimitive.boolean, e, "edge")
-            assertEquals(step["expected"]!!.jsonObject["is_timed_out"]!!.jsonPrimitive.boolean, t.isTimedOut())
-            checkInval(ctx, obs, step, "is_timed_out")
+            step.getValue("expected").jsonObject.consuming(
+                "resilience/timeout.json steps[$index].expected",
+            ) { expected ->
+                expected.assertBoolean("is_timed_out") { t.isTimedOut() }
+                checkInval(ctx, obs, expected, "is_timed_out")
+            }
         }
     }
 }

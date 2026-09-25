@@ -38,7 +38,7 @@ class ServiceConformanceTest {
     private fun checkInval(
         ctx: Context,
         obs: Computed<Any>,
-        step: JsonObject,
+        expected: AssertionKeys,
         reader: String,
     ) {
         val wasCached = ctx.isSet(obs)
@@ -48,19 +48,21 @@ class ServiceConformanceTest {
         // otherwise be compared by nothing (#lzsubblockkeyset). The nested
         // tracker owns the whole sub-block, so an unobserved reader kind fails
         // as an unconsumed key.
-        step["expected"]!!
-            .jsonObject
-            .getValue("invalidates")
-            .jsonObject
-            .consumingNested("expected.invalidates[$reader]") { inv ->
-                inv.assertBoolean(reader) { !wasCached }
-            }
+        expected.sub("invalidates") { inv ->
+            inv.assertBoolean(reader) { !wasCached }
+        }
     }
 
-    private fun wantMap(
-        step: JsonObject,
+    private fun checkMap(
+        expected: AssertionKeys,
         key: String,
-    ): Map<String, String> = step["expected"]!!.jsonObject[key]!!.jsonObject.mapValues { it.value.jsonPrimitive.content }
+        actual: Map<String, String>,
+    ) = expected.sub(key) { want ->
+        assertEquals(want.keys, actual.keys, "$key key set")
+        for (entry in want.keys) {
+            want.assertKeyOutcome(entry) { it.jsonPrimitive.content == actual[entry] }
+        }
+    }
 
     @Test
     fun health() {
@@ -68,16 +70,22 @@ class ServiceConformanceTest {
         val ctx = Context()
         val h = HealthCell(ctx)
         val obs = observe(ctx, h.healthCell)
-        for (element in steps(fx)) {
+        for ((index, element) in steps(fx).withIndex()) {
             val step = element.jsonObject
             val op = step["op"]!!.jsonObject
+            val opType = op["type"]!!.jsonPrimitive.content
+            if (opType != "set") error("health.json: unknown op type '$opType'")
             h.set(
                 op["name"]!!.jsonPrimitive.content,
                 op["up"]!!.jsonPrimitive.boolean,
                 op["critical"]!!.jsonPrimitive.boolean,
             )
-            assertEquals(step["expected"]!!.jsonObject["health"]!!.jsonPrimitive.content, h.health().name)
-            checkInval(ctx, obs, step, "health")
+            step.getValue("expected").jsonObject.consuming(
+                "service/health.json steps[$index].expected",
+            ) { expected ->
+                expected.assertString("health") { h.health().name }
+                checkInval(ctx, obs, expected, "health")
+            }
         }
     }
 
@@ -87,7 +95,7 @@ class ServiceConformanceTest {
         val ctx = Context()
         val r = ReadinessCell(ctx)
         val obs = observe(ctx, r.readyCell)
-        for (element in steps(fx)) {
+        for ((index, element) in steps(fx).withIndex()) {
             val step = element.jsonObject
             val op = step["op"]!!.jsonObject
             // The runner drives `set` unconditionally, so read the discriminator and
@@ -96,8 +104,12 @@ class ServiceConformanceTest {
             val opType = op["type"]!!.jsonPrimitive.content
             if (opType != "set") error("readiness.json: unknown op type '$opType'")
             r.set(op["name"]!!.jsonPrimitive.content, op["ready"]!!.jsonPrimitive.boolean)
-            assertEquals(step["expected"]!!.jsonObject["ready"]!!.jsonPrimitive.boolean, r.ready())
-            checkInval(ctx, obs, step, "ready")
+            step.getValue("expected").jsonObject.consuming(
+                "service/readiness.json steps[$index].expected",
+            ) { expected ->
+                expected.assertBoolean("ready") { r.ready() }
+                checkInval(ctx, obs, expected, "ready")
+            }
         }
     }
 
@@ -107,7 +119,7 @@ class ServiceConformanceTest {
         val ctx = Context()
         val d = DiscoveryCell<Long>(ctx)
         val obs = observe(ctx, d.discoveryCell)
-        for (element in steps(fx)) {
+        for ((index, element) in steps(fx).withIndex()) {
             val step = element.jsonObject
             val op = step["op"]!!.jsonObject
             when (op["type"]!!.jsonPrimitive.content) {
@@ -130,8 +142,13 @@ class ServiceConformanceTest {
                 // scenario books as replayed while naming behaviour never exercised.
                 else -> error("discovery.json: unknown op type '${op["type"]!!.jsonPrimitive.content}'")
             }
-            assertEquals(wantMap(step, "discovery"), d.discovery())
-            checkInval(ctx, obs, step, "discovery")
+            val actual = d.discovery()
+            step.getValue("expected").jsonObject.consuming(
+                "service/discovery.json steps[$index].expected",
+            ) { expected ->
+                checkMap(expected, "discovery", actual)
+                checkInval(ctx, obs, expected, "discovery")
+            }
         }
     }
 
@@ -141,7 +158,7 @@ class ServiceConformanceTest {
         val ctx = Context()
         val reg = ServiceRegistry(ctx)
         val obs = observe(ctx, reg.projectionCell)
-        for (element in steps(fx)) {
+        for ((index, element) in steps(fx).withIndex()) {
             val step = element.jsonObject
             val op = step["op"]!!.jsonObject
             when (op["type"]!!.jsonPrimitive.content) {
@@ -155,8 +172,13 @@ class ServiceConformanceTest {
                 // Fail closed on an unrecognised op (`#lzscenariobodyskip`).
                 else -> error("service_registry.json: unknown op type '${op["type"]!!.jsonPrimitive.content}'")
             }
-            assertEquals(wantMap(step, "projection"), reg.projection())
-            checkInval(ctx, obs, step, "projection")
+            val actual = reg.projection()
+            step.getValue("expected").jsonObject.consuming(
+                "service/service_registry.json steps[$index].expected",
+            ) { expected ->
+                checkMap(expected, "projection", actual)
+                checkInval(ctx, obs, expected, "projection")
+            }
         }
     }
 }

@@ -1615,7 +1615,7 @@ fi
 #                  (#lzrsbindpending). The whole-ledger SIZE below is a different
 #                  measurement — it compares the ledger against a committed
 #                  constant, which the attack cannot move — and it covers BOTH
-#                  classes, where a bind-pending count reached only the 464
+#                  classes, where a bind-pending count reached only the 423
 #                  reachable ones.
 #
 #                  Dropping the per-class count is only safe because this ledger is
@@ -1661,7 +1661,7 @@ fi
 #           Lower it. This half is the signal a ceiling discards, and it is the
 #           reason the excused population cannot quietly acquire headroom.
 #
-# Pinned at 489 after the temporal and presence migrations (#lzktbindpending). In normal work
+# Pinned at 448 after the service and resilience migrations (#lzktbindpending). In normal work
 # it only ever moves DOWNWARD, one step per migrated site, in the migrating commit.
 # Env-overridable so the guard itself can be probed without editing the pin — but
 # the override must be a number. An empty or malformed value FAILS CLOSED rather
@@ -1671,8 +1671,8 @@ fi
 # ONE parse for the whole family (#lzpinparsestrict): a NON-EMPTY run of bare
 # ASCII digits `0`-`9`, and nothing else. This binding already had the rule, and
 # it is the only one of the ten that got the unset-versus-empty distinction right
-# from the start: `${VAR-489}` substitutes the default only when the variable is
-# UNSET, where `${VAR:-489}` would also have swallowed `export
+# from the start: `${VAR-448}` substitutes the default only when the variable is
+# UNSET, where `${VAR:-448}` would also have swallowed `export
 # EXPECTED_LEDGERED_BLOCKS=` and a typo that expanded to nothing. That is why the
 # empty case is spelled in the pattern below rather than left to the default.
 #
@@ -1680,7 +1680,7 @@ fi
 # RANGE is resolved by the locale's collation and `0-9` is only guaranteed to be
 # the ten ASCII digits under LC_COLLATE=C. An enumeration is the same ten in every
 # locale, which is what the family rule says.
-EXPECTED_LEDGERED_BLOCKS="${EXPECTED_LEDGERED_BLOCKS-489}"
+EXPECTED_LEDGERED_BLOCKS="${EXPECTED_LEDGERED_BLOCKS-448}"
 case "$EXPECTED_LEDGERED_BLOCKS" in
   '' | *[!0123456789]*)
     echo "ERROR: EXPECTED_LEDGERED_BLOCKS is not a non-negative integer in bare" \
