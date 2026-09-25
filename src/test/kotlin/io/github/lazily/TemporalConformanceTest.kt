@@ -36,8 +36,6 @@ class TemporalConformanceTest {
 
     private fun edge(step: JsonObject) = step["returns"]!!.jsonPrimitive.boolean
 
-    private fun expected(step: JsonObject) = step["expected"]!!.jsonObject
-
     /**
      * Assert the step's `invalidates` sub-block by its KEY SET, not just the one
      * reader this call names (#lzsubblockkeyset): a reader kind added upstream
@@ -45,15 +43,12 @@ class TemporalConformanceTest {
      * sub-block, so an unobserved reader fails as an unconsumed key.
      */
     private fun checkInval(
-        step: JsonObject,
+        expected: AssertionKeys,
         reader: String,
         invalidated: Boolean,
-    ) = expected(step)
-        .getValue("invalidates")
-        .jsonObject
-        .consumingNested("temporal expected.invalidates[$reader]") { inv ->
-            inv.assertBoolean(reader) { invalidated }
-        }
+    ) = expected.sub("invalidates") { inv ->
+        inv.assertBoolean(reader) { invalidated }
+    }
 
     @Test
     fun timerSingleShot() {
@@ -64,32 +59,25 @@ class TemporalConformanceTest {
         val observed = ctx.computed { get(timer.firedCell) }
         ctx.get(observed)
 
-        for (element in steps(fx)) {
+        for ((index, element) in steps(fx).withIndex()) {
             val step = element.jsonObject
             assertEquals(edge(step), timer.tick(now(step)), "fire edge")
-            val exp = expected(step)
-            assertEquals(exp["fired"]!!.jsonPrimitive.boolean, timer.hasFired())
-            if (exp["value"]!!.jsonPrimitive.let { it.longOrNull == null && it.content == "()" }) {
-                assertEquals(Unit, timer.value())
-            } else {
-                assertEquals(null, timer.value())
-            }
-            assertEquals(
-                exp["next_fire"].let {
-                    if (it == null ||
-                        it.jsonPrimitive.longOrNull == null
-                    ) {
-                        null
-                    } else {
-                        it.jsonPrimitive.long
-                    }
-                },
-                timer.nextFire(),
-            )
-
             val wasCached = ctx.isSet(observed)
             ctx.get(observed)
-            checkInval(step, "fired", !wasCached)
+            step.getValue("expected").jsonObject.consuming(
+                "temporal/timer_single_shot.json steps[$index].expected",
+            ) { exp ->
+                exp.assertBoolean("fired") { timer.hasFired() }
+                exp.assertKeyOutcome("value") { want ->
+                    if (want.jsonPrimitive.let { it.longOrNull == null && it.content == "()" }) {
+                        timer.value() == Unit
+                    } else {
+                        timer.value() == null
+                    }
+                }
+                exp.assertKeyOutcome("next_fire") { want -> want.jsonPrimitive.longOrNull == timer.nextFire() }
+                checkInval(exp, "fired", !wasCached)
+            }
         }
     }
 
@@ -102,16 +90,18 @@ class TemporalConformanceTest {
         val observed = ctx.computed { get(iv.countCell) }
         ctx.get(observed)
 
-        for (element in steps(fx)) {
+        for ((index, element) in steps(fx).withIndex()) {
             val step = element.jsonObject
             assertEquals(edge(step), iv.tick(now(step)), "fire edge")
-            val exp = expected(step)
-            assertEquals(exp["count"]!!.jsonPrimitive.long, iv.count())
-            assertEquals(exp["next_fire"]!!.jsonPrimitive.long, iv.nextFire())
-
             val wasCached = ctx.isSet(observed)
             ctx.get(observed)
-            checkInval(step, "count", !wasCached)
+            step.getValue("expected").jsonObject.consuming(
+                "temporal/interval_periodic.json steps[$index].expected",
+            ) { exp ->
+                exp.assertLong("count") { iv.count() }
+                exp.assertLong("next_fire") { iv.nextFire() }
+                checkInval(exp, "count", !wasCached)
+            }
         }
     }
 
@@ -126,16 +116,18 @@ class TemporalConformanceTest {
         val observed = ctx.computed { get(cron.countCell) }
         ctx.get(observed)
 
-        for (element in steps(fx)) {
+        for ((index, element) in steps(fx).withIndex()) {
             val step = element.jsonObject
             assertEquals(edge(step), cron.tick(now(step)), "fire edge")
-            val exp = expected(step)
-            assertEquals(exp["count"]!!.jsonPrimitive.long, cron.count())
-            assertEquals(exp["next_fire"]!!.jsonPrimitive.longOrNull, cron.nextFire())
-
             val wasCached = ctx.isSet(observed)
             ctx.get(observed)
-            checkInval(step, "count", !wasCached)
+            step.getValue("expected").jsonObject.consuming(
+                "temporal/cron_pattern.json steps[$index].expected",
+            ) { exp ->
+                exp.assertLong("count") { cron.count() }
+                exp.assertKeyOutcome("next_fire") { want -> want.jsonPrimitive.longOrNull == cron.nextFire() }
+                checkInval(exp, "count", !wasCached)
+            }
         }
     }
 
@@ -150,17 +142,19 @@ class TemporalConformanceTest {
         val observed = ctx.computed { get(d.expiredCell) }
         ctx.get(observed)
 
-        for (element in steps(fx)) {
+        for ((index, element) in steps(fx).withIndex()) {
             val step = element.jsonObject
             assertEquals(edge(step), d.tick(now(step)), "expiry edge")
-            val exp = expected(step)
             val state = d.state()
-            assertEquals(exp["state"]!!.jsonPrimitive.content == "Expired", state.isExpired)
-            assertEquals(exp["value"]!!.jsonPrimitive.content, state.value) // value preserved
-
             val wasCached = ctx.isSet(observed)
             ctx.get(observed)
-            checkInval(step, "state", !wasCached)
+            step.getValue("expected").jsonObject.consuming(
+                "temporal/deadline_expiry.json steps[$index].expected",
+            ) { exp ->
+                exp.assertString("state") { if (state.isExpired) "Expired" else "Live" }
+                exp.assertString("value") { state.value } // value preserved
+                checkInval(exp, "state", !wasCached)
+            }
         }
     }
 }

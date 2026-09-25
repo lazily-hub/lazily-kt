@@ -1,14 +1,14 @@
 package io.github.lazily
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import kotlin.test.Test
-import kotlin.test.assertEquals
 
 /**
  * Cross-language conformance for the presence + ephemeral plane (`#lzpresence`)
@@ -25,12 +25,8 @@ class PresenceConformanceTest {
 
     private fun steps(fx: JsonObject) = fx["steps"]!!.jsonArray
 
-    private fun wantMap(step: JsonObject): Map<Long, String> =
-        step["expected"]!!
-            .jsonObject["present"]!!
-            .jsonObject
-            .entries
-            .associate { (k, v) -> k.toLong() to v.jsonPrimitive.content }
+    private fun presentJson(present: Map<Long, String>): JsonObject =
+        JsonObject(present.mapKeys { (peer, _) -> peer.toString() }.mapValues { (_, value) -> JsonPrimitive(value) })
 
     private inline fun <reified T : Any> observe(
         ctx: Context,
@@ -44,7 +40,7 @@ class PresenceConformanceTest {
     private fun checkInval(
         ctx: Context,
         obs: Computed<Any>,
-        step: JsonObject,
+        expected: AssertionKeys,
         reader: String,
     ) {
         val wasCached = ctx.isSet(obs)
@@ -54,23 +50,20 @@ class PresenceConformanceTest {
         // otherwise be compared by nothing (#lzsubblockkeyset). The nested
         // tracker owns the whole sub-block, so an unobserved reader kind fails
         // as an unconsumed key.
-        step["expected"]!!
-            .jsonObject
-            .getValue("invalidates")
-            .jsonObject
-            .consumingNested("expected.invalidates[$reader]") { inv ->
-                inv.assertBoolean(reader) { !wasCached }
-            }
+        expected.sub("invalidates") { invalidates ->
+            invalidates.assertBoolean(reader) { !wasCached }
+        }
     }
 
     @Test
     fun presence() {
+        val fixture = "presence/presence.json"
         val fx = loadFixture("presence.json")
         val ctx = Context()
         val ttl = fx["config"]!!.jsonObject["ttl"]!!.jsonPrimitive.long
         val cell = PresenceCell<Long, String>(ctx, ttl)
         val obs = observe(ctx, cell.presentCell)
-        for (element in steps(fx)) {
+        steps(fx).forEachIndexed { index, element ->
             val step = element.jsonObject
             val op = step["op"]!!.jsonObject
             val now = op["now"]!!.jsonPrimitive.long
@@ -84,19 +77,22 @@ class PresenceConformanceTest {
                 // scenario books as replayed while naming behaviour never exercised.
                 else -> error("presence.json: unknown op type '${op["type"]!!.jsonPrimitive.content}'")
             }
-            assertEquals(wantMap(step), cell.present())
-            checkInval(ctx, obs, step, "present")
+            val expected = AssertionKeys("$fixture steps[$index].expected", step["expected"]!!.jsonObject)
+            expected.assertKeyValue("present") { presentJson(cell.present()) }
+            checkInval(ctx, obs, expected, "present")
+            expected.requireAllSatisfied()
         }
     }
 
     @Test
     fun awareness() {
+        val fixture = "presence/awareness.json"
         val fx = loadFixture("awareness.json")
         val ctx = Context()
         val ttl = fx["config"]!!.jsonObject["ttl"]!!.jsonPrimitive.long
         val cell = AwarenessCell<Long, String>(ctx, ttl)
         val obs = observe(ctx, cell.presentCell)
-        for (element in steps(fx)) {
+        steps(fx).forEachIndexed { index, element ->
             val step = element.jsonObject
             val op = step["op"]!!.jsonObject
             val now = op["now"]!!.jsonPrimitive.long
@@ -106,18 +102,21 @@ class PresenceConformanceTest {
                 // Fail closed on an unrecognised op (`#lzscenariobodyskip`).
                 else -> error("awareness.json: unknown op type '${op["type"]!!.jsonPrimitive.content}'")
             }
-            assertEquals(wantMap(step), cell.present())
-            checkInval(ctx, obs, step, "present")
+            val expected = AssertionKeys("$fixture steps[$index].expected", step["expected"]!!.jsonObject)
+            expected.assertKeyValue("present") { presentJson(cell.present()) }
+            checkInval(ctx, obs, expected, "present")
+            expected.requireAllSatisfied()
         }
     }
 
     @Test
     fun ephemeral() {
+        val fixture = "presence/ephemeral.json"
         val fx = loadFixture("ephemeral.json")
         val ctx = Context()
         val cell = EphemeralCell<String>(ctx)
         val obs = observe(ctx, cell.valueCell)
-        for (element in steps(fx)) {
+        steps(fx).forEachIndexed { index, element ->
             val step = element.jsonObject
             val op = step["op"]!!.jsonObject
             val now = op["now"]!!.jsonPrimitive.long
@@ -127,8 +126,10 @@ class PresenceConformanceTest {
                 // Fail closed on an unrecognised op (`#lzscenariobodyskip`).
                 else -> error("ephemeral.json: unknown op type '${op["type"]!!.jsonPrimitive.content}'")
             }
-            assertEquals(step["expected"]!!.jsonObject["value"]!!.jsonPrimitive.contentOrNull, cell.value())
-            checkInval(ctx, obs, step, "value")
+            val expected = AssertionKeys("$fixture steps[$index].expected", step["expected"]!!.jsonObject)
+            expected.assertKeyValue("value") { cell.value()?.let(::JsonPrimitive) ?: JsonNull }
+            checkInval(ctx, obs, expected, "value")
+            expected.requireAllSatisfied()
         }
     }
 }
