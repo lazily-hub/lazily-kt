@@ -24,14 +24,19 @@ class LatestDurableProjectionConformanceTest {
         assertEquals("LatestDurableProjection", fixture.getValue("kind").jsonPrimitive.content)
         assertEquals("LatestDurableProjectionCore", fixture.getValue("model").jsonPrimitive.content)
         var replayed = 0
-        for (scenarioObject in ConformanceScenarios.of("egress/latest_durable_projection.json", fixture)) {
+        val scenarios = ConformanceScenarios.of("egress/latest_durable_projection.json", fixture)
+        for ((scenarioIndex, scenarioObject) in scenarios.withIndex()) {
             val core = LatestDurableProjectionCore<String, String>(scenarioObject.getValue("generation").jsonPrimitive.long)
-            for (step in scenarioObject.getValue("steps").jsonArray) {
+            for ((stepIndex, step) in scenarioObject.getValue("steps").jsonArray.withIndex()) {
                 val stepObject = step.jsonObject
                 val op = stepObject.getValue("op").jsonObject
                 val returned = stepObject.getValue("returns").jsonObject
                 assertOutcome(core, op, returned)
-                assertState(core, stepObject.getValue("expected").jsonObject)
+                stepObject.getValue("expected").jsonObject.consuming(
+                    "egress/latest_durable_projection.json scenarios[$scenarioIndex].steps[$stepIndex].expected",
+                ) { expected ->
+                    assertState(core, expected)
+                }
                 replayed++
             }
         }
@@ -96,30 +101,32 @@ class LatestDurableProjectionConformanceTest {
 
     private fun assertState(
         core: LatestDurableProjectionCore<String, String>,
-        expected: JsonObject,
+        expected: AssertionKeys,
     ) {
-        assertEquals(expected.getValue("generation").jsonPrimitive.long, core.generation)
-        val entries = expected.getValue("entries").jsonArray
-        assertEquals(entries.size, core.knownKeys().size)
-        for (element in entries) {
-            val want = element.jsonObject
-            val key = want.getValue("key").jsonPrimitive.content
-            val got = core.snapshot(key)
-            val desired = want.getValue("desired")
-            if (desired is JsonNull) {
-                assertNull(got.desired)
-            } else {
-                val desiredObject = desired.jsonObject
-                assertEquals(desiredObject.getValue("epoch").jsonPrimitive.long, got.desired?.epoch)
-                assertEquals(desiredObject.getValue("value").jsonPrimitive.content, got.desired?.value)
+        expected.assertLong("generation") { core.generation }
+        expected.assertKeyWith("entries") { entriesElement ->
+            val entries = entriesElement.jsonArray
+            assertEquals(entries.size, core.knownKeys().size)
+            for (element in entries) {
+                val want = element.jsonObject
+                val key = want.getValue("key").jsonPrimitive.content
+                val got = core.snapshot(key)
+                val desired = want.getValue("desired")
+                if (desired is JsonNull) {
+                    assertNull(got.desired)
+                } else {
+                    val desiredObject = desired.jsonObject
+                    assertEquals(desiredObject.getValue("epoch").jsonPrimitive.long, got.desired?.epoch)
+                    assertEquals(desiredObject.getValue("value").jsonPrimitive.content, got.desired?.value)
+                }
+                val inflight = want.getValue("inflight")
+                if (inflight is JsonNull) {
+                    assertNull(got.inflight)
+                } else {
+                    assertEnvelope(requireNotNull(got.inflight), inflight.jsonObject)
+                }
+                assertEquals(want.getValue("durable_through").jsonPrimitive.contentOrNull?.toLong(), got.durableThrough)
             }
-            val inflight = want.getValue("inflight")
-            if (inflight is JsonNull) {
-                assertNull(got.inflight)
-            } else {
-                assertEnvelope(requireNotNull(got.inflight), inflight.jsonObject)
-            }
-            assertEquals(want.getValue("durable_through").jsonPrimitive.contentOrNull?.toLong(), got.durableThrough)
         }
     }
 
