@@ -1661,7 +1661,7 @@ fi
 #           Lower it. This half is the signal a ceiling discards, and it is the
 #           reason the excused population cannot quietly acquire headroom.
 #
-# Pinned at 426 after the egress migration (#lzktbindpending). In normal work
+# Pinned at 370 after the windowing and rateshape migrations (#lzktbindpending). In normal work
 # it only ever moves DOWNWARD, one step per migrated site, in the migrating commit.
 # Env-overridable so the guard itself can be probed without editing the pin — but
 # the override must be a number. An empty or malformed value FAILS CLOSED rather
@@ -1680,7 +1680,7 @@ fi
 # RANGE is resolved by the locale's collation and `0-9` is only guaranteed to be
 # the ten ASCII digits under LC_COLLATE=C. An enumeration is the same ten in every
 # locale, which is what the family rule says.
-EXPECTED_LEDGERED_BLOCKS="${EXPECTED_LEDGERED_BLOCKS-426}"
+EXPECTED_LEDGERED_BLOCKS="${EXPECTED_LEDGERED_BLOCKS-370}"
 case "$EXPECTED_LEDGERED_BLOCKS" in
   '' | *[!0123456789]*)
     echo "ERROR: EXPECTED_LEDGERED_BLOCKS is not a non-negative integer in bare" \

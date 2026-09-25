@@ -28,8 +28,6 @@ class WindowingConformanceTest {
 
     private fun ret(step: JsonObject) = step["returns"]!!.jsonPrimitive.longOrNull
 
-    private fun expOut(step: JsonObject) = step["expected"]!!.jsonObject["output"]!!.jsonPrimitive.longOrNull
-
     /**
      * Assert the step's `invalidates` sub-block by its KEY SET, not just the one
      * reader this runner observes (#lzsubblockkeyset): a reader kind added
@@ -37,15 +35,11 @@ class WindowingConformanceTest {
      * the whole sub-block, so an unobserved reader fails as an unconsumed key.
      */
     private fun checkInval(
-        step: JsonObject,
+        expected: AssertionKeys,
         invalidated: Boolean,
-    ) = step["expected"]!!
-        .jsonObject
-        .getValue("invalidates")
-        .jsonObject
-        .consumingNested("windowing expected.invalidates") { inv ->
-            inv.assertBoolean("output") { invalidated }
-        }
+    ) = expected.sub("invalidates") { inv ->
+        inv.assertBoolean("output") { invalidated }
+    }
 
     private fun observe(
         ctx: Context,
@@ -61,11 +55,19 @@ class WindowingConformanceTest {
         obs: Computed<Any>,
         step: JsonObject,
         out: Long?,
+        fixture: String,
+        stepIndex: Int,
     ) {
-        assertEquals(expOut(step), out, "output")
         val wasCached = ctx.isSet(obs)
         ctx.get(obs)
-        checkInval(step, !wasCached)
+        step.getValue("expected").jsonObject.consuming(
+            "windowing/$fixture steps[$stepIndex].expected",
+        ) { expected ->
+            expected.assertKeyWith("output") { want ->
+                assertEquals(want.jsonPrimitive.longOrNull, out, "output")
+            }
+            checkInval(expected, !wasCached)
+        }
     }
 
     @Test
@@ -75,7 +77,7 @@ class WindowingConformanceTest {
         val n = fx["config"]!!.jsonObject["n"]!!.jsonPrimitive.long
         val w = TumblingCountWindow(ctx, n, sum)
         val obs = observe(ctx, w.outputCell)
-        for (element in steps(fx)) {
+        for ((stepIndex, element) in steps(fx).withIndex()) {
             val step = element.jsonObject
             // The runner drives `push` unconditionally, so read the discriminator and
             // refuse anything the fixture did not name (`#lzscenariobodyskip`).
@@ -83,7 +85,7 @@ class WindowingConformanceTest {
             if (opType != "push") error("tumbling_count.json: unknown op type '$opType'")
             val e = w.push(step["op"]!!.jsonObject["value"]!!.jsonPrimitive.long)
             assertEquals(ret(step), e, "emit")
-            check(ctx, obs, step, w.output())
+            check(ctx, obs, step, w.output(), "tumbling_count.json", stepIndex)
         }
     }
 
@@ -94,7 +96,7 @@ class WindowingConformanceTest {
         val period = fx["config"]!!.jsonObject["period"]!!.jsonPrimitive.long
         val w = TumblingTimeWindow(ctx, period, sum)
         val obs = observe(ctx, w.outputCell)
-        for (element in steps(fx)) {
+        for ((stepIndex, element) in steps(fx).withIndex()) {
             val step = element.jsonObject
             val op = step["op"]!!.jsonObject
             val now = op["now"]!!.jsonPrimitive.long
@@ -111,7 +113,7 @@ class WindowingConformanceTest {
                     else -> error("tumbling_time.json: unknown op type '$opType'")
                 }
             assertEquals(ret(step), e, "emit")
-            check(ctx, obs, step, w.output())
+            check(ctx, obs, step, w.output(), "tumbling_time.json", stepIndex)
         }
     }
 
@@ -122,7 +124,7 @@ class WindowingConformanceTest {
         val cfg = fx["config"]!!.jsonObject
         val w = SlidingWindow(ctx, cfg["size"]!!.jsonPrimitive.long, cfg["slide"]!!.jsonPrimitive.long, sum)
         val obs = observe(ctx, w.outputCell)
-        for (element in steps(fx)) {
+        for ((stepIndex, element) in steps(fx).withIndex()) {
             val step = element.jsonObject
             // The runner drives `push` unconditionally, so read the discriminator and
             // refuse anything the fixture did not name (`#lzscenariobodyskip`).
@@ -130,7 +132,7 @@ class WindowingConformanceTest {
             if (opType != "push") error("sliding_count.json: unknown op type '$opType'")
             val e = w.push(step["op"]!!.jsonObject["value"]!!.jsonPrimitive.long)
             assertEquals(ret(step), e, "emit")
-            check(ctx, obs, step, w.output())
+            check(ctx, obs, step, w.output(), "sliding_count.json", stepIndex)
         }
     }
 
@@ -141,7 +143,7 @@ class WindowingConformanceTest {
         val gap = fx["config"]!!.jsonObject["gap"]!!.jsonPrimitive.long
         val w = SessionWindow(ctx, gap, sum)
         val obs = observe(ctx, w.outputCell)
-        for (element in steps(fx)) {
+        for ((stepIndex, element) in steps(fx).withIndex()) {
             val step = element.jsonObject
             val op = step["op"]!!.jsonObject
             val now = op["now"]!!.jsonPrimitive.long
@@ -153,7 +155,7 @@ class WindowingConformanceTest {
                     else -> error("session.json: unknown op type '$opType'")
                 }
             assertEquals(ret(step), e, "emit")
-            check(ctx, obs, step, w.output())
+            check(ctx, obs, step, w.output(), "session.json", stepIndex)
         }
     }
 }

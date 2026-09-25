@@ -38,8 +38,6 @@ class RateShapeConformanceTest {
 
     private fun ret(step: JsonObject) = step["returns"]!!.jsonPrimitive.contentOrNull
 
-    private fun expOutput(step: JsonObject) = step["expected"]!!.jsonObject["output"]!!.jsonPrimitive.contentOrNull
-
     /**
      * Assert the step's `invalidates` sub-block by its KEY SET, not just the one
      * reader this runner observes (#lzsubblockkeyset): a reader kind added
@@ -47,33 +45,37 @@ class RateShapeConformanceTest {
      * the whole sub-block, so an unobserved reader fails as an unconsumed key.
      */
     private fun checkInval(
-        step: JsonObject,
+        expected: AssertionKeys,
         invalidated: Boolean,
-    ) = step["expected"]!!
-        .jsonObject
-        .getValue("invalidates")
-        .jsonObject
-        .consumingNested("rateshape expected.invalidates") { inv ->
-            inv.assertBoolean("output") { invalidated }
-        }
+    ) = expected.sub("invalidates") { inv ->
+        inv.assertBoolean("output") { invalidated }
+    }
 
     /** Replay a fixture given a per-step driver returning the emitted value. */
     private fun run(
         ctx: Context,
         fx: JsonObject,
+        fixture: String,
         outputCell: Source<Any>,
         readOutput: () -> String?,
         drive: (JsonObject) -> String?,
     ) {
         val observed = ctx.computed { get(outputCell) }
         ctx.get(observed)
-        for (element in steps(fx)) {
+        for ((stepIndex, element) in steps(fx).withIndex()) {
             val step = element.jsonObject
             assertEquals(ret(step), drive(step), "emit")
-            assertEquals(expOutput(step), readOutput(), "output")
+            val output = readOutput()
             val wasCached = ctx.isSet(observed)
             ctx.get(observed)
-            checkInval(step, !wasCached)
+            step.getValue("expected").jsonObject.consuming(
+                "rateshape/$fixture steps[$stepIndex].expected",
+            ) { expected ->
+                expected.assertKeyWith("output") { want ->
+                    assertEquals(want.jsonPrimitive.contentOrNull, output, "output")
+                }
+                checkInval(expected, !wasCached)
+            }
         }
     }
 
@@ -86,7 +88,7 @@ class RateShapeConformanceTest {
         // `tick` used to be the bare `else`, so ANY unrecognised op.type replayed as
         // a tick — the fixture named one thing and the runner did another while the
         // scenario still booked as replayed (`#lzscenariobodyskip`).
-        run(ctx, fx, cell.outputCell, { cell.output() }) { step ->
+        run(ctx, fx, "debounce.json", cell.outputCell, { cell.output() }) { step ->
             when (val opType = opType(step)) {
                 "input" -> {
                     cell.input(opNow(step), opVal(step))
@@ -107,7 +109,7 @@ class RateShapeConformanceTest {
         val window = fx["initial"]!!.jsonObject["window"]!!.jsonPrimitive.long
         val cell = ThrottleCell<String>(ctx, edge, window)
         // `tick` used to be the bare `else` (`#lzscenariobodyskip`).
-        run(ctx, fx, cell.outputCell, { cell.output() }) { step ->
+        run(ctx, fx, name, cell.outputCell, { cell.output() }) { step ->
             when (val opType = opType(step)) {
                 "input" -> cell.input(opNow(step), opVal(step))
                 "tick" -> cell.tick(opNow(step))
@@ -128,7 +130,7 @@ class RateShapeConformanceTest {
         val cell = SampleCell<String>(ctx, SampleMode.Count(n))
         // The driver replays `input` unconditionally, so read the discriminator and
         // refuse anything the fixture did not name (`#lzscenariobodyskip`).
-        run(ctx, fx, cell.outputCell, { cell.output() }) { step ->
+        run(ctx, fx, "sample_count.json", cell.outputCell, { cell.output() }) { step ->
             val opType = opType(step)
             if (opType != "input") error("sample_count.json: unknown op type '$opType'")
             cell.input(opVal(step))
@@ -142,7 +144,7 @@ class RateShapeConformanceTest {
         val period = fx["initial"]!!.jsonObject["period"]!!.jsonPrimitive.long
         val cell = SampleCell<String>(ctx, SampleMode.Time(period))
         // `tick` used to be the bare `else` (`#lzscenariobodyskip`).
-        run(ctx, fx, cell.outputCell, { cell.output() }) { step ->
+        run(ctx, fx, "sample_time.json", cell.outputCell, { cell.output() }) { step ->
             when (val opType = opType(step)) {
                 "input" -> {
                     cell.input(opVal(step))
@@ -161,7 +163,7 @@ class RateShapeConformanceTest {
         val rate = fx["initial"]!!.jsonObject["rate"]!!.jsonPrimitive.double
         val cell = ProbabilisticSampleCell<String>(ctx, rate, Lcg(0))
         // The driver replays `input` unconditionally (`#lzscenariobodyskip`).
-        run(ctx, fx, cell.outputCell, { cell.output() }) { step ->
+        run(ctx, fx, "probabilistic_sample.json", cell.outputCell, { cell.output() }) { step ->
             val opType = opType(step)
             if (opType != "input") error("probabilistic_sample.json: unknown op type '$opType'")
             val draw = step["op"]!!.jsonObject["draw"]!!.jsonPrimitive.double
