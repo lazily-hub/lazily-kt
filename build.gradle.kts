@@ -1,5 +1,6 @@
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
+import org.gradle.jvm.tasks.Jar
 
 plugins {
     kotlin("jvm") version "2.0.21"
@@ -401,6 +402,16 @@ kotlin {
 // Sources JAR for published artifact (provided by the Kotlin plugin).
 java {
     withSourcesJar()
+}
+
+// Carry the family license and attribution notice in every published JAR.
+tasks.withType<Jar>().configureEach {
+    from(layout.projectDirectory.file("LICENSE")) {
+        into("META-INF")
+    }
+    from(layout.projectDirectory.file("NOTICE")) {
+        into("META-INF")
+    }
 }
 
 publishing {
