@@ -401,6 +401,7 @@ EXPECTED_CLOSURE_TARGETS=(
 	check
 	ci-reach
 	fmt
+	published-dependency-check
 	test
 	test-interop-peer
 	test-lazily-formal
@@ -460,10 +461,11 @@ EXPECTED_NO_GATE_TARGETS=(
 # pin ambiguous, and this refuses rather than picking. Family-wide measurement:
 # rs has 69 run: steps and 65 distinct names, js 23/22, cs 23/21, cpp 20/19 — the
 # collision is common enough that the check is not theoretical. This workflow's
-# 11 run: steps carry 11 distinct names.
+# 12 run: steps carry 12 distinct names.
 EXPECTED_CI_STEPS=(
 	'assertion-ordering-check=Assertion observation ordering (#lzassertordering)'
 	'ci-reach=CI-reachability guard (#lzcheckcireachguard)'
+	'published-dependency-check=Published dependency floor (#lzktoptionaldeps)'
 	'test=Test'
 	'test=Guard — conformance fixtures actually replayed (#lzspecconf)'
 	'test-interop-peer=Interop peer self-check (#lzinteroppeerci)'

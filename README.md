@@ -713,6 +713,51 @@ The JVM channel is the conformance-tested surface; the `extern "C"` symbols in
 (`LazilyFfiNative`). lazily-kt's platform CAN host a native in-process boundary,
 so it declares the `ffi = host` capability.
 
+## Optional feature — protobuf graph-boundary codec
+
+The default dependency graph of `io.github.lazily:lazily` is four artifacts:
+`kotlin-stdlib`, `jna` (the FFI boundary), `kotlinx-coroutines-core` (the async
+plane) and `kotlinx-serialization-json` (the wire plane and the state-chart
+parser). The protobuf graph-boundary codec (`ProtobufGraphBoundaryProjection`,
+`PROTOBUF_GRAPH_BOUNDARY_FEATURE`) is **not** in it — it lives in a Gradle
+feature variant, so `protobuf-kotlin` and `protobuf-java` are downloaded only by
+consumers that ask for it (#lzktoptionaldeps).
+
+Gradle consumers request the capability:
+
+```kotlin
+dependencies {
+    implementation("io.github.lazily:lazily:0.42.0")
+    implementation("io.github.lazily:lazily:0.42.0") {
+        capabilities { requireCapability("io.github.lazily:lazily-protobuf-codec") }
+    }
+}
+```
+
+Maven consumers add the classifier artifact and `protobuf-kotlin` explicitly;
+the POM lists it as `<optional>true</optional>`, which Maven does not resolve
+transitively.
+
+```xml
+<dependency>
+  <groupId>io.github.lazily</groupId>
+  <artifactId>lazily</artifactId>
+  <version>0.42.0</version>
+  <classifier>protobuf-codec</classifier>
+</dependency>
+<dependency>
+  <groupId>com.google.protobuf</groupId>
+  <artifactId>protobuf-kotlin</artifactId>
+  <version>4.31.1</version>
+</dependency>
+```
+
+Both sets above are pinned by `scripts/check-published-dependencies.py`, which
+reads the **generated** POM and Gradle Module Metadata rather than
+`build.gradle.kts`, and compares them in both directions — a new unconditional
+dependency and a pin nothing declares each fail it. It runs in `make check` and
+in CI.
+
 ## Development
 
 ```bash

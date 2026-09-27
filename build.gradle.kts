@@ -74,17 +74,59 @@ repositories {
     mavenCentral()
 }
 
+// The protobuf graph-boundary codec is an OPTIONAL FEATURE, not part of the
+// default dependency graph (#lzktoptionaldeps).
+//
+// `implementation("com.google.protobuf:protobuf-kotlin")` in the main source set
+// publishes a runtime-scope POM dependency, so every consumer of
+// `io.github.lazily:lazily` resolved protobuf-kotlin AND its protobuf-java
+// parent — roughly 1.8 MB of wire-codec machinery — to use a reactive-signals
+// library. Exactly one file needs it (ProtobufGraphBoundary.kt) and nothing in
+// `src/main` references that file, so it moves into its own source set and is
+// published as a Gradle feature variant with the
+// `io.github.lazily:lazily-protobuf-codec` capability.
+//
+// Consumers who want the codec ask for the capability explicitly:
+//
+//     implementation("io.github.lazily:lazily:<version>")
+//     implementation("io.github.lazily:lazily:<version>") {
+//         capabilities { requireCapability("io.github.lazily:lazily-protobuf-codec") }
+//     }
+//
+// The feature's dependency is published as an OPTIONAL POM dependency, which
+// Maven consumers do not resolve transitively, and Gradle Module Metadata
+// carries the capability so Gradle consumers get the real variant.
+//
+// The pin that keeps this honest is scripts/check-published-dependencies.py:
+// it reads the GENERATED POM rather than this file, and compares the
+// non-optional and optional dependency sets against pins in BOTH directions, so
+// a new unconditional `implementation` and a pin for something nothing uses both
+// redden. See that script for why reading the manifest would not have caught
+// this in the first place.
+val protobufCodec: SourceSet by sourceSets.creating
+
 dependencies {
     implementation("net.java.dev.jna:jna:5.15.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
-    implementation("com.google.protobuf:protobuf-kotlin:4.31.1")
+    "protobufCodecImplementation"("com.google.protobuf:protobuf-kotlin:4.31.1")
     testImplementation("org.jetbrains.kotlin:kotlin-test")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+    // The test suite replays the protobuf conformance fixtures, so it compiles
+    // against the feature variant's output and its dependency directly. Test
+    // configurations are not published, so this does not reach the POM — which
+    // is the whole point of the guard reading the POM rather than this block.
+    testImplementation(protobufCodec.output)
+    testImplementation("com.google.protobuf:protobuf-kotlin:4.31.1")
 }
 
+// The generated protobuf code belongs to the feature variant, not to `main`.
+// Leaving `srcDir("../lazily-spec/proto")` on `main` would regenerate the
+// classes into the main jar and put protobuf-java back on every consumer's
+// classpath through `compileOnly`-invisible generated code, which is the leak
+// with an extra step.
 sourceSets {
-    main {
+    named("protobufCodec") {
         proto {
             srcDir("../lazily-spec/proto")
             include("lazily/graph_boundary/v1/graph_boundary.proto")
@@ -402,6 +444,24 @@ kotlin {
 // Sources JAR for published artifact (provided by the Kotlin plugin).
 java {
     withSourcesJar()
+
+    // Publish the protobuf graph-boundary codec as an optional feature variant
+    // (#lzktoptionaldeps). This creates the `protobufCodecApiElements` /
+    // `protobufCodecRuntimeElements` variants, a `lazily-protobuf-codec` jar with
+    // the `protobuf-codec` classifier, and the
+    // `io.github.lazily:lazily-protobuf-codec` capability, and it adds the source
+    // set's dependencies to the POM as OPTIONAL rather than runtime-scope.
+    registerFeature("protobufCodec") {
+        usingSourceSet(protobufCodec)
+        // Named explicitly because the DEFAULT capability name is derived from
+        // the Gradle PROJECT name (`lazily-kt`), not the published artifactId
+        // (`lazily`) — consumers would have had to ask for
+        // `io.github.lazily:lazily-kt-protobuf-codec` while depending on
+        // `io.github.lazily:lazily`. The guard pins this string, so a rename
+        // cannot happen silently.
+        capability("io.github.lazily", "lazily-protobuf-codec", project.version.toString())
+        withSourcesJar()
+    }
 }
 
 // Carry the family license and attribution notice in every published JAR.

@@ -52,12 +52,26 @@ export LAZILY_CONFORMANCE_RUN_ID
 test-lean-formal \
 test-lazily-formal \
 assertion-ordering-check \
+published-dependency-check \
 ci-reach
 
-check: fmt test test-interop-peer test-lean-formal test-lazily-formal assertion-ordering-check ci-reach
+check: fmt test test-interop-peer test-lean-formal test-lazily-formal assertion-ordering-check published-dependency-check ci-reach
 
 assertion-ordering-check:
 	python3 ../lazily-spec/scripts/check-assertion-ordering.py --binding kt --root .
+
+# The published-dependency floor (#lzktoptionaldeps). Reads the GENERATED POM and
+# Gradle Module Metadata — not build.gradle.kts — and pins both the default graph
+# and the feature-gated graph in both directions, so a new unconditional
+# `implementation` and a pin nothing declares both redden. Parity with lazily-rs
+# `make default-build-dependency-check` and lazily-js `test/package-manifest.test.js`.
+#
+# It regenerates the publication itself rather than reusing whatever `build` left
+# behind, for the same reason the conformance evidence carries a run id: a task
+# that stopped being wired leaves last run's files on disk, and a guard that reads
+# them reports OK about a publication that was never produced.
+published-dependency-check:
+	python3 ./scripts/check-published-dependencies.py
 
 # The formatting GATE (#lazilyformattinggate). spotless + ktlint, both versions
 # pinned exactly in build.gradle.kts — see the comment there for why pinning the

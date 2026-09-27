@@ -89,6 +89,16 @@ jobs:
       - name: Assertion observation ordering (#lzassertordering)
         run: python3 ../lazily-spec/scripts/check-assertion-ordering.py --binding kt --root .
 
+      # The published-dependency floor (#lzktoptionaldeps). This binding shipped
+      # protobuf-kotlin — and protobuf-java behind it — to every consumer of a
+      # reactive-signals library because one unconditional `implementation` line
+      # looked like the other three. The guard reads the GENERATED POM and module
+      # metadata, so it measures what consumers resolve rather than what the
+      # build file says, and it pins both directions: an added dependency and a
+      # pin nothing declares both fail.
+      - name: Published dependency floor (#lzktoptionaldeps)
+        run: python3 ./scripts/check-published-dependencies.py
+
       # The gate that keeps every step above honest (#lzcheckcireachguard). It
       # compares `make check`'s prerequisite closure against the run: bodies in
       # this file and fails on any target CI does not reach. Comments inside run:
