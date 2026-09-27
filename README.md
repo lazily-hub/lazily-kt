@@ -7,7 +7,7 @@ IPC wire types, a reactive full-Harel state chart, an `AsyncContext` async
 reactive graph, a lock-backed `ThreadSafeContext`, an in-process `ShmBlobArena`
 blob host, and an agent-doc state-projection consumer.
 
-`io.github.lazily:lazily` · Kotlin 2.0.21 · JVM 21 · v0.41.1
+`io.github.lazily:lazily` · Kotlin 2.0.21 · JVM 21 · v0.42.0
 
 ## Feature Set
 
@@ -723,12 +723,16 @@ parser). The protobuf graph-boundary codec (`ProtobufGraphBoundaryProjection`,
 feature variant, so `protobuf-kotlin` and `protobuf-java` are downloaded only by
 consumers that ask for it (#lzktoptionaldeps).
 
+The split lands in the release AFTER v0.42.0 — the snippets below apply from
+that version on. In v0.42.0 and earlier the codec is in the main jar and
+protobuf-kotlin is an unconditional runtime dependency.
+
 Gradle consumers request the capability:
 
 ```kotlin
 dependencies {
-    implementation("io.github.lazily:lazily:0.42.0")
-    implementation("io.github.lazily:lazily:0.42.0") {
+    implementation("io.github.lazily:lazily:$lazilyVersion")
+    implementation("io.github.lazily:lazily:$lazilyVersion") {
         capabilities { requireCapability("io.github.lazily:lazily-protobuf-codec") }
     }
 }
@@ -742,7 +746,7 @@ transitively.
 <dependency>
   <groupId>io.github.lazily</groupId>
   <artifactId>lazily</artifactId>
-  <version>0.42.0</version>
+  <version>${lazily.version}</version>
   <classifier>protobuf-codec</classifier>
 </dependency>
 <dependency>
