@@ -26,8 +26,8 @@ Both are measured, because each closes a hole the other leaves open:
 
   2. module.json variants — what a GRADLE consumer resolves. The default
      `runtimeElements` variant must equal ALLOWED_MODULE_RUNTIME exactly, and the
-     variant carrying REQUIRED_FEATURE_CAPABILITY must equal
-     GATED_MODULE_RUNTIME exactly.
+     variant carrying each capability in GATED_MODULE_RUNTIME_BY_CAPABILITY
+     must equal that capability's pinned graph exactly.
 
 (2) is not decoration. `<optional>true</optional>` is fifteen characters of XML;
 a POM-only guard is satisfied by a dependency marked optional in a POM that no
@@ -80,8 +80,12 @@ GENERATE_TASKS = (
 # Every dependency a MAVEN consumer of io.github.lazily:lazily resolves.
 #
 # kotlin-stdlib is here because the Kotlin plugin adds it and there is no
-# version of this library without it; JNA backs the FFI boundary (LazilyFFI.kt);
-# coroutines-core backs the async plane (AsyncContext.kt, Context.kt).
+# version of this library without it; coroutines-core backs the async plane
+# (AsyncContext.kt, Context.kt).
+#
+# JNA is NO LONGER here (#lzktoptionaljna). It backed LazilyFFI.kt alone, and at
+# ~1.9 MB — the jar embeds native stubs for every supported platform — it was the
+# largest thing every consumer downloaded for a binding most never call.
 #
 # kotlinx-serialization-json is CORE here and deliberately not gated. It is not
 # "the JSON codec": nine main-source files use it, including StateChart.kt's
@@ -96,7 +100,6 @@ GENERATE_TASKS = (
 # is the point of reading the generated document.
 ALLOWED_POM_DEFAULT = frozenset(
     {
-        "net.java.dev.jna:jna",
         "org.jetbrains.kotlin:kotlin-stdlib",
         "org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm",
         "org.jetbrains.kotlinx:kotlinx-serialization-json-jvm",
@@ -105,7 +108,12 @@ ALLOWED_POM_DEFAULT = frozenset(
 
 # Dependencies that must reach the POM ONLY as optional feature-variant entries.
 # Non-empty by construction: see require_pins_measure().
-GATED_POM_OPTIONAL = frozenset({"com.google.protobuf:protobuf-kotlin"})
+GATED_POM_OPTIONAL = frozenset(
+    {
+        "com.google.protobuf:protobuf-kotlin",
+        "net.java.dev.jna:jna",
+    }
+)
 
 # The same two sets as a GRADLE consumer sees them. The coordinates differ from
 # the POM's on purpose — module metadata records what was declared
@@ -114,28 +122,41 @@ GATED_POM_OPTIONAL = frozenset({"com.google.protobuf:protobuf-kotlin"})
 # that quietly stopped describing one of the two documents.
 ALLOWED_MODULE_RUNTIME = frozenset(
     {
-        "net.java.dev.jna:jna",
         "org.jetbrains.kotlin:kotlin-stdlib",
         "org.jetbrains.kotlinx:kotlinx-coroutines-core",
         "org.jetbrains.kotlinx:kotlinx-serialization-json",
     }
 )
 
-# kotlin-stdlib appears again because the feature variant compiles Kotlin. That
-# is not a leak: the consumer already has it from the main variant.
-GATED_MODULE_RUNTIME = frozenset(
-    {
-        "com.google.protobuf:protobuf-kotlin",
-        "org.jetbrains.kotlin:kotlin-stdlib",
-    }
-)
-
-# The capability consumers are documented to request. Pinned as an exact string:
-# Gradle derives the default from the PROJECT name (`lazily-kt`) rather than the
-# published artifactId (`lazily`), so build.gradle.kts overrides it, and an
+# The capabilities consumers are documented to request, each mapped to the
+# runtime graph its variant must publish. Pinned as exact strings: Gradle derives
+# the default capability from the PROJECT name (`lazily-kt`) rather than the
+# published artifactId (`lazily`), so build.gradle.kts overrides both, and an
 # override that silently reverted would leave every documented consumer snippet
 # resolving nothing.
-REQUIRED_FEATURE_CAPABILITY = "io.github.lazily:lazily-protobuf-codec"
+#
+# This is a MAP rather than one capability and one set because the second feature
+# (#lzktoptionaljna) would otherwise be invisible here: with a single pin, a
+# publication that gated jna under a variant nobody named, or under the codec's
+# capability, would still satisfy every comparison. Each capability is measured
+# against its OWN graph, so the two cannot stand in for each other.
+#
+# kotlin-stdlib appears in each because a feature variant compiles Kotlin. That
+# is not a leak: the consumer already has it from the main variant.
+GATED_MODULE_RUNTIME_BY_CAPABILITY = {
+    "io.github.lazily:lazily-protobuf-codec": frozenset(
+        {
+            "com.google.protobuf:protobuf-kotlin",
+            "org.jetbrains.kotlin:kotlin-stdlib",
+        }
+    ),
+    "io.github.lazily:lazily-ffi": frozenset(
+        {
+            "net.java.dev.jna:jna",
+            "org.jetbrains.kotlin:kotlin-stdlib",
+        }
+    ),
+}
 
 # The default variant the Java plugin publishes for runtime consumers.
 DEFAULT_RUNTIME_VARIANT = "runtimeElements"
@@ -203,8 +224,10 @@ def measure_pom(path: Path) -> tuple[frozenset[str], frozenset[str]]:
     return frozenset(default), frozenset(gated)
 
 
-def measure_module(path: Path) -> tuple[frozenset[str], frozenset[str], int]:
-    """Return (default runtime deps, gated runtime deps, gated file count)."""
+def measure_module(
+    path: Path,
+) -> tuple[frozenset[str], dict[str, frozenset[str]], dict[str, int]]:
+    """Return (default runtime deps, per-capability gated deps, per-capability files)."""
     if not path.is_file():
         raise GuardRefusal(f"{path} does not exist; the module metadata was not measured")
     try:
@@ -228,27 +251,32 @@ def measure_module(path: Path) -> tuple[frozenset[str], frozenset[str], int]:
             f"{DEFAULT_RUNTIME_VARIANT!r}; expected exactly one to measure"
         )
 
-    gated_variants = [
-        v
-        for v in variants
-        if any(
-            f"{cap['group']}:{cap['name']}" == REQUIRED_FEATURE_CAPABILITY
-            for cap in v.get("capabilities", [])
-        )
-        # The sources variant carries the capability too and has no dependencies;
-        # the runtime variant is the one that decides what a consumer downloads.
-        and v.get("name", "").endswith("RuntimeElements")
-    ]
-    if len(gated_variants) != 1:
-        raise GuardRefusal(
-            f"{path} has {len(gated_variants)} runtime variants carrying capability "
-            f"{REQUIRED_FEATURE_CAPABILITY!r}; expected exactly one. The capability "
-            "is what a Gradle consumer asks for, so measuring the gated graph "
-            "without it would be measuring some other variant."
-        )
+    gated: dict[str, frozenset[str]] = {}
+    gated_files: dict[str, int] = {}
+    for capability in GATED_MODULE_RUNTIME_BY_CAPABILITY:
+        gated_variants = [
+            v
+            for v in variants
+            if any(
+                f"{cap['group']}:{cap['name']}" == capability
+                for cap in v.get("capabilities", [])
+            )
+            # The sources variant carries the capability too and has no dependencies;
+            # the runtime variant is the one that decides what a consumer downloads.
+            and v.get("name", "").endswith("RuntimeElements")
+        ]
+        if len(gated_variants) != 1:
+            raise GuardRefusal(
+                f"{path} has {len(gated_variants)} runtime variants carrying capability "
+                f"{capability!r}; expected exactly one. The capability is what a Gradle "
+                "consumer asks for, so measuring the gated graph without it would be "
+                "measuring some other variant."
+            )
+        variant = gated_variants[0]
+        gated[capability] = coords(variant)
+        gated_files[capability] = len(variant.get("files", []))
 
-    gated = gated_variants[0]
-    return coords(default_variants[0]), coords(gated), len(gated.get("files", []))
+    return coords(default_variants[0]), gated, gated_files
 
 
 # --- assertions -----------------------------------------------------------
@@ -262,8 +290,26 @@ def require_pins_measure() -> list[str]:
             "GATED_POM_OPTIONAL is empty — the optional half would be satisfied by a "
             "publication that gated nothing, which is the state this guard exists to refuse"
         )
-    if not GATED_MODULE_RUNTIME:
-        problems.append("GATED_MODULE_RUNTIME is empty — same vacuity")
+    if not GATED_MODULE_RUNTIME_BY_CAPABILITY:
+        problems.append(
+            "GATED_MODULE_RUNTIME_BY_CAPABILITY names no capability — with no feature "
+            "pinned, a publication that gated nothing would satisfy the module half"
+        )
+    for capability, pinned in GATED_MODULE_RUNTIME_BY_CAPABILITY.items():
+        if not pinned:
+            problems.append(f"{capability} pins an empty runtime graph — same vacuity")
+    # Every gated coordinate must be gated by exactly one feature. Two features
+    # pinned for the same dependency means neither variant's pin can fail on it:
+    # the dependency would be found wherever it was published.
+    seen: dict[str, str] = {}
+    for capability, pinned in GATED_MODULE_RUNTIME_BY_CAPABILITY.items():
+        for coord in pinned - {"org.jetbrains.kotlin:kotlin-stdlib"}:
+            if coord in seen:
+                problems.append(
+                    f"{coord} is pinned under both {seen[coord]} and {capability}, so "
+                    "neither capability's graph can fail on it"
+                )
+            seen[coord] = capability
     if not ALLOWED_POM_DEFAULT:
         problems.append("ALLOWED_POM_DEFAULT is empty — an empty pin describes nothing")
     overlap = GATED_POM_OPTIONAL & ALLOWED_POM_DEFAULT
@@ -272,12 +318,13 @@ def require_pins_measure() -> list[str]:
             "these coordinates are pinned as BOTH default and gated, so neither "
             f"direction can fail on them: {sorted(overlap)}"
         )
-    overlap = GATED_MODULE_RUNTIME & ALLOWED_MODULE_RUNTIME
-    if overlap - {"org.jetbrains.kotlin:kotlin-stdlib"}:
-        problems.append(
-            "these module coordinates are pinned as both default and gated: "
-            f"{sorted(overlap - {'org.jetbrains.kotlin:kotlin-stdlib'})}"
-        )
+    for capability, pinned in GATED_MODULE_RUNTIME_BY_CAPABILITY.items():
+        overlap = (pinned & ALLOWED_MODULE_RUNTIME) - {"org.jetbrains.kotlin:kotlin-stdlib"}
+        if overlap:
+            problems.append(
+                f"these module coordinates are pinned as both default and gated under "
+                f"{capability}: {sorted(overlap)}"
+            )
     return problems
 
 
@@ -327,18 +374,19 @@ def main(argv: list[str] | None = None) -> int:
     failures += compare(
         f"module {DEFAULT_RUNTIME_VARIANT}", module_default, ALLOWED_MODULE_RUNTIME
     )
-    failures += compare(
-        f"module {REQUIRED_FEATURE_CAPABILITY} runtime", module_gated, GATED_MODULE_RUNTIME
-    )
-
-    # A capability with no artifact behind it satisfies every set comparison
-    # above while shipping a consumer nothing to call.
-    if gated_files == 0:
-        failures.append(
-            f"module {REQUIRED_FEATURE_CAPABILITY} runtime: the variant publishes no "
-            "files — the capability is an empty shell, so a consumer that requested "
-            "it would resolve the dependency and none of the code that needs it"
+    for capability, pinned in sorted(GATED_MODULE_RUNTIME_BY_CAPABILITY.items()):
+        failures += compare(
+            f"module {capability} runtime", module_gated[capability], pinned
         )
+
+        # A capability with no artifact behind it satisfies every set comparison
+        # above while shipping a consumer nothing to call.
+        if gated_files[capability] == 0:
+            failures.append(
+                f"module {capability} runtime: the variant publishes no files — the "
+                "capability is an empty shell, so a consumer that requested it would "
+                "resolve the dependency and none of the code that needs it"
+            )
 
     if failures:
         for failure in failures:
@@ -352,11 +400,15 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
+    gated_summary = ", ".join(
+        f"{capability} ({gated_files[capability]} file(s))"
+        for capability in sorted(GATED_MODULE_RUNTIME_BY_CAPABILITY)
+    )
     print(
         "check-published-dependencies: OK — "
         f"{len(pom_default)} default POM dependencies, "
-        f"{len(pom_gated)} gated behind {REQUIRED_FEATURE_CAPABILITY} "
-        f"({gated_files} published file(s)), both documents pinned in both directions"
+        f"{len(pom_gated)} gated across {len(GATED_MODULE_RUNTIME_BY_CAPABILITY)} "
+        f"feature variant(s): {gated_summary}; both documents pinned in both directions"
     )
     return 0
 

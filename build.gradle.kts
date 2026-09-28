@@ -105,11 +105,27 @@ repositories {
 // this in the first place.
 val protobufCodec: SourceSet by sourceSets.creating
 
+// The same treatment for JNA (#lzktoptionaljna). `net.java.dev.jna:jna` was the
+// largest dependency left in the default published graph — ~1.9 MB, because the
+// jar embeds native stubs for every supported platform — and exactly one main
+// source imported it: LazilyFFI.kt, the JNA binding to the agent-doc binary's
+// C-ABI projection.
+//
+// LazilyFfiBoundary.kt does NOT move, and that is the substantive finding rather
+// than an omission. Despite the name, `LazilyFfiNative` is pure JVM: it is the
+// entry-table SHAPE a native peer links against (Graal `--export-symbols`, or a
+// JNI shim), and it calls LazilyFfiChannel, which decodes and re-encodes
+// IpcMessage in Kotlin. The file has no imports at all and never references
+// LazilyFFI. So the conformance surface the test suite replays
+// (LazilyFfiBoundaryTest exercises LazilyFfiChannel / LazilyFfiNative) stays in
+// `main`, compiled and tested exactly as before; only the JNA binding is gated.
+val ffi: SourceSet by sourceSets.creating
+
 dependencies {
-    implementation("net.java.dev.jna:jna:5.15.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     "protobufCodecImplementation"("com.google.protobuf:protobuf-kotlin:4.31.1")
+    "ffiImplementation"("net.java.dev.jna:jna:5.15.0")
     testImplementation("org.jetbrains.kotlin:kotlin-test")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     // The test suite replays the protobuf conformance fixtures, so it compiles
@@ -460,6 +476,16 @@ java {
         // `io.github.lazily:lazily`. The guard pins this string, so a rename
         // cannot happen silently.
         capability("io.github.lazily", "lazily-protobuf-codec", project.version.toString())
+        withSourcesJar()
+    }
+
+    // Publish the JNA-backed FFI binding as an optional feature variant
+    // (#lzktoptionaljna), on the same terms: an explicit capability rather than
+    // the project-name-derived default, and jna published as an OPTIONAL POM
+    // dependency Maven does not resolve transitively.
+    registerFeature("ffi") {
+        usingSourceSet(ffi)
+        capability("io.github.lazily", "lazily-ffi", project.version.toString())
         withSourcesJar()
     }
 }

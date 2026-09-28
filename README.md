@@ -275,7 +275,8 @@ ctx.getAsync(sum)             // dependency invalidated -> 13
 
 `StateProjectionClient` and `StateProjectionBridgeSupport` consume the agent-doc
 binary's `DocumentStateProjection` over its C ABI. `LazilyFFI` provides the JNA
-bindings to that C-ABI surface. This is an **optional transport** for consuming
+bindings to that C-ABI surface, and ships in the `io.github.lazily:lazily-ffi`
+feature variant rather than the main jar (#lzktoptionaljna). This is an **optional transport** for consuming
 authoritative projections from the Rust binary — it is independent of the
 reactive core. A state chart or any other compute runs natively, never via this
 FFI channel (routing chart logic through JNA to a Rust `Context` would be
@@ -715,10 +716,10 @@ so it declares the `ffi = host` capability.
 
 ## Optional feature — protobuf graph-boundary codec
 
-The default dependency graph of `io.github.lazily:lazily` is four artifacts:
-`kotlin-stdlib`, `jna` (the FFI boundary), `kotlinx-coroutines-core` (the async
-plane) and `kotlinx-serialization-json` (the wire plane and the state-chart
-parser). The protobuf graph-boundary codec (`ProtobufGraphBoundaryProjection`,
+The default dependency graph of `io.github.lazily:lazily` is three artifacts:
+`kotlin-stdlib`, `kotlinx-coroutines-core` (the async plane) and
+`kotlinx-serialization-json` (the wire plane and the state-chart parser). `jna`
+is no longer among them — see the FFI section below (#lzktoptionaljna). The protobuf graph-boundary codec (`ProtobufGraphBoundaryProjection`,
 `PROTOBUF_GRAPH_BOUNDARY_FEATURE`) is **not** in it — it lives in a Gradle
 feature variant, so `protobuf-kotlin` and `protobuf-java` are downloaded only by
 consumers that ask for it (#lzktoptionaldeps).
@@ -753,6 +754,52 @@ transitively.
   <groupId>com.google.protobuf</groupId>
   <artifactId>protobuf-kotlin</artifactId>
   <version>4.31.1</version>
+</dependency>
+```
+
+## Optional feature — JNA FFI binding
+
+`jna` was the largest artifact in the default graph at ~1.9 MB: the jar embeds
+native stubs for every supported platform, and exactly one source needed it —
+`LazilyFFI`, the JNA binding to the agent-doc binary's C ABI. It now lives in its
+own feature variant, so only consumers that actually call the binary download it
+(#lzktoptionaljna).
+
+**`LazilyFfiChannel` and `LazilyFfiNative` are unaffected and remain in the main
+jar.** Despite the name, that plane is pure JVM: `LazilyFfiNative` is the
+entry-table shape a native peer links against, and it delegates to
+`LazilyFfiChannel`, which encodes and decodes `IpcMessage` in Kotlin. Embedding
+the FFI channel in-process needs no capability and no `jna`.
+
+The split lands in the release AFTER v0.42.0 — the snippets below apply from that
+version on. In v0.42.0 and earlier `LazilyFFI` is in the main jar and `jna` is an
+unconditional runtime dependency.
+
+Gradle consumers request the capability:
+
+```kotlin
+dependencies {
+    implementation("io.github.lazily:lazily:$lazilyVersion")
+    implementation("io.github.lazily:lazily:$lazilyVersion") {
+        capabilities { requireCapability("io.github.lazily:lazily-ffi") }
+    }
+}
+```
+
+Maven consumers add the classifier artifact and `jna` explicitly; the POM lists
+it as `<optional>true</optional>`, which Maven does not resolve transitively.
+
+```xml
+<dependency>
+  <groupId>io.github.lazily</groupId>
+  <artifactId>lazily</artifactId>
+  <version>${lazily.version}</version>
+  <classifier>ffi</classifier>
+</dependency>
+<dependency>
+  <groupId>net.java.dev.jna</groupId>
+  <artifactId>jna</artifactId>
+  <version>5.15.0</version>
 </dependency>
 ```
 
