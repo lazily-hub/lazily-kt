@@ -68,7 +68,7 @@ spotless {
 }
 
 group = "io.github.lazily"
-version = "0.42.0"
+version = "0.43.0"
 
 repositories {
     mavenCentral()
