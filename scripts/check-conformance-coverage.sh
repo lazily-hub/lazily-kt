@@ -1481,7 +1481,7 @@ fi
 # whose scenario recorder silently shrank while still producing a non-empty
 # ledger. Derived from the completed gate's own 157/157 report. Override only for
 # the n+1 exactness probe; never lower it to repair a red run.
-MIN_SCENARIOS="${MIN_SCENARIOS:-157}"
+MIN_SCENARIOS="${MIN_SCENARIOS:-162}"
 if [ "$sc_replayed" -lt "$MIN_SCENARIOS" ]; then
   echo "ERROR: the runtime ledger records only $sc_replayed replayed scenario(s)," >&2
   echo "       expected >= MIN_SCENARIOS=$MIN_SCENARIOS. The replay population shrank;" >&2
