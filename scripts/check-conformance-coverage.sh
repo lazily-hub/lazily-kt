@@ -1030,6 +1030,7 @@ lossless-tree
   resilience
   service
   signaling
+  simulation
   statechart
   stdlib
   temporal
@@ -1455,7 +1456,9 @@ done
 # Note the number is necessarily >= the 27 REQUIRED_AREAS, since each of those
 # must contribute an opened fixture; the extra is an area the run opens without
 # requiring. Do not lower this to fix a red run — the shrink is the finding.
-MIN_OPENED_AREAS="${MIN_OPENED_AREAS:-28}"
+# Raised to 29 with the canonical consumer simulation testkit fixture: the
+# `simulation` area is now replayed and required above.
+MIN_OPENED_AREAS="${MIN_OPENED_AREAS:-29}"
 if [ "$opened_area_count" -lt "$MIN_OPENED_AREAS" ]; then
   echo "ERROR: the suite OPENED fixtures in only $opened_area_count corpus area(s)," >&2
   echo "       expected >= $MIN_OPENED_AREAS. The corpus is a partial checkout, or the" >&2

@@ -339,6 +339,12 @@ lazily-kt replays the shared [`lazily-spec`][spec] conformance fixtures:
   `drifting_accumulator` subjects. Each `record` step also cross-checks that the
   recorded `sum` digest IS the digest of the subject's final sum, so a harness
   that fingerprinted some other value cannot pass.
+- `SimConsumerTestkit` runs one generated history through a deterministic
+  in-memory consumer and explicitly selected Postgres, NATS, or external-process
+  adapters. Its narrow `SimConsumerWorldEvidence` seam proves world execution
+  without prescribing a scheduler; `SimConsumerTestkitConformanceTest` replays
+  all five `conformance/simulation/consumer_testkit.json` scenarios, including
+  first-step observation, history-prefix, and simulation-bypass failures.
 
 Not yet implemented: the `ffi = host` symbol export is provided as a JVM
 embeddable channel + C header + JNI-ready native entry table ([`src/main/resources/native/lazily_ffi.h`](src/main/resources/native/lazily_ffi.h)); real `extern "C"` symbol export ships via a Graal native-image build of the artifact.
