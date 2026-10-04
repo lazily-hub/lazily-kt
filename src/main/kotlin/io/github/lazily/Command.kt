@@ -363,6 +363,20 @@ sealed interface CommandMessage {
     }
 }
 
+// The command plane carries generations as `Long`; a receipt's wire generation
+// is a u64 (`ULong`). Compare them without wrapping either side: a negative
+// command generation never matches, and neither does a receipt generation past
+// `Long.MAX_VALUE`.
+internal fun receiptGenerationMatches(
+    commandGeneration: Long,
+    receiptGeneration: ULong,
+): Boolean = commandGeneration >= 0 && commandGeneration.toULong() == receiptGeneration
+
+// A receipt generation past `Long.MAX_VALUE` is reported capped, never wrapped
+// into a negative `Long`.
+internal fun receiptGenerationAsLong(receiptGeneration: ULong): Long =
+    if (receiptGeneration > Long.MAX_VALUE.toULong()) Long.MAX_VALUE else receiptGeneration.toLong()
+
 sealed interface CommandApplyStatus {
     data object Recorded : CommandApplyStatus
 
@@ -481,8 +495,8 @@ class CommandProjection {
     fun observeReceipt(receipt: CausalReceipt): CommandApplyStatus {
         if (receipt.receiptId in seenReceiptIds) return CommandApplyStatus.Duplicate
         val entry = entries[receipt.causationId] ?: return CommandApplyStatus.Unknown
-        if (receipt.generation != entry.generation) {
-            return CommandApplyStatus.StaleGeneration(entry.generation, receipt.generation)
+        if (!receiptGenerationMatches(entry.generation, receipt.generation)) {
+            return CommandApplyStatus.StaleGeneration(entry.generation, receiptGenerationAsLong(receipt.generation))
         }
         if (!receipt.outcome.isTerminal) {
             seenReceiptIds.add(receipt.receiptId)

@@ -7,6 +7,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNull
@@ -27,12 +28,12 @@ class ReceiptTest {
             ReceiptMessage.ofCausalReceipts(
                 CausalReceipts(
                     listOf(
-                        CausalReceipt.observed("receipt-observed", "patch-123", "editor", 7),
+                        CausalReceipt.observed("receipt-observed", "patch-123", "editor", 7u),
                         CausalReceipt.applied(
                             "receipt-applied",
                             "patch-123",
                             "editor",
-                            7,
+                            7u,
                             payloadHash = "sha256:abc",
                         ),
                     ),
@@ -52,19 +53,19 @@ class ReceiptTest {
         assertEquals(
             ReceiptApplyStatus.Recorded,
             projection.observe(
-                7,
-                CausalReceipt.observed("receipt-observed", "patch-123", "editor", 7),
+                7u,
+                CausalReceipt.observed("receipt-observed", "patch-123", "editor", 7u),
             ),
         )
         assertEquals(
-            ReceiptApplyStatus.StaleGeneration(expected = 7, actual = 6),
+            ReceiptApplyStatus.StaleGeneration(expected = 7u, actual = 6u),
             projection.observe(
-                7,
+                7u,
                 CausalReceipt.rejected(
                     "receipt-stale",
                     "patch-123",
                     "editor",
-                    6,
+                    6u,
                     reason = "stale generation",
                 ),
             ),
@@ -72,12 +73,12 @@ class ReceiptTest {
         assertEquals(
             ReceiptApplyStatus.Recorded,
             projection.observe(
-                7,
+                7u,
                 CausalReceipt.applied(
                     "receipt-applied",
                     "patch-123",
                     "editor",
-                    7,
+                    7u,
                     payloadHash = "sha256:abc",
                 ),
             ),
@@ -91,10 +92,10 @@ class ReceiptTest {
     @Test
     fun `duplicate and terminal conflict are no-ops`() {
         val projection = ReceiptProjection()
-        val applied = CausalReceipt.applied("receipt-applied", "patch-123", "editor", 7)
+        val applied = CausalReceipt.applied("receipt-applied", "patch-123", "editor", 7u)
 
-        assertEquals(ReceiptApplyStatus.Recorded, projection.observe(7, applied))
-        assertEquals(ReceiptApplyStatus.Duplicate, projection.observe(7, applied))
+        assertEquals(ReceiptApplyStatus.Recorded, projection.observe(7u, applied))
+        assertEquals(ReceiptApplyStatus.Duplicate, projection.observe(7u, applied))
         assertEquals(
             ReceiptApplyStatus.TerminalConflict(
                 causationId = "patch-123",
@@ -102,8 +103,8 @@ class ReceiptTest {
                 incoming = ReceiptOutcome.Rejected,
             ),
             projection.observe(
-                7,
-                CausalReceipt.rejected("receipt-rejected", "patch-123", "editor", 7),
+                7u,
+                CausalReceipt.rejected("receipt-rejected", "patch-123", "editor", 7u),
             ),
         )
         assertFalse(projection.containsReceipt("receipt-rejected"))
@@ -125,7 +126,7 @@ class ReceiptTest {
             .jsonObject
             .consuming("receipts/causal_receipts.json assertions") { a ->
                 val currentGeneration =
-                    a.long("current_generation")
+                    a.long("current_generation")?.toULong()
                         ?: error("current_generation is required")
                 receipts.forEach { projection.observe(currentGeneration, it) }
 
@@ -136,7 +137,7 @@ class ReceiptTest {
                 // induces: a receipt stamped with it is recorded, one stamped with
                 // anything else is stale.
                 a.assertKeyWith("current_generation") { want ->
-                    val gen = want.jsonPrimitive.long
+                    val gen = want.jsonPrimitive.long.toULong()
                     assertEquals(
                         receipts.filter { it.generation != gen }.map { it.receiptId },
                         projection.staleReceiptIds(),
@@ -179,5 +180,75 @@ class ReceiptTest {
                 }
             }
         assertNull(projection.terminalFor("missing"))
+    }
+
+    private val validReceipt =
+        """{"receipt_id":"r-1","causation_id":"c-1","observer":"editor","generation":7,""" +
+            """"outcome":"applied","reason":null,"payload_hash":"sha256:abc"}"""
+
+    private fun frame(receipt: String): String = """{"CausalReceipts":{"receipts":[$receipt]}}"""
+
+    @Test
+    fun `canonical fixture re-encodes byte for byte`() {
+        val wire =
+            Json
+                .parseToJsonElement(ConformanceFixtures.read("receipts/causal_receipts.json"))
+                .jsonObject
+                .getValue("wire")
+        assertEquals(wire.toString(), ReceiptMessage.fromJson(wire).toJson().toString())
+    }
+
+    @Test
+    fun `generation spans the full u64 range`() {
+        val max = frame(validReceipt.replace("\"generation\":7", "\"generation\":18446744073709551615"))
+        val decoded = assertIs<ReceiptMessage.CausalReceiptsMessage>(ReceiptMessage.decodeJson(max))
+        assertEquals(ULong.MAX_VALUE, decoded.batch.receipts.single().generation)
+        assertEquals(max, decoded.encodeJson().decodeToString())
+    }
+
+    @Test
+    fun `strict decoder rejects off-schema receipts`() {
+        val bad =
+            mapOf(
+                "negative generation" to validReceipt.replace("\"generation\":7", "\"generation\":-1"),
+                "generation past u64" to validReceipt.replace("\"generation\":7", "\"generation\":18446744073709551616"),
+                "fractional generation" to validReceipt.replace("\"generation\":7", "\"generation\":7.0"),
+                "string generation" to validReceipt.replace("\"generation\":7", "\"generation\":\"7\""),
+                "unknown outcome" to validReceipt.replace("\"applied\"", "\"merged\""),
+                "unknown key" to validReceipt.replace("}", ",\"extra\":1}"),
+                "missing reason" to validReceipt.replace("\"reason\":null,", ""),
+                "empty receipt_id" to validReceipt.replace("\"r-1\"", "\"\""),
+                "numeric observer" to validReceipt.replace("\"editor\"", "1"),
+            )
+        bad.forEach { (label, receipt) ->
+            assertFailsWith<IllegalArgumentException>(label) { ReceiptMessage.decodeJson(frame(receipt)) }
+        }
+        assertFailsWith<IllegalArgumentException>("missing receipts") {
+            ReceiptMessage.decodeJson("""{"CausalReceipts":{}}""")
+        }
+        assertFailsWith<IllegalArgumentException>("two variant tags") {
+            ReceiptMessage.decodeJson("""{"CausalReceipts":{"receipts":[]},"Other":{}}""")
+        }
+        assertFailsWith<IllegalArgumentException>("unknown variant") {
+            ReceiptMessage.decodeJson("""{"Other":{"receipts":[]}}""")
+        }
+    }
+
+    @Test
+    fun `empty batch encodes as an empty array`() {
+        assertEquals(
+            """{"CausalReceipts":{"receipts":[]}}""",
+            ReceiptMessage.ofCausalReceipts(CausalReceipts()).encodeJson().decodeToString(),
+        )
+    }
+
+    @Test
+    fun `command generation comparison never wraps`() {
+        assertTrue(receiptGenerationMatches(7, 7u))
+        assertFalse(receiptGenerationMatches(-1, ULong.MAX_VALUE))
+        assertFalse(receiptGenerationMatches(Long.MAX_VALUE, ULong.MAX_VALUE))
+        assertTrue(receiptGenerationMatches(Long.MAX_VALUE, Long.MAX_VALUE.toULong()))
+        assertEquals(Long.MAX_VALUE, receiptGenerationAsLong(ULong.MAX_VALUE))
+        assertEquals(7L, receiptGenerationAsLong(7u))
     }
 }

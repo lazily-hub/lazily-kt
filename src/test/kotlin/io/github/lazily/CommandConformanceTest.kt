@@ -175,10 +175,10 @@ class CommandConformanceTest {
     fun `conflicting terminal receipts fail closed`() {
         val p = CommandProjection()
         p.submit(submitFixture("cmd-1", 42))
-        p.observeReceipt(CausalReceipt.applied("rcpt-applied", "cmd-1", "project-controller", 42))
+        p.observeReceipt(CausalReceipt.applied("rcpt-applied", "cmd-1", "project-controller", 42u))
         val status =
             p.observeReceipt(
-                CausalReceipt.rejected("rcpt-rejected", "cmd-1", "project-controller", 42, reason = "conflict"),
+                CausalReceipt.rejected("rcpt-rejected", "cmd-1", "project-controller", 42u, reason = "conflict"),
             )
         assertIs<CommandApplyStatus.TerminalConflict>(status)
         assertTrue(p.hasConflict("cmd-1"))
@@ -383,7 +383,7 @@ class CommandConformanceTest {
             ),
         )
         assertEquals(CallState.Pending, client.pollCall(id))
-        client.ingestReceipt(CausalReceipt.applied("rcpt-1", id, "project-controller", 42))
+        client.ingestReceipt(CausalReceipt.applied("rcpt-1", id, "project-controller", 42u))
         val state = client.pollCall(id)
         assertIs<CallState.Resolved>(state)
         assertEquals(CommandStatus.Applied, state.entry.status)
