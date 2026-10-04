@@ -201,6 +201,8 @@ class AgentDocStateConformanceTest {
                 is DeltaOp.EdgeAdd -> edges.add(op.dependent to op.dependency)
                 is DeltaOp.EdgeRemove -> edges.remove(op.dependent to op.dependency)
                 is DeltaOp.SlotValue, is DeltaOp.Invalidate -> Unit
+                is DeltaOp.QueuePush, is DeltaOp.QueuePop, is DeltaOp.QueueClose ->
+                    throw UnsupportedQueueOpException(op)
             }
         }
 

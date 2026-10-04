@@ -63,8 +63,18 @@ class GraphView {
     /**
      * Apply a warm [Delta]. Ops apply verbatim in emission order; the frontier advances
      * to [Delta.epoch]. A no-op delta (empty ops) only advances the epoch.
+     *
+     * QueueCell op-log ops (`QueuePush`/`QueuePop`/`QueueClose`, `#queue-oplog`) are
+     * REFUSED with [UnsupportedQueueOpException]: a graph-state image has no queue
+     * semantics to apply them with, and silently dropping or mis-applying one would
+     * fork the replica from the producer. The whole delta is refused before any op
+     * applies, and the epoch does not advance.
      */
     fun applyDelta(delta: Delta) {
+        // Refuse before mutating anything, so a refused delta leaves the replica untouched.
+        delta.ops.firstOrNull { it is DeltaOp.QueuePush || it is DeltaOp.QueuePop || it is DeltaOp.QueueClose }?.let {
+            throw UnsupportedQueueOpException(it)
+        }
         for (op in delta.ops) {
             when (op) {
                 is DeltaOp.NodeAdd -> nodes[op.node] = Node(op.node, op.typeTag, payloadOf(op.state))
@@ -74,6 +84,7 @@ class GraphView {
                 is DeltaOp.NodeRemove -> nodes.remove(op.node)
                 is DeltaOp.EdgeAdd -> edges.add(op.dependent to op.dependency)
                 is DeltaOp.EdgeRemove -> edges.remove(op.dependent to op.dependency)
+                is DeltaOp.QueuePush, is DeltaOp.QueuePop, is DeltaOp.QueueClose -> throw UnsupportedQueueOpException(op)
             }
         }
         epoch = maxOf(epoch, delta.epoch)
@@ -108,6 +119,16 @@ class GraphView {
             else -> null
         }
 }
+
+/**
+ * A QueueCell op-log op (`#lzdeltaqueueops`) reached a graph-state projection that
+ * cannot apply queue semantics. Mirrors lazily-cs `StateProjection`'s refusal.
+ */
+class UnsupportedQueueOpException(
+    val op: DeltaOp,
+) : UnsupportedOperationException(
+    "${op::class.simpleName} requires a queue projection adapter; the graph-state projection cannot apply it.",
+)
 
 private fun ByteArray?.contentEqualsOrBothNull(other: ByteArray?): Boolean =
     if (this == null || other == null) this == null && other == null else this.contentEquals(other)

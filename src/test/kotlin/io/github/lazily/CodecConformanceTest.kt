@@ -60,6 +60,9 @@ class CodecConformanceTest {
             is DeltaOp.NodeRemove -> "NodeRemove"
             is DeltaOp.EdgeAdd -> "EdgeAdd"
             is DeltaOp.EdgeRemove -> "EdgeRemove"
+            is DeltaOp.QueuePush -> "QueuePush"
+            is DeltaOp.QueuePop -> "QueuePop"
+            is DeltaOp.QueueClose -> "QueueClose"
         }
 
     private fun variantOf(message: IpcMessage): String =

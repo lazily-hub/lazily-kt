@@ -655,6 +655,74 @@ sealed interface DeltaOp {
         ): Boolean = permissions.canRead(peer, dependent) && permissions.canRead(peer, dependency)
     }
 
+    /**
+     * QueueCell op-log push (`#queue-oplog`, `#lzdeltaqueueops`): append [payload]
+     * to the queue at [node]. Same body shape as [CellSet]; the payload is an
+     * [IpcValue], so it spills/resolves exactly like a `CellSet` payload.
+     */
+    data class QueuePush(
+        val node: NodeId,
+        val payload: IpcValue,
+    ) : DeltaOp {
+        constructor(node: NodeId, bytes: ByteArray) : this(node, IpcValue.Inline(bytes))
+
+        override fun toJson(): JsonObject =
+            buildJsonObject {
+                put(
+                    "QueuePush",
+                    buildJsonObject {
+                        put("node", node)
+                        put("payload", payload.toJson())
+                    },
+                )
+            }
+
+        override fun targetReadable(
+            permissions: PeerPermissions,
+            peer: PeerId,
+        ): Boolean = permissions.canRead(peer, node)
+    }
+
+    /** QueueCell op-log pop (`#queue-oplog`): drop the head of the queue at [node]. */
+    data class QueuePop(
+        val node: NodeId,
+    ) : DeltaOp {
+        override fun toJson(): JsonObject =
+            buildJsonObject {
+                put(
+                    "QueuePop",
+                    buildJsonObject {
+                        put("node", node)
+                    },
+                )
+            }
+
+        override fun targetReadable(
+            permissions: PeerPermissions,
+            peer: PeerId,
+        ): Boolean = permissions.canRead(peer, node)
+    }
+
+    /** QueueCell op-log close (`#queue-oplog`): close the queue at [node]. */
+    data class QueueClose(
+        val node: NodeId,
+    ) : DeltaOp {
+        override fun toJson(): JsonObject =
+            buildJsonObject {
+                put(
+                    "QueueClose",
+                    buildJsonObject {
+                        put("node", node)
+                    },
+                )
+            }
+
+        override fun targetReadable(
+            permissions: PeerPermissions,
+            peer: PeerId,
+        ): Boolean = permissions.canRead(peer, node)
+    }
+
     companion object {
         fun cellSet(
             node: NodeId,
@@ -703,6 +771,20 @@ sealed interface DeltaOp {
             dependency: NodeId,
         ): DeltaOp = EdgeRemove(dependent, dependency)
 
+        fun queuePush(
+            node: NodeId,
+            bytes: ByteArray,
+        ): DeltaOp = QueuePush(node, bytes)
+
+        fun queuePush(
+            node: NodeId,
+            payload: IpcValue,
+        ): DeltaOp = QueuePush(node, payload)
+
+        fun queuePop(node: NodeId): DeltaOp = QueuePop(node)
+
+        fun queueClose(node: NodeId): DeltaOp = QueueClose(node)
+
         fun fromJson(element: JsonElement): DeltaOp {
             val obj = element.asObject("DeltaOp")
             require(obj.size == 1) { "DeltaOp must be externally tagged" }
@@ -738,6 +820,13 @@ sealed interface DeltaOp {
                         dependent = body.longField("dependent"),
                         dependency = body.longField("dependency"),
                     )
+                "QueuePush" ->
+                    QueuePush(
+                        node = body.longField("node"),
+                        payload = IpcValue.fromJson(body.required("payload")),
+                    )
+                "QueuePop" -> QueuePop(body.longField("node"))
+                "QueueClose" -> QueueClose(body.longField("node"))
                 else -> throw IpcDecodeException.Malformed("unknown DeltaOp variant: $tag")
             }
         }

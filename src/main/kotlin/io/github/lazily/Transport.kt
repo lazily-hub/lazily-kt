@@ -251,7 +251,7 @@ fun spillState(
 
 /**
  * Spill every large value/state site across an [IpcMessage] to [backend]:
- * `Snapshot` node states, `Delta` `CellSet`/`SlotValue` payloads and `NodeAdd`
+ * `Snapshot` node states, `Delta` `CellSet`/`SlotValue`/`QueuePush` payloads and `NodeAdd`
  * states, and `CrdtSync` op states. Returns the rewritten message (small on the
  * wire) plus the total bytes spilled. Sites already carrying a descriptor are
  * left untouched.
@@ -283,6 +283,11 @@ fun spillMessage(
                                 if (spilled > 0) op.copy(payload = payload) else op
                             }
                             is DeltaOp.SlotValue -> {
+                                val (payload, spilled) = spillValue(op.payload, backend, threshold)
+                                total += spilled
+                                if (spilled > 0) op.copy(payload = payload) else op
+                            }
+                            is DeltaOp.QueuePush -> {
                                 val (payload, spilled) = spillValue(op.payload, backend, threshold)
                                 total += spilled
                                 if (spilled > 0) op.copy(payload = payload) else op
