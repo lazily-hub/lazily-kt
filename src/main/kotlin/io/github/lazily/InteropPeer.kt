@@ -64,7 +64,7 @@ private class InteropPeer {
         return buildJsonObject {
             put("ok", true)
             put("binding", "lazily-kt")
-            put("version", "0.43.0")
+            put("version", "0.44.0")
             put("protocol_version", PROTOCOL_VERSION)
             put(
                 "features",
