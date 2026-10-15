@@ -1703,6 +1703,13 @@ class ReactiveGraphConformanceTest {
     }
 
     /**
+     * The skip set proven by [reactiveGraphConformance]. Call this only after
+     * that method returns: the replay asserts the observed skip set equals this
+     * ledger independently for all three execution models.
+     */
+    internal fun verifiedRuntimeSkipFixtures(): Map<String, String> = EXPECTED_SKIPS.toMap()
+
+    /**
      * Mutation proof for the production step-expectation evaluator.
      *
      * [AssertionKeys] can prove that a fixture value reached a comparison, but

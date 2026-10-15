@@ -97,6 +97,18 @@ lightweight ids over the shared node table.
 - **Dynamic dependencies** — the tracking stack auto-discovers edges on each
   recompute (no stale subscriptions); cycles are detected and throw.
 
+### Core qualification evidence
+
+[`scripts/core-conformance.json`](scripts/core-conformance.json) exposes a
+shell-free report command for the `core-v1` profile. It reruns the canonical
+reactive-graph corpus against `Context`, `ThreadSafeContext`, and `AsyncContext`,
+executes the assertion mutation probes, and writes fresh report-root evidence.
+Fifteen of the sixteen Core fixtures currently pass. The bounded feedback-drain
+fixture is reported as an explicit whole-fixture skip until Kotlin can stop and
+attribute a self-rescheduling effect drain. The optional native C-ABI proof is
+intentionally unclaimed: the JVM boundary tests do not build and invoke an
+exported native symbol.
+
 ## Usage
 
 ### Latest-durable projection egress

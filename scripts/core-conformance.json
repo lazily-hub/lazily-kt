@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "profile_id": "core-v1",
+  "binding_id": "kotlin",
+  "report_command": [
+    "./gradlew",
+    "coreConformanceReport",
+    "--rerun-tasks",
+    "--no-daemon"
+  ],
+  "runtime_skips": [
+    {
+      "fixture": "reactive-graph/feedback_drain_bound_reports_exhaustion.json",
+      "scenario": "*",
+      "reason": "The Kotlin schedulers do not yet bound a self-rescheduling effect drain or report the effect that exhausted the bound."
+    }
+  ],
+  "fixtureless_claims": []
+}

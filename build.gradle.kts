@@ -362,6 +362,37 @@ tasks.register<JavaExec>("interopPeerCheck") {
     args("--self-check")
 }
 
+tasks.register<JavaExec>("coreConformanceReport") {
+    group = "verification"
+    description = "Replay the Core profile and write its observed conformance report."
+    dependsOn(tasks.testClasses)
+    mainClass.set("io.github.lazily.CoreConformanceReportKt")
+    classpath = sourceSets.test.get().runtimeClasspath
+
+    val bindingId = providers.environmentVariable("LAZILY_CORE_BINDING_ID")
+    val profilePath = providers.environmentVariable("LAZILY_CORE_PROFILE_PATH")
+    val reportPath = providers.environmentVariable("LAZILY_CORE_REPORT_PATH")
+    val reportsRoot = providers.environmentVariable("LAZILY_CORE_REPORTS_ROOT")
+    val specRoot = providers.environmentVariable("LAZILY_CORE_SPEC_ROOT")
+
+    doFirst {
+        listOf(
+            "LAZILY_CORE_BINDING_ID" to bindingId,
+            "LAZILY_CORE_PROFILE_PATH" to profilePath,
+            "LAZILY_CORE_REPORT_PATH" to reportPath,
+            "LAZILY_CORE_REPORTS_ROOT" to reportsRoot,
+            "LAZILY_CORE_SPEC_ROOT" to specRoot,
+        ).forEach { (name, value) ->
+            check(value.isPresent) { "$name is required" }
+            environment(name, value.get())
+        }
+        // The canonical fixture loader already supports this established name.
+        // Feed both names from the same provider so a long-lived Gradle daemon
+        // cannot replay another checkout's corpus.
+        environment("LAZILY_SPEC_DIR", specRoot.get())
+    }
+}
+
 // Reactive-core microbenchmark (parity with lazily-rs benches/context.rs).
 // Run via `./gradlew benchmark` or `make benchmark`.
 tasks.register<JavaExec>("benchmark") {

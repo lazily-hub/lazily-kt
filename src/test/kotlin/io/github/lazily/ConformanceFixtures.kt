@@ -17,8 +17,9 @@ import java.util.concurrent.ConcurrentSkipListSet
  * Canonical conformance fixture loader (`#lzspecconf`).
  *
  * Fixtures are read **only** from the canonical lazily-spec sibling checkout at
- * `../lazily-spec/conformance` (override with `LAZILY_SPEC_DIR`), mirroring
- * `lazily-rs`'s `SPEC_DIR` constant.
+ * `../lazily-spec/conformance` (override with `LAZILY_SPEC_DIR`, or with
+ * `LAZILY_CORE_SPEC_ROOT` for Core report generation), mirroring lazily-rs's
+ * `SPEC_DIR` constant.
  *
  * There is deliberately **no bundled fallback**. lazily-kt used to copy the
  * fixtures into `src/test/resources/conformance/` and fall back to them when the
@@ -36,7 +37,12 @@ import java.util.concurrent.ConcurrentSkipListSet
  */
 object ConformanceFixtures {
     /** The lazily-spec sibling checkout — corpus, schemas, and proto all hang off it. */
-    val specRoot: Path = Path.of(System.getenv("LAZILY_SPEC_DIR") ?: "../lazily-spec")
+    val specRoot: Path =
+        Path.of(
+            System.getenv("LAZILY_SPEC_DIR")
+                ?: System.getenv("LAZILY_CORE_SPEC_ROOT")
+                ?: "../lazily-spec",
+        )
 
     /**
      * Canonical conformance root — the lazily-spec sibling, never a bundled copy.
