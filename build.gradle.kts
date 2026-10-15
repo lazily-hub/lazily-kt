@@ -10,6 +10,7 @@ plugins {
     // block for why both pins are needed rather than either alone.
     id("com.diffplug.spotless") version "6.25.0"
     id("com.google.protobuf") version "0.9.5"
+    id("org.jetbrains.kotlinx.binary-compatibility-validator") version "0.18.2"
     `maven-publish`
 }
 
@@ -575,4 +576,26 @@ publishing {
             }
         }
     }
+}
+
+// Core generation compatibility is intentionally a two-layer gate. `apiCheck`
+// is JetBrains' native JVM binary checker over the complete published surface;
+// the normalized checker pins the smaller profile allow-list, including public
+// inline source declarations that have no callable JVM method for BCV to dump.
+val coreApiCheck by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Validate the normalized Core API and migration metadata."
+    dependsOn("apiCheck")
+    commandLine("python3", "scripts/check-core-api.py")
+}
+
+val coreApiNegativeSelfTest by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Prove the Core compatibility gates reject API and metadata mutations."
+    dependsOn("apiCheck")
+    commandLine("python3", "scripts/check-core-api.py", "--self-test")
+}
+
+tasks.named("check") {
+    dependsOn(coreApiCheck, coreApiNegativeSelfTest)
 }

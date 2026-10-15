@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "profile_id": "core-v1",
+  "core_api_generation": 1,
+  "artifact": "io.github.lazily:lazily",
+  "shipping_model": "single_artifact",
+  "modules": [
+    "collections",
+    "statecharts",
+    "synchronization",
+    "durable",
+    "distributed",
+    "transport",
+    "codecs",
+    "ffi",
+    "react",
+    "r3"
+  ],
+  "support_range": {
+    "minimum_core_api_generation": 1,
+    "maximum_core_api_generation": 1
+  },
+  "compatibility_tested_generations": [1],
+  "independently_shipped_modules": []
+}

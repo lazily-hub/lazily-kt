@@ -52,13 +52,17 @@ export LAZILY_CONFORMANCE_RUN_ID
 test-lean-formal \
 test-lazily-formal \
 assertion-ordering-check \
+	core-api-check \
 published-dependency-check \
 ci-reach
 
-check: fmt test test-interop-peer test-lean-formal test-lazily-formal assertion-ordering-check published-dependency-check ci-reach
+check: fmt test test-interop-peer test-lean-formal test-lazily-formal assertion-ordering-check core-api-check published-dependency-check ci-reach
 
 assertion-ordering-check:
 	python3 ../lazily-spec/scripts/check-assertion-ordering.py --binding kt --root .
+
+core-api-check:
+	./gradlew apiCheck coreApiCheck coreApiNegativeSelfTest
 
 # The published-dependency floor (#lzktoptionaldeps). Reads the GENERATED POM and
 # Gradle Module Metadata — not build.gradle.kts — and pins both the default graph

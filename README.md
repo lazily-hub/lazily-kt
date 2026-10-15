@@ -829,6 +829,27 @@ in CI.
 
 ## Development
 
+### Core API compatibility
+
+`api/lazily-kt.api` is the JetBrains binary-compatibility-validator snapshot for
+the complete JVM artifact. `compat/core-api.json` is the normalized generation-1
+Core profile view: it pins the canonical `io.github.lazily` names and also checks
+the public inline `source`/`computed` declarations that have no standalone JVM
+method for the binary dumper to compare.
+
+`compat/core-deprecations.json` records each legacy single-threaded Core spelling
+with its introduction, replacement, two-generation/90-day compatibility window,
+and earliest removal generation. `compat/core-modules.json` records that Kotlin's
+profile modules ship in the same artifact at generation 1; there is therefore no
+independently versioned Kotlin module requiring a second oldest/current artifact
+matrix yet.
+
+Run `make core-api-check` after any public API change. It runs the native
+`apiCheck`, the normalized metadata gate, and mutation self-tests that prove
+removed symbols, changed ABI signatures, incomplete deprecations, and missing
+module-generation evidence all turn the gate red. Regenerate the native snapshot
+with `./gradlew apiDump` only after reviewing the compatibility impact.
+
 ```bash
 make check   # == ./gradlew test + build both Lean formal models
 ```

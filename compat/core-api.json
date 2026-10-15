@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "profile_id": "core-v1",
+  "core_api_generation": 1,
+  "package_entrypoint": "io.github.lazily",
+  "native_dump": "api/lazily-kt.api",
+  "declarations": [
+    {
+      "abstract_symbol": "context",
+      "kind": "type",
+      "public_name": "Context",
+      "binary_signature": "public final class io/github/lazily/Context : io/github/lazily/ComputeOps {",
+      "introduced_generation": 1,
+      "deprecated_since_generation": null,
+      "replacement": null,
+      "earliest_removal_generation": null
+    },
+    {
+      "abstract_symbol": "source",
+      "kind": "type",
+      "public_name": "Source",
+      "binary_signature": "public final class io/github/lazily/Source : io/github/lazily/Cell {",
+      "source_path": "src/main/kotlin/io/github/lazily/Context.kt",
+      "source_signature": "inline fun <reified T : Any> source(value: T): Source<T> = Source(cellAny(value))",
+      "introduced_generation": 1,
+      "deprecated_since_generation": null,
+      "replacement": null,
+      "earliest_removal_generation": null
+    },
+    {
+      "abstract_symbol": "computed",
+      "kind": "type",
+      "public_name": "Computed",
+      "binary_signature": "public final class io/github/lazily/Computed : io/github/lazily/Cell {",
+      "source_path": "src/main/kotlin/io/github/lazily/Context.kt",
+      "source_signature": "inline fun <reified T : Any> computed(noinline compute: Compute.() -> T): Computed<T> = Computed(slotAny { compute() })",
+      "introduced_generation": 1,
+      "deprecated_since_generation": null,
+      "replacement": null,
+      "earliest_removal_generation": null
+    },
+    {
+      "abstract_symbol": "effect",
+      "kind": "type",
+      "public_name": "Effect",
+      "binary_signature": "public final class io/github/lazily/Effect : io/github/lazily/GraphNode {",
+      "introduced_generation": 1,
+      "deprecated_since_generation": null,
+      "replacement": null,
+      "earliest_removal_generation": null
+    },
+    {
+      "abstract_symbol": "batch",
+      "kind": "operation",
+      "public_name": "Context.batch",
+      "binary_owner": "public final class io/github/lazily/Context : io/github/lazily/ComputeOps {",
+      "binary_signature": "public final fun batch (Lkotlin/jvm/functions/Function1;)V",
+      "introduced_generation": 1,
+      "deprecated_since_generation": null,
+      "replacement": null,
+      "earliest_removal_generation": null
+    },
+    {
+      "abstract_symbol": "scope",
+      "kind": "operation",
+      "public_name": "Context.scope",
+      "binary_owner": "public final class io/github/lazily/Context : io/github/lazily/ComputeOps {",
+      "binary_signature": "public final fun scope ()Lio/github/lazily/TeardownScope;",
+      "introduced_generation": 1,
+      "deprecated_since_generation": null,
+      "replacement": null,
+      "earliest_removal_generation": null
+    },
+    {
+      "abstract_symbol": "scope",
+      "kind": "type",
+      "public_name": "TeardownScope",
+      "binary_signature": "public final class io/github/lazily/TeardownScope : java/lang/AutoCloseable {",
+      "introduced_generation": 1,
+      "deprecated_since_generation": null,
+      "replacement": null,
+      "earliest_removal_generation": null
+    },
+    {
+      "abstract_symbol": "typed_context",
+      "kind": "type",
+      "public_name": "Context",
+      "binary_signature": "public final class io/github/lazily/Context : io/github/lazily/ComputeOps {",
+      "introduced_generation": 1,
+      "deprecated_since_generation": null,
+      "replacement": null,
+      "earliest_removal_generation": null
+    }
+  ]
+}

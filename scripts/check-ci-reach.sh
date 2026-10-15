@@ -400,6 +400,7 @@ EXPECTED_CLOSURE_TARGETS=(
 	assertion-ordering-check
 	check
 	ci-reach
+	core-api-check
 	fmt
 	published-dependency-check
 	test
@@ -465,6 +466,7 @@ EXPECTED_NO_GATE_TARGETS=(
 EXPECTED_CI_STEPS=(
 	'assertion-ordering-check=Assertion observation ordering (#lzassertordering)'
 	'ci-reach=CI-reachability guard (#lzcheckcireachguard)'
+	'core-api-check=Core API compatibility'
 	'published-dependency-check=Published dependency floor (#lzktoptionaldeps)'
 	'test=Test'
 	'test=Guard — conformance fixtures actually replayed (#lzspecconf)'

@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "profile_id": "core-v1",
+  "core_api_generation": 1,
+  "compatibility_policy": {
+    "minimum_generations": 2,
+    "minimum_days": 90
+  },
+  "deprecations": [
+    {
+      "symbol": "Context.cell",
+      "source_path": "src/main/kotlin/io/github/lazily/Context.kt",
+      "source_signature": "inline fun <reified T : Any> cell(value: T): Source<T>",
+      "source_occurrence": 1,
+      "introduced_generation": 0,
+      "deprecated_since_generation": 1,
+      "replacement": "Context.source",
+      "compatibility_window": { "minimum_generations": 2, "minimum_days": 90 },
+      "earliest_removal_generation": 3
+    },
+    {
+      "symbol": "Context.slot",
+      "source_path": "src/main/kotlin/io/github/lazily/Context.kt",
+      "source_signature": "inline fun <reified T : Any> slot(noinline compute: Compute.() -> T): Computed<T>",
+      "source_occurrence": 1,
+      "introduced_generation": 0,
+      "deprecated_since_generation": 1,
+      "replacement": "Context.computed",
+      "compatibility_window": { "minimum_generations": 2, "minimum_days": 90 },
+      "earliest_removal_generation": 3
+    },
+    {
+      "symbol": "Context.getCell",
+      "source_path": "src/main/kotlin/io/github/lazily/Context.kt",
+      "source_signature": "inline fun <reified T : Any> getCell(handle: Source<T>): T",
+      "introduced_generation": 0,
+      "deprecated_since_generation": 1,
+      "replacement": "Context.get",
+      "compatibility_window": { "minimum_generations": 2, "minimum_days": 90 },
+      "earliest_removal_generation": 3
+    },
+    {
+      "symbol": "Context.setCell",
+      "source_path": "src/main/kotlin/io/github/lazily/Context.kt",
+      "source_signature": "fun <T : Any> setCell(",
+      "introduced_generation": 0,
+      "deprecated_since_generation": 1,
+      "replacement": "Source.set",
+      "compatibility_window": { "minimum_generations": 2, "minimum_days": 90 },
+      "earliest_removal_generation": 3
+    },
+    {
+      "symbol": "Context.disposeSlot",
+      "source_path": "src/main/kotlin/io/github/lazily/Context.kt",
+      "source_signature": "fun disposeSlot(handle: Computed<*>)",
+      "introduced_generation": 0,
+      "deprecated_since_generation": 1,
+      "replacement": "Cell.dispose",
+      "compatibility_window": { "minimum_generations": 2, "minimum_days": 90 },
+      "earliest_removal_generation": 3
+    },
+    {
+      "symbol": "Context.disposeCell",
+      "source_path": "src/main/kotlin/io/github/lazily/Context.kt",
+      "source_signature": "fun disposeCell(handle: Source<*>)",
+      "introduced_generation": 0,
+      "deprecated_since_generation": 1,
+      "replacement": "Cell.dispose",
+      "compatibility_window": { "minimum_generations": 2, "minimum_days": 90 },
+      "earliest_removal_generation": 3
+    },
+    {
+      "symbol": "TeardownScope.cell",
+      "source_path": "src/main/kotlin/io/github/lazily/Context.kt",
+      "source_signature": "inline fun <reified T : Any> cell(value: T): Source<T>",
+      "source_occurrence": 2,
+      "introduced_generation": 0,
+      "deprecated_since_generation": 1,
+      "replacement": "TeardownScope.source",
+      "compatibility_window": { "minimum_generations": 2, "minimum_days": 90 },
+      "earliest_removal_generation": 3
+    },
+    {
+      "symbol": "TeardownScope.slot",
+      "source_path": "src/main/kotlin/io/github/lazily/Context.kt",
+      "source_signature": "inline fun <reified T : Any> slot(noinline compute: Compute.() -> T): Computed<T>",
+      "source_occurrence": 2,
+      "introduced_generation": 0,
+      "deprecated_since_generation": 1,
+      "replacement": "TeardownScope.computed",
+      "compatibility_window": { "minimum_generations": 2, "minimum_days": 90 },
+      "earliest_removal_generation": 3
+    },
+    {
+      "symbol": "ComputeOps.getCell",
+      "source_path": "src/main/kotlin/io/github/lazily/Compute.kt",
+      "source_signature": "inline fun <reified T : Any> ComputeOps.getCell(handle: Source<T>): T",
+      "introduced_generation": 0,
+      "deprecated_since_generation": 1,
+      "replacement": "ComputeOps.get",
+      "compatibility_window": { "minimum_generations": 2, "minimum_days": 90 },
+      "earliest_removal_generation": 3
+    }
+  ]
+}
