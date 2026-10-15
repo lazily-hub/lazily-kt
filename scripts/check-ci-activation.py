@@ -35,6 +35,7 @@ def load_config(path: Path) -> dict[str, list[str]]:
         "expected-job-activation",
         "expected-job-matrix",
         "required-blocking-leg",
+        "expected-step-activation",
     }
     out = {key: [] for key in allowed}
     for number, raw in enumerate(path.read_text().splitlines(), 1):
@@ -139,7 +140,7 @@ def parse_workflow(path: Path) -> tuple[dict[str, dict[str, list[str]]], dict[st
                 job = match.group(1)
                 if job in jobs:
                     raise bad(number, raw, "duplicate job")
-                jobs[job] = {"activation": {}, "matrix": {}}
+                jobs[job] = {"activation": {}, "matrix": {}, "steps": []}
                 job_mode = ""
                 in_matrix = False
                 continue
@@ -151,7 +152,7 @@ def parse_workflow(path: Path) -> tuple[dict[str, dict[str, list[str]]], dict[st
                 if not match:
                     raise bad(number, raw, "unsupported job-level shape")
                 key, value = match.group(1), match.group(2).strip()
-                job_mode = "strategy" if key == "strategy" else "other"
+                job_mode = {"strategy": "strategy", "steps": "steps"}.get(key, "other")
                 in_matrix = False
                 if key in {"if", "needs", "continue-on-error"}:
                     if not value:
@@ -161,6 +162,40 @@ def parse_workflow(path: Path) -> tuple[dict[str, dict[str, list[str]]], dict[st
                     if key in activation:
                         raise bad(number, raw, f"duplicate {key}")
                     activation[key] = ",".join(values(value, f"{path}:{number}"))
+                continue
+            if job_mode == "steps":
+                # STEP-LEVEL ACTIVATION (#lzcoreciactivationfixes). A `run:` step
+                # under `if: false` or `continue-on-error: true` enforces nothing
+                # while its job's activation stays pinned and green, so every run
+                # step's own `if:`/`continue-on-error:` is recorded and pinned.
+                steps = jobs[job]["steps"]
+                assert isinstance(steps, list)
+                if indent == 6:
+                    if not text.startswith("- "):
+                        raise bad(number, raw, "unsupported step shape")
+                    steps.append({"name": "", "activation": {}, "run": False, "line": number})
+                    text = text[2:].strip()
+                    indent = 8
+                if indent == 8:
+                    if not steps:
+                        raise bad(number, raw, "step key appears before a step")
+                    match = re.fullmatch(r"([A-Za-z0-9_.-]+):(.*)", text)
+                    if not match:
+                        raise bad(number, raw, "unsupported step-key shape")
+                    key, value = match.group(1), match.group(2).strip()
+                    step = steps[-1]
+                    if key == "name":
+                        step["name"] = scalar(value)
+                    elif key == "run":
+                        step["run"] = True
+                    elif key in {"if", "continue-on-error"}:
+                        if not value:
+                            raise bad(number, raw, f"block-valued step {key} is unsupported")
+                        activation = step["activation"]
+                        assert isinstance(activation, dict)
+                        if key in activation:
+                            raise bad(number, raw, f"duplicate step-level {key}")
+                        activation[key] = scalar(value)
                 continue
             if job_mode != "strategy":
                 continue
@@ -227,6 +262,10 @@ def canonical_activation(values_: dict[str, str]) -> str:
     return ";".join(f"{key}={values_.get(key, '')}" for key in ("continue-on-error", "if", "needs"))
 
 
+def canonical_step_activation(values_: dict[str, str]) -> str:
+    return ";".join(f"{key}={values_.get(key, '')}" for key in ("continue-on-error", "if"))
+
+
 def canonical_matrix(values_: dict[str, list[str]]) -> str:
     return ";".join(f"{key}={','.join(values_[key])}" for key in sorted(values_))
 
@@ -239,6 +278,9 @@ def main() -> int:
     expected_jobs = set(config["expected-gate-job"])
     expected_activation = keyed(config["expected-job-activation"], 2, "expected-job-activation")
     expected_matrix = keyed(config["expected-job-matrix"], 2, "expected-job-matrix")
+    expected_step_activation = keyed(config["expected-step-activation"], 3, "expected-step-activation")
+    seen_step_keys: set[str] = set()
+    step_count = 0
     errors: list[str] = []
     parsed: dict[str, tuple[dict[str, dict[str, list[str]]], dict[str, dict[str, object]]]] = {}
 
@@ -302,6 +344,27 @@ def main() -> int:
                 errors.append(f"{key}: job-level if is always false")
             if activation.get("continue-on-error") in {"true", "${{ true }}", "${{true}}"}:
                 errors.append(f"{key}: job-level continue-on-error makes the gate advisory")
+            steps = data["steps"]
+            assert isinstance(steps, list)
+            for step in steps:
+                if not step["run"]:
+                    continue
+                step_count += 1
+                got_step = canonical_step_activation(step["activation"])
+                if not step["name"]:
+                    if step["activation"]:
+                        errors.append(f"{key}: unnamed run step at line {step['line']} is conditional and cannot be pinned")
+                    continue
+                if "|" in step["name"]:
+                    errors.append(f"{key}: step name {step['name']!r} contains the pin separator")
+                    continue
+                step_key = f"{key}|{step['name']}"
+                if step_key in seen_step_keys:
+                    errors.append(f"{step_key}: duplicate run-step name")
+                seen_step_keys.add(step_key)
+                wanted = expected_step_activation.get(step_key, "continue-on-error=;if=")
+                if got_step != wanted:
+                    errors.append(f"{step_key}: step-level activation expected {wanted!r}, got {got_step!r}")
 
     expected_filter_keys = set(expected_filters)
     actual_filter_keys = {
@@ -309,6 +372,9 @@ def main() -> int:
     }
     if expected_filter_keys != actual_filter_keys:
         errors.append("expected-trigger-filter keys do not exactly match parsed triggers")
+    stale_steps = sorted(set(expected_step_activation) - seen_step_keys)
+    if stale_steps:
+        errors.append(f"expected-step-activation names no parsed run step: {stale_steps}")
     if set(expected_activation) != expected_jobs or set(expected_matrix) != expected_jobs:
         errors.append("job activation/matrix pin keys must exactly match expected-gate-job")
 
@@ -341,7 +407,8 @@ def main() -> int:
         return 1
     print(
         f"check-ci-activation: OK — {len(parsed)} workflow(s), "
-        f"{len(expected_jobs)} gate job(s), exact triggers/filters/activation/matrices"
+        f"{len(expected_jobs)} gate job(s), exact triggers/filters/activation/matrices, "
+        f"{step_count} run step(s) with exact step-level activation ({len(expected_step_activation)} pinned conditional)"
     )
     return 0
 

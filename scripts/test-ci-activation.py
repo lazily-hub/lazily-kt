@@ -59,6 +59,20 @@ def add_job_key(text: str, key: str, value: str) -> str:
     return text[:insert] + f"    {key}: {value}\n" + text[insert:]
 
 
+def add_step_key(text: str, key: str, value: str) -> str:
+    match = re.search(r"(?m)^      - name: [^\n]+\n(?=        run:)", text)
+    if not match:
+        raise AssertionError("workflow has no named run step")
+    return text[: match.end()] + f"        {key}: {value}\n" + text[match.end() :]
+
+
+def drift_step_if(text: str) -> str:
+    changed = re.sub(r"(?m)^(        if: )(.+)$", r"\1\2 && false", text, count=1)
+    if changed == text:
+        raise AssertionError("workflow has no step-level if to drift")
+    return changed
+
+
 def reduce_matrix(text: str) -> str:
     changed = re.sub(r"(?m)^(        [A-Za-z0-9_.-]+:) \[[^\]]*,[^\]]*\]$", r"\1 [beta]", text, count=1)
     if changed == text:
@@ -100,7 +114,12 @@ def main() -> None:
         "job-continue-on-error": (add_job_key(workflow, "continue-on-error", "true"), False),
         "job-needs": (add_job_key(workflow, "needs", "never-runs"), False),
         "unsupported-flow-on": (replace_on(workflow, "on: [push, pull_request]\n\n"), False),
+        "step-if-false": (add_step_key(workflow, "if", "false"), False),
+        "step-if-nonobvious": (add_step_key(workflow, "if", "matrix.sdk == 'nightly'"), False),
+        "step-continue-on-error": (add_step_key(workflow, "continue-on-error", "true"), False),
     }
+    if re.search(r"(?m)^        if: ", workflow):
+        cases["pinned-step-if-drift"] = (drift_step_if(workflow), False)
     if re.search(r"(?m)^        [A-Za-z0-9_.-]+: \[[^\]]*,[^\]]*\]$", workflow):
         cases["matrix-reduced"] = (reduce_matrix(workflow), False)
     for name, (text, should_pass) in cases.items():

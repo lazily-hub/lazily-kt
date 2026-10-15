@@ -178,4 +178,4 @@ jobs:
           java-version: "21"
       - uses: gradle/actions/setup-gradle@v4
       - name: Core artifact consumer (minimum/current)
-        run: make core-artifact-consumer-check
+        run: ./scripts/core-artifact-consumer-check.sh

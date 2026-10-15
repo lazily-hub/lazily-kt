@@ -468,6 +468,7 @@ EXPECTED_CI_STEPS=(
 	'assertion-ordering-check=Assertion observation ordering (#lzassertordering)'
 	'ci-reach=CI-reachability guard (#lzcheckcireachguard)'
 	'core-api-check=Core API compatibility'
+	'core-artifact-consumer-check=Core artifact consumer (minimum/current)'
 	'published-dependency-check=Published dependency floor (#lzktoptionaldeps)'
 	'test=Test'
 	'test=Guard — conformance fixtures actually replayed (#lzspecconf)'
