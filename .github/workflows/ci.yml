@@ -177,5 +177,9 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: gradle/actions/setup-gradle@v4
+      # The protobufCodec feature variant generates from ../lazily-spec/proto,
+      # so publishing the artifact needs the spec sibling exactly like `test`.
+      - name: Fetch canonical lazily-spec protos for the protobuf codec variant
+        run: git clone --depth 1 https://github.com/lazily-hub/lazily-spec.git ../lazily-spec
       - name: Core artifact consumer (minimum/current)
         run: ./scripts/core-artifact-consumer-check.sh
