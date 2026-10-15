@@ -82,6 +82,10 @@ fun main() {
 
     val runner = ReactiveGraphConformanceTest()
     runner.executableStepExpectationFamiliesRejectFixtureValueMutations()
+    require(runner.familyDivergences.keys == negativeControlFamilies.toSet()) {
+        "every negative-control family must be rejected by a library divergence: " +
+            "observed=${runner.familyDivergences.keys} declared=$negativeControlFamilies"
+    }
     runner.reactiveGraphConformance()
 
     val observedCoreSkips =
@@ -155,6 +159,8 @@ fun main() {
                     ),
                 "negative_control_scope" to JsonPrimitive("shared production evaluator expectation-key families"),
                 "negative_control_families" to strings(negativeControlFamilies),
+                "negative_control_divergences" to
+                    JsonObject(runner.familyDivergences.mapValues { (_, entry) -> JsonPrimitive(entry) }),
                 "claims" to JsonObject(claims),
             ),
         )

@@ -1710,18 +1710,35 @@ class ReactiveGraphConformanceTest {
     internal fun verifiedRuntimeSkipFixtures(): Map<String, String> = EXPECTED_SKIPS.toMap()
 
     /**
+     * The library-divergence ledger entry that rejected each family mutation, as
+     * observed by [executableStepExpectationFamiliesRejectFixtureValueMutations].
+     */
+    internal val familyDivergences = linkedMapOf<String, String>()
+
+    /**
      * Mutation proof for the production step-expectation evaluator.
      *
      * [AssertionKeys] can prove that a fixture value reached a comparison, but
      * no tracker can tell whether the comparison ignored that value and returned
      * `true`. Each executable key family therefore gets one real corpus mutation
      * through [replay]/[runCorpus]. Every mutation must make the production path
-     * fail and name the mutated family. Raw reads are deliberate: when this test
-     * is selected alone, its intentionally-aborted runs must not declare canonical
-     * blocks they never get far enough to bind.
+     * fail through a LIBRARY divergence on the mutated family: the replay's own
+     * `#<step>:<key> — got X, want Y` ledger entry for the mutated fixture and step.
+     * Any other failure (an unknown node id on the runner's own lookup, a key-set
+     * tracker refusing the block) proves the runner read the value, not that the
+     * comparison over the library discriminates, and fails this test. The runs are
+     * untracked for that reason: with [AssertionKeys] on, a failed comparison
+     * surfaces as the tracker's "READ but never asserted" refusal, which a
+     * bookkeeping failure produces just as well, and the divergence entry never
+     * reaches the ledger. The comparisons are the same production evaluator the
+     * ThreadSafeContext and AsyncContext passes of [reactiveGraphConformance] use.
+     * Raw reads are deliberate: when this test is selected alone, its
+     * intentionally-aborted runs must not declare canonical blocks they never get
+     * far enough to bind.
      */
     @Test
     fun executableStepExpectationFamiliesRejectFixtureValueMutations() {
+        familyDivergences.clear()
         ConformanceFixtures.requireRoot()
 
         data class Mutation(
@@ -1823,7 +1840,7 @@ class ReactiveGraphConformanceTest {
                     runCorpus(
                         create = { SyncModel() },
                         modelName = "Context-mutation-${mutation.key}",
-                        trackStepAssertions = true,
+                        trackStepAssertions = false,
                         visitedStepSites = linkedSetOf(),
                         fixtureNames = listOf(mutation.fixture),
                         readFixture = { raw },
@@ -1838,11 +1855,77 @@ class ReactiveGraphConformanceTest {
                     )
                 }
             assertEquals(1, mutationHits, "${mutation.key}: target site must be visited exactly once")
+            val entry = familyDivergence(mutation.key, mutation.fixture, mutation.siteId, failure)
             assertTrue(
-                failure.message.orEmpty().contains(mutation.key),
-                "${mutation.key}: failure must name the mutated family, got: ${failure.message}",
+                entry != null,
+                "${mutation.key}: the mutation must be rejected by a library divergence on the mutated " +
+                    "family (`#<step>:${mutation.key} — got X, want Y`), not by runner bookkeeping, " +
+                    "got: ${failure::class.simpleName}: ${failure.message}",
             )
+            familyDivergences[mutation.key] = entry!!
         }
+    }
+
+    /**
+     * The replay's divergence-ledger entry for [key] at the mutated step of
+     * [fixture], or null when [failure] came from anything else. A bare
+     * `contains(key)` used to stand here and credited "unknown or unreadable node
+     * 'ghost'" as a `read` kill: the message named the family only by accident.
+     */
+    private fun familyDivergence(
+        key: String,
+        fixture: String,
+        siteId: String,
+        failure: Throwable,
+    ): String? {
+        val step = Regex("""steps\[(\d+)]\.expect$""").find(siteId)!!.groupValues[1]
+        val divergence =
+            Regex(
+                Regex.escape("Context-mutation-$key/$fixture#$step:$key") +
+                    """(?:\.[^\s,\]]+)? — got .*?, want .*?(?=, Context-mutation-|]>)""",
+            )
+        return divergence.find(failure.message.orEmpty())?.value
+    }
+
+    /**
+     * Regression for the over-credit: a mutant that fails on the runner's own
+     * bookkeeping (here an unknown node id on the `read` lookup) must not count
+     * as a family kill, while the same family's real value mutation must.
+     */
+    @Test
+    fun familyNegativeControlRequiresALibraryDivergence() {
+        ConformanceFixtures.requireRoot()
+        val fixture = "disarm_disposes_nothing.json"
+        val siteId = "$area/$fixture|steps[9].expect"
+        val raw = Files.readString(ConformanceFixtures.path("$area/$fixture"))
+
+        fun rejection(replacementJson: String): Throwable {
+            val replacement = json.parseToJsonElement(replacementJson)
+            return assertFails {
+                runCorpus(
+                    create = { SyncModel() },
+                    modelName = "Context-mutation-read",
+                    trackStepAssertions = false,
+                    visitedStepSites = linkedSetOf(),
+                    fixtureNames = listOf(fixture),
+                    readFixture = { raw },
+                    mutateExpectation = { id, expect ->
+                        if (id == siteId) JsonObject(expect + ("read" to replacement)) else expect
+                    },
+                )
+            }
+        }
+
+        val bookkeeping = rejection("""{"ghost":5}""")
+        assertTrue(
+            bookkeeping.message.orEmpty().contains("read"),
+            "the attack must be one the old `contains(key)` guard credited, got: ${bookkeeping.message}",
+        )
+        assertEquals(null, familyDivergence("read", fixture, siteId, bookkeeping))
+        assertEquals(
+            "Context-mutation-read/$fixture#9:read.escaped — got 4, want 5",
+            familyDivergence("read", fixture, siteId, rejection("""{"escaped":5,"downstream":9}""")),
+        )
     }
 
     @Test
