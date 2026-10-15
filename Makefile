@@ -54,9 +54,13 @@ test-lazily-formal \
 assertion-ordering-check \
 	core-api-check \
 published-dependency-check \
-ci-reach
+ci-reach \
+core-artifact-consumer-check
 
-check: fmt test test-interop-peer test-lean-formal test-lazily-formal assertion-ordering-check core-api-check published-dependency-check ci-reach
+core-artifact-consumer-check:
+	./scripts/core-artifact-consumer-check.sh
+
+check: fmt test test-interop-peer test-lean-formal test-lazily-formal assertion-ordering-check core-api-check published-dependency-check core-artifact-consumer-check ci-reach
 
 assertion-ordering-check:
 	python3 ../lazily-spec/scripts/check-assertion-ordering.py --binding kt --root .

@@ -401,6 +401,7 @@ EXPECTED_CLOSURE_TARGETS=(
 	check
 	ci-reach
 	core-api-check
+	core-artifact-consumer-check
 	fmt
 	published-dependency-check
 	test

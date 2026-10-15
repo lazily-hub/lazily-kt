@@ -166,3 +166,16 @@ jobs:
       - name: lazily-formal model builds under `make test-lazily-formal`
         working-directory: lazily-formal
         run: lake build
+
+  core-artifact-consumer:
+    name: Core artifact consumer / JDK 21 minimum-current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Core artifact consumer (minimum/current)
+        run: make core-artifact-consumer-check
