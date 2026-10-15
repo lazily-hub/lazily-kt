@@ -9,7 +9,7 @@ repositories {
 }
 
 dependencies {
-    implementation("io.github.lazily:lazily:0.44.0")
+    implementation("io.github.lazily:lazily:0.45.0")
 }
 
 application {
