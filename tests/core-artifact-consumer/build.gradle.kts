@@ -3,13 +3,23 @@ plugins {
     application
 }
 
+val artifactRepository = "__REPOSITORY__"
+
 repositories {
-    maven { url = uri("__REPOSITORY__") }
+    maven {
+        url = uri(artifactRepository)
+        if (artifactRepository.startsWith("https://")) {
+            credentials {
+                username = System.getenv("GITHUB_ACTOR")
+                password = System.getenv("GITHUB_TOKEN")
+            }
+        }
+    }
     mavenCentral()
 }
 
 dependencies {
-    implementation("io.github.lazily:lazily:0.46.0")
+    implementation("io.github.lazily:lazily:__VERSION__")
 }
 
 application {
