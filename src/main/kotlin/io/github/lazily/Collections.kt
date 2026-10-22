@@ -49,10 +49,10 @@ sealed class InsertAt<out K> {
 private fun ComputeOps.cellValue(id: Int): Any = getCellAny(id)
 
 /** Allocate a cell holding [value] without a reified type parameter. */
-private fun Context.allocCell(): Source<Any> = Source(cellAny(UNSET))
+private fun Context.allocCell(): Source<Any> = cellAny(UNSET).let { Source(handleToken(it)) }
 
 /** Allocate a memo/non-memo slot over [compute] without a reified type parameter. */
-private fun Context.allocSlot(compute: Compute.() -> Any?): Computed<Any> = Computed(slotAny(compute))
+private fun Context.allocSlot(compute: Compute.() -> Any?): Computed<Any> = slotAny(compute).let { Computed(handleToken(it)) }
 
 private object UnsetSentinel
 

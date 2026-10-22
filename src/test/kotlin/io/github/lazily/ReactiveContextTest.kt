@@ -231,9 +231,9 @@ class ReactiveContextTest {
     fun circular_dependency_is_detected() {
         val ctx = Context()
         // A slot that reads itself: capture its own id post-creation.
-        val selfId = intArrayOf(0)
-        val self = ctx.computed<Int> { ctx.get(Computed(selfId[0])) }
-        selfId[0] = self.id
+        val selfToken = longArrayOf(0)
+        val self = ctx.computed<Int> { ctx.get(Computed(selfToken[0])) }
+        selfToken[0] = self.token
         try {
             ctx.get(self)
             throw AssertionError("expected circular dependency to be detected")

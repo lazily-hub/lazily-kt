@@ -128,10 +128,12 @@ public final class io/github/lazily/AsyncContext$AsyncCellHandle : io/github/laz
 }
 
 public class io/github/lazily/AsyncContext$AsyncComputed : io/github/lazily/AsyncGraphNode {
+	public fun getNodeGeneration ()I
 	public fun getNodeId ()I
 }
 
 public final class io/github/lazily/AsyncContext$AsyncEffectHandle : io/github/lazily/AsyncGraphNode {
+	public fun getNodeGeneration ()I
 	public fun getNodeId ()I
 }
 
@@ -145,6 +147,7 @@ public final class io/github/lazily/AsyncContext$AsyncSlotHandle : io/github/laz
 }
 
 public class io/github/lazily/AsyncContext$AsyncSource : io/github/lazily/AsyncGraphNode {
+	public fun getNodeGeneration ()I
 	public fun getNodeId ()I
 }
 
@@ -170,6 +173,7 @@ public final class io/github/lazily/AsyncDependencyMap {
 }
 
 public abstract interface class io/github/lazily/AsyncGraphNode {
+	public abstract fun getNodeGeneration ()I
 	public abstract fun getNodeId ()I
 }
 
@@ -397,7 +401,7 @@ public final class io/github/lazily/AuditRung {
 public final class io/github/lazily/AwarenessCell : io/github/lazily/Ephemeral {
 	public fun <init> (Lio/github/lazily/Context;J)V
 	public final fun get (Ljava/lang/Object;J)Ljava/lang/Object;
-	public final fun getPresentCell-cNV08Q8 ()I
+	public final fun getPresentCell-cNV08Q8 ()J
 	public final fun present (Lio/github/lazily/ComputeOps;)Ljava/util/Map;
 	public static synthetic fun present$default (Lio/github/lazily/AwarenessCell;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)Ljava/util/Map;
 	public final fun set (Ljava/lang/Object;Ljava/lang/Object;J)V
@@ -406,10 +410,10 @@ public final class io/github/lazily/AwarenessCell : io/github/lazily/Ephemeral {
 
 public final class io/github/lazily/BackpressurePolicy {
 	public fun <init> (Lio/github/lazily/Context;Lio/github/lazily/BoundDim;JJLio/github/lazily/Overflow;)V
-	public final fun getDimension-cNV08Q8 ()I
-	public final fun getHighWater-cNV08Q8 ()I
-	public final fun getLowWater-cNV08Q8 ()I
-	public final fun getOverflow-cNV08Q8 ()I
+	public final fun getDimension-cNV08Q8 ()J
+	public final fun getHighWater-cNV08Q8 ()J
+	public final fun getLowWater-cNV08Q8 ()J
+	public final fun getOverflow-cNV08Q8 ()J
 }
 
 public final class io/github/lazily/BarrierCell {
@@ -419,7 +423,7 @@ public final class io/github/lazily/BarrierCell {
 	public final fun count ()J
 	public final fun isOpen (Lio/github/lazily/ComputeOps;)Z
 	public static synthetic fun isOpen$default (Lio/github/lazily/BarrierCell;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)Z
-	public final fun isOpenCell-cNV08Q8 ()I
+	public final fun isOpenCell-cNV08Q8 ()J
 }
 
 public final class io/github/lazily/BarrierCell$Companion {
@@ -605,7 +609,7 @@ public final class io/github/lazily/BrokerPubAck {
 public final class io/github/lazily/BulkheadCell {
 	public fun <init> (Lio/github/lazily/Context;J)V
 	public final fun acquire ()Z
-	public final fun getInUseCell-cNV08Q8 ()I
+	public final fun getInUseCell-cNV08Q8 ()J
 	public final fun permitsInUse (Lio/github/lazily/ComputeOps;)J
 	public static synthetic fun permitsInUse$default (Lio/github/lazily/BulkheadCell;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)J
 	public final fun release ()V
@@ -762,12 +766,12 @@ public abstract interface class io/github/lazily/Cell : io/github/lazily/GraphNo
 
 public final class io/github/lazily/CellKt {
 	public static final fun dispose (Lio/github/lazily/Cell;Lio/github/lazily/Context;)V
-	public static final fun eager-PgdbaWI (ILio/github/lazily/Context;)I
-	public static final fun isEager-PgdbaWI (ILio/github/lazily/Context;)Z
-	public static final fun lazy-PgdbaWI (ILio/github/lazily/Context;)V
-	public static final fun merge-WN29kHw (ILio/github/lazily/Context;Ljava/lang/Object;Lio/github/lazily/MergePolicy;)V
-	public static synthetic fun merge-WN29kHw$default (ILio/github/lazily/Context;Ljava/lang/Object;Lio/github/lazily/MergePolicy;ILjava/lang/Object;)V
-	public static final fun set-7F0XRmo (ILio/github/lazily/Context;Ljava/lang/Object;)V
+	public static final fun eager-PgdbaWI (JLio/github/lazily/Context;)J
+	public static final fun isEager-PgdbaWI (JLio/github/lazily/Context;)Z
+	public static final fun lazy-PgdbaWI (JLio/github/lazily/Context;)V
+	public static final fun merge-WN29kHw (JLio/github/lazily/Context;Ljava/lang/Object;Lio/github/lazily/MergePolicy;)V
+	public static synthetic fun merge-WN29kHw$default (JLio/github/lazily/Context;Ljava/lang/Object;Lio/github/lazily/MergePolicy;ILjava/lang/Object;)V
+	public static final fun set-7F0XRmo (JLio/github/lazily/Context;Ljava/lang/Object;)V
 }
 
 public final class io/github/lazily/ChartBuilder {
@@ -787,7 +791,7 @@ public final class io/github/lazily/ChartDef$Companion {
 public final class io/github/lazily/CircuitBreakerCell {
 	public fun <init> (Lio/github/lazily/Context;IIJ)V
 	public final fun allow (J)Z
-	public final fun getStateCell-cNV08Q8 ()I
+	public final fun getStateCell-cNV08Q8 ()J
 	public final fun record (ZJ)V
 	public final fun state ()Lio/github/lazily/BreakerState;
 }
@@ -1301,19 +1305,21 @@ public abstract interface class io/github/lazily/ComputeOps {
 }
 
 public final class io/github/lazily/Computed : io/github/lazily/Cell {
-	public static final synthetic fun box-impl (I)Lio/github/lazily/Computed;
-	public static fun constructor-impl (I)I
+	public static final synthetic fun box-impl (J)Lio/github/lazily/Computed;
+	public static fun constructor-impl (J)J
 	public fun equals (Ljava/lang/Object;)Z
-	public static fun equals-impl (ILjava/lang/Object;)Z
-	public static final fun equals-impl0 (II)Z
-	public final fun getId ()I
+	public static fun equals-impl (JLjava/lang/Object;)Z
+	public static final fun equals-impl0 (JJ)Z
+	public static final fun getId-impl (J)I
+	public fun getNodeGeneration ()I
+	public static fun getNodeGeneration-impl (J)I
 	public fun getNodeId ()I
-	public static fun getNodeId-impl (I)I
+	public static fun getNodeId-impl (J)I
 	public fun hashCode ()I
-	public static fun hashCode-impl (I)I
+	public static fun hashCode-impl (J)I
 	public fun toString ()Ljava/lang/String;
-	public static fun toString-impl (I)Ljava/lang/String;
-	public final synthetic fun unbox-impl ()I
+	public static fun toString-impl (J)Ljava/lang/String;
+	public final synthetic fun unbox-impl ()J
 }
 
 public final class io/github/lazily/ComputedMap : io/github/lazily/ReactiveMap {
@@ -1344,10 +1350,10 @@ public final class io/github/lazily/Context : io/github/lazily/ComputeOps {
 	public final fun cellAny (Ljava/lang/Object;)I
 	public final fun dependencyCount (Lio/github/lazily/GraphNode;)I
 	public final fun dependentCount (Lio/github/lazily/GraphNode;)I
-	public final fun disposeCell-XRV6JTQ (I)V
+	public final fun disposeCell-XRV6JTQ (J)V
 	public final fun disposeEffect (Lio/github/lazily/Effect;)V
 	public final fun disposeNode (Lio/github/lazily/GraphNode;)V
-	public final fun disposeSlot-PgrDrCU (I)V
+	public final fun disposeSlot-PgrDrCU (J)V
 	public final fun effect (Lkotlin/jvm/functions/Function1;)Lio/github/lazily/Effect;
 	public final fun effectAny (Lkotlin/jvm/functions/Function1;)I
 	public final fun finishBatch ()V
@@ -1355,13 +1361,14 @@ public final class io/github/lazily/Context : io/github/lazily/ComputeOps {
 	public fun getCellAny (I)Ljava/lang/Object;
 	public fun getComputeContext ()Lio/github/lazily/Context;
 	public fun getSlotAny (I)Ljava/lang/Object;
+	public final fun handleToken (I)J
 	public final fun isDisposed (Lio/github/lazily/GraphNode;)Z
 	public final fun isEffectActive (Lio/github/lazily/Effect;)Z
-	public final fun isSet-PgrDrCU (I)Z
+	public final fun isSet-PgrDrCU (J)Z
 	public final fun scope ()Lio/github/lazily/TeardownScope;
-	public final fun set-Isps-Kk (ILjava/lang/Object;)V
+	public final fun set-Isps-Kk (JLjava/lang/Object;)V
 	public final fun setBatchDepth (I)V
-	public final fun setCell-Isps-Kk (ILjava/lang/Object;)V
+	public final fun setCell-Isps-Kk (JLjava/lang/Object;)V
 	public final fun setCellAny (ILjava/lang/Object;)V
 	public final fun slotAny (Lkotlin/jvm/functions/Function1;)I
 	public final fun slotAnyWithEquals (Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function2;)I
@@ -1488,7 +1495,7 @@ public final class io/github/lazily/CronCell {
 	public fun <init> (Lio/github/lazily/Context;JLjava/util/List;)V
 	public final fun count (Lio/github/lazily/ComputeOps;)J
 	public static synthetic fun count$default (Lio/github/lazily/CronCell;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)J
-	public final fun getCountCell-cNV08Q8 ()I
+	public final fun getCountCell-cNV08Q8 ()J
 	public final fun nextFire ()Ljava/lang/Long;
 	public final fun tick (J)Z
 }
@@ -1508,7 +1515,7 @@ public abstract interface class io/github/lazily/DataChannel {
 
 public final class io/github/lazily/DeadlineCell {
 	public fun <init> (Lio/github/lazily/Context;Ljava/lang/Object;J)V
-	public final fun getExpiredCell-cNV08Q8 ()I
+	public final fun getExpiredCell-cNV08Q8 ()J
 	public final fun isExpired (Lio/github/lazily/ComputeOps;)Z
 	public static synthetic fun isExpired$default (Lio/github/lazily/DeadlineCell;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)Z
 	public final fun nextFire ()Ljava/lang/Long;
@@ -1553,7 +1560,7 @@ public final class io/github/lazily/Deadlined$Live : io/github/lazily/Deadlined 
 
 public final class io/github/lazily/DebounceCell {
 	public fun <init> (Lio/github/lazily/Context;J)V
-	public final fun getOutputCell-cNV08Q8 ()I
+	public final fun getOutputCell-cNV08Q8 ()J
 	public final fun input (JLjava/lang/Object;)V
 	public final fun output (Lio/github/lazily/ComputeOps;)Ljava/lang/Object;
 	public static synthetic fun output$default (Lio/github/lazily/DebounceCell;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)Ljava/lang/Object;
@@ -1890,7 +1897,7 @@ public final class io/github/lazily/DiscoveryCell {
 	public final fun discovery (Lio/github/lazily/ComputeOps;)Ljava/util/Map;
 	public static synthetic fun discovery$default (Lio/github/lazily/DiscoveryCell;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)Ljava/util/Map;
 	public final fun evict (Ljava/lang/Object;)V
-	public final fun getDiscoveryCell-cNV08Q8 ()I
+	public final fun getDiscoveryCell-cNV08Q8 ()J
 	public final fun register (Ljava/lang/String;Ljava/lang/String;Ljava/lang/Object;)V
 	public final fun resolve (Ljava/lang/String;)Ljava/lang/String;
 }
@@ -1902,6 +1909,12 @@ public final class io/github/lazily/DiscoveryCore {
 	public final fun evict (Ljava/lang/Object;)V
 	public final fun register (Ljava/lang/String;Ljava/lang/String;Ljava/lang/Object;)V
 	public final fun resolve (Ljava/lang/String;)Ljava/lang/String;
+}
+
+public final class io/github/lazily/DisposalKt {
+	public static final fun nodeGeneration (J)I
+	public static final fun nodeId (J)I
+	public static final fun nodeToken (II)J
 }
 
 public final class io/github/lazily/DisposedNodeException : java/lang/IllegalStateException {
@@ -2083,9 +2096,10 @@ public final class io/github/lazily/EdgeSnapshot$Companion {
 }
 
 public final class io/github/lazily/Effect : io/github/lazily/GraphNode {
-	public fun <init> (I)V
-	public final fun getId ()I
+	public fun <init> (J)V
+	public fun getNodeGeneration ()I
 	public fun getNodeId ()I
+	public final fun getToken ()J
 }
 
 public final class io/github/lazily/EntryKind : java/lang/Enum {
@@ -2120,7 +2134,7 @@ public abstract interface class io/github/lazily/Ephemeral {
 
 public final class io/github/lazily/EphemeralCell : io/github/lazily/Ephemeral {
 	public fun <init> (Lio/github/lazily/Context;)V
-	public final fun getValueCell-cNV08Q8 ()I
+	public final fun getValueCell-cNV08Q8 ()J
 	public final fun set (Ljava/lang/Object;JJ)V
 	public final fun tick (J)V
 	public final fun value (Lio/github/lazily/ComputeOps;)Ljava/lang/Object;
@@ -2159,6 +2173,7 @@ public final class io/github/lazily/FramedTransport : io/github/lazily/RelayTran
 }
 
 public abstract interface class io/github/lazily/GraphNode {
+	public abstract fun getNodeGeneration ()I
 	public abstract fun getNodeId ()I
 }
 
@@ -2202,7 +2217,7 @@ public final class io/github/lazily/Health : java/lang/Enum {
 
 public final class io/github/lazily/HealthCell {
 	public fun <init> (Lio/github/lazily/Context;)V
-	public final fun getHealthCell-cNV08Q8 ()I
+	public final fun getHealthCell-cNV08Q8 ()J
 	public final fun health ()Lio/github/lazily/Health;
 	public final fun set (Ljava/lang/String;ZZ)V
 }
@@ -2392,7 +2407,7 @@ public final class io/github/lazily/IngressCell {
 	public synthetic fun <init> (Lio/github/lazily/Context;Lio/github/lazily/IngressPolicy;Lio/github/lazily/MergePolicy;Lio/github/lazily/IngressTransportKind;JILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun accepted (Lio/github/lazily/ComputeOps;)Ljava/util/List;
 	public static synthetic fun accepted$default (Lio/github/lazily/IngressCell;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)Ljava/util/List;
-	public final fun acceptedHandle-ue6j58o ()I
+	public final fun acceptedHandle-ue6j58o ()J
 	public final fun admit (Lio/github/lazily/IngressEnvelope;)Lio/github/lazily/IngressAdmission;
 	public final fun authority (Ljava/lang/Object;Lio/github/lazily/ComputeOps;)Lio/github/lazily/IngressAuthority;
 	public static synthetic fun authority$default (Lio/github/lazily/IngressCell;Ljava/lang/Object;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)Lio/github/lazily/IngressAuthority;
@@ -2400,10 +2415,10 @@ public final class io/github/lazily/IngressCell {
 	public final fun drain (Ljava/lang/Object;)Ljava/lang/Object;
 	public final fun dropped (Lio/github/lazily/ComputeOps;)Ljava/util/List;
 	public static synthetic fun dropped$default (Lio/github/lazily/IngressCell;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)Ljava/util/List;
-	public final fun droppedHandle-ue6j58o ()I
+	public final fun droppedHandle-ue6j58o ()J
 	public final fun errors (Lio/github/lazily/ComputeOps;)Ljava/util/List;
 	public static synthetic fun errors$default (Lio/github/lazily/IngressCell;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)Ljava/util/List;
-	public final fun errorsHandle-ue6j58o ()I
+	public final fun errorsHandle-ue6j58o ()J
 	public final fun fail (Ljava/lang/Object;Lio/github/lazily/IngressError;)V
 	public final fun open (Ljava/lang/Object;J)V
 	public final fun policy ()Lio/github/lazily/IngressPolicy;
@@ -2416,7 +2431,7 @@ public final class io/github/lazily/IngressCell {
 	public static synthetic fun retry$default (Lio/github/lazily/IngressCell;Ljava/lang/Object;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)Lio/github/lazily/IngressRetry;
 	public final fun schedule (Lio/github/lazily/ComputeOps;)Lio/github/lazily/IngressSchedule;
 	public static synthetic fun schedule$default (Lio/github/lazily/IngressCell;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)Lio/github/lazily/IngressSchedule;
-	public final fun scheduleHandle-ue6j58o ()I
+	public final fun scheduleHandle-ue6j58o ()J
 	public final fun scopeKeys ()Ljava/util/List;
 	public final fun setPollInterval (J)V
 	public final fun setTransport (Lio/github/lazily/IngressTransportKind;)V
@@ -2722,10 +2737,10 @@ public final class io/github/lazily/IngressScopeChange$Companion {
 }
 
 public final class io/github/lazily/IngressScopeReaders {
-	public final fun getAuthority-ue6j58o ()I
-	public final fun getReadiness-ue6j58o ()I
-	public final fun getRetry-ue6j58o ()I
-	public final fun getValue-ue6j58o ()I
+	public final fun getAuthority-ue6j58o ()J
+	public final fun getReadiness-ue6j58o ()J
+	public final fun getRetry-ue6j58o ()J
+	public final fun getValue-ue6j58o ()J
 }
 
 public final class io/github/lazily/IngressScopeView {
@@ -2827,7 +2842,7 @@ public final class io/github/lazily/IntervalCell {
 	public fun <init> (Lio/github/lazily/Context;J)V
 	public final fun count (Lio/github/lazily/ComputeOps;)J
 	public static synthetic fun count$default (Lio/github/lazily/IntervalCell;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)J
-	public final fun getCountCell-cNV08Q8 ()I
+	public final fun getCountCell-cNV08Q8 ()J
 	public final fun nextFire ()J
 	public final fun tick (J)Z
 }
@@ -3186,9 +3201,9 @@ public final class io/github/lazily/LatestDurableProjection {
 	public fun <init> (Lio/github/lazily/Context;J)V
 	public final fun ackApplied (Ljava/lang/Object;JJ)Lio/github/lazily/LatestDurableAck;
 	public final fun claim (Ljava/lang/Object;J)Lio/github/lazily/LatestDurableClaim;
-	public final fun entry-A2r3zBs (Ljava/lang/Object;)I
+	public final fun entry-A2r3zBs (Ljava/lang/Object;)J
 	public final fun failRetryable (Ljava/lang/Object;JJ)Lio/github/lazily/LatestDurableFailure;
-	public final fun generation-ue6j58o ()I
+	public final fun generation-ue6j58o ()J
 	public final fun reconnect (J)Lio/github/lazily/LatestDurableReconnect;
 	public final fun upsertDesired (Ljava/lang/Object;JLjava/lang/Object;)Lio/github/lazily/LatestDurableUpsert;
 }
@@ -3385,7 +3400,7 @@ public final class io/github/lazily/LeaderCell {
 	public final fun campaign (JJ)Lio/github/lazily/LeaderRole;
 	public final fun contend (Ljava/lang/Object;JJ)Lio/github/lazily/LeaderRole;
 	public final fun currentLeader (J)Ljava/lang/Object;
-	public final fun getCurrentLeaderCell-cNV08Q8 ()I
+	public final fun getCurrentLeaderCell-cNV08Q8 ()J
 	public final fun role (J)Lio/github/lazily/LeaderRole;
 	public final fun tick (J)Lio/github/lazily/LeaderRole;
 }
@@ -3413,7 +3428,7 @@ public final class io/github/lazily/LeaseCell {
 	public fun <init> (Lio/github/lazily/Context;)V
 	public final fun acquire (Ljava/lang/Object;JJ)Ljava/lang/Long;
 	public final fun fence ()J
-	public final fun getHolderCell-cNV08Q8 ()I
+	public final fun getHolderCell-cNV08Q8 ()J
 	public final fun holder (J)Ljava/lang/Object;
 	public final fun isHeld (J)Z
 	public final fun release (Ljava/lang/Object;J)V
@@ -3437,7 +3452,7 @@ public final class io/github/lazily/LockCell {
 	public final fun acquire (Ljava/lang/Object;JJ)Ljava/lang/Long;
 	public final fun fence ()J
 	public final fun isLocked (J)Z
-	public final fun isLockedCell-cNV08Q8 ()I
+	public final fun isLockedCell-cNV08Q8 ()J
 	public final fun release (Ljava/lang/Object;J)V
 	public final fun tick (J)Z
 	public final fun validate (J)Z
@@ -3528,7 +3543,7 @@ public final class io/github/lazily/Match$Same : io/github/lazily/Match {
 
 public final class io/github/lazily/MembershipCell {
 	public fun <init> (Lio/github/lazily/Context;Lio/github/lazily/MembershipConfig;)V
-	public final fun getPeerSetCell-cNV08Q8 ()I
+	public final fun getPeerSetCell-cNV08Q8 ()J
 	public final fun heartbeat (Ljava/lang/Comparable;J)Ljava/util/List;
 	public final fun join (Ljava/lang/Comparable;J)Ljava/util/List;
 	public final fun leave (Ljava/lang/Comparable;J)Ljava/util/List;
@@ -3568,10 +3583,10 @@ public final class io/github/lazily/MembershipCore {
 }
 
 public final class io/github/lazily/MergeCell {
-	public synthetic fun <init> (Lio/github/lazily/Context;ILio/github/lazily/MergePolicy;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public synthetic fun <init> (Lio/github/lazily/Context;JLio/github/lazily/MergePolicy;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun get (Lio/github/lazily/ComputeOps;)Ljava/lang/Object;
 	public static synthetic fun get$default (Lio/github/lazily/MergeCell;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)Ljava/lang/Object;
-	public final fun getCell-cNV08Q8 ()I
+	public final fun getCell-cNV08Q8 ()J
 	public final fun getPolicy ()Lio/github/lazily/MergePolicy;
 	public final fun merge (Ljava/lang/Object;)V
 	public final fun set (Ljava/lang/Object;)V
@@ -3841,7 +3856,7 @@ public final class io/github/lazily/Outbox {
 	public synthetic fun <init> (Lio/github/lazily/Context;JLio/github/lazily/MergePolicy;Lio/github/lazily/BoundDim;Lio/github/lazily/Overflow;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun drain ()Ljava/lang/Object;
 	public final fun getRelay ()Lio/github/lazily/RelayCell;
-	public final fun isFull-ue6j58o ()I
+	public final fun isFull-ue6j58o ()J
 	public final fun send (Ljava/lang/Object;)Lio/github/lazily/IngressOutcome;
 }
 
@@ -3993,7 +4008,7 @@ public final class io/github/lazily/Position : java/lang/Comparable {
 public final class io/github/lazily/PresenceCell : io/github/lazily/Ephemeral {
 	public fun <init> (Lio/github/lazily/Context;J)V
 	public final fun evict (Ljava/lang/Object;J)V
-	public final fun getPresentCell-cNV08Q8 ()I
+	public final fun getPresentCell-cNV08Q8 ()J
 	public final fun heartbeat (Ljava/lang/Object;Ljava/lang/Object;J)V
 	public final fun present (Lio/github/lazily/ComputeOps;)Ljava/util/Map;
 	public static synthetic fun present$default (Lio/github/lazily/PresenceCell;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)Ljava/util/Map;
@@ -4010,7 +4025,7 @@ public final class io/github/lazily/PriorityStorage {
 
 public final class io/github/lazily/ProbabilisticSampleCell {
 	public fun <init> (Lio/github/lazily/Context;DLio/github/lazily/SampleRng;)V
-	public final fun getOutputCell-cNV08Q8 ()I
+	public final fun getOutputCell-cNV08Q8 ()J
 	public final fun input (Ljava/lang/Object;)Ljava/lang/Object;
 	public final fun inputWithDraw (Ljava/lang/Object;D)Ljava/lang/Object;
 	public final fun output (Lio/github/lazily/ComputeOps;)Ljava/lang/Object;
@@ -4111,7 +4126,7 @@ public final class io/github/lazily/QueueCell {
 	public final fun close ()V
 	public final fun head (Lio/github/lazily/ComputeOps;)Ljava/lang/Object;
 	public static synthetic fun head$default (Lio/github/lazily/QueueCell;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)Ljava/lang/Object;
-	public final fun headHandle-ue6j58o ()I
+	public final fun headHandle-ue6j58o ()J
 	public final fun isClosed (Lio/github/lazily/ComputeOps;)Z
 	public static synthetic fun isClosed$default (Lio/github/lazily/QueueCell;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)Z
 	public final fun isEmpty (Lio/github/lazily/ComputeOps;)Z
@@ -4199,12 +4214,12 @@ public final class io/github/lazily/QueuePushError$Full : io/github/lazily/Queue
 }
 
 public final class io/github/lazily/QueueReaderHandles {
-	public synthetic fun <init> (IIIIILkotlin/jvm/internal/DefaultConstructorMarker;)V
-	public final fun getClosed-cNV08Q8 ()I
-	public final fun getHead-ue6j58o ()I
-	public final fun getLen-ue6j58o ()I
-	public final fun isEmpty-ue6j58o ()I
-	public final fun isFull-ue6j58o ()I
+	public synthetic fun <init> (JJJJJLkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getClosed-cNV08Q8 ()J
+	public final fun getHead-ue6j58o ()J
+	public final fun getLen-ue6j58o ()J
+	public final fun isEmpty-ue6j58o ()J
+	public final fun isFull-ue6j58o ()J
 }
 
 public abstract interface class io/github/lazily/QueueStorage {
@@ -4238,7 +4253,7 @@ public abstract interface class io/github/lazily/ReactiveMap {
 
 public final class io/github/lazily/ReadinessCell {
 	public fun <init> (Lio/github/lazily/Context;)V
-	public final fun getReadyCell-cNV08Q8 ()I
+	public final fun getReadyCell-cNV08Q8 ()J
 	public final fun ready ()Z
 	public final fun set (Ljava/lang/String;Z)V
 }
@@ -4481,16 +4496,16 @@ public final class io/github/lazily/RelayCell {
 	public final fun depth (Lio/github/lazily/ComputeOps;)J
 	public static synthetic fun depth$default (Lio/github/lazily/RelayCell;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)J
 	public final fun drain ()Ljava/lang/Object;
-	public final fun getDepth-ue6j58o ()I
+	public final fun getDepth-ue6j58o ()J
 	public final fun getMergePolicy ()Lio/github/lazily/MergePolicy;
 	public final fun getPolicy ()Lio/github/lazily/BackpressurePolicy;
 	public final fun ingress (Ljava/lang/Object;)Lio/github/lazily/IngressOutcome;
 	public final fun isEmpty (Lio/github/lazily/ComputeOps;)Z
 	public static synthetic fun isEmpty$default (Lio/github/lazily/RelayCell;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)Z
-	public final fun isEmpty-ue6j58o ()I
+	public final fun isEmpty-ue6j58o ()J
 	public final fun isFull (Lio/github/lazily/ComputeOps;)Z
 	public static synthetic fun isFull$default (Lio/github/lazily/RelayCell;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)Z
-	public final fun isFull-ue6j58o ()I
+	public final fun isFull-ue6j58o ()J
 	public final fun overflowIsLegal (Lio/github/lazily/ComputeOps;)Z
 	public static synthetic fun overflowIsLegal$default (Lio/github/lazily/RelayCell;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)Z
 	public final fun peek ()Ljava/lang/Object;
@@ -4707,10 +4722,10 @@ public final class io/github/lazily/ReplayStrideMismatchException : io/github/la
 }
 
 public final class io/github/lazily/ReplicatedCell {
-	public synthetic fun <init> (Lio/github/lazily/Context;ILio/github/lazily/CrdtRegister;Lio/github/lazily/CrdtCodec;Lio/github/lazily/CrdtClock;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public synthetic fun <init> (Lio/github/lazily/Context;JLio/github/lazily/CrdtRegister;Lio/github/lazily/CrdtCodec;Lio/github/lazily/CrdtClock;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun applyRemote (Lio/github/lazily/CrdtOp;)Z
 	public final fun gc (Lio/github/lazily/WireStamp;)Z
-	public final fun getBacking-cNV08Q8 ()I
+	public final fun getBacking-cNV08Q8 ()J
 	public final fun getCtx ()Lio/github/lazily/Context;
 	public final fun getFrontier ()Lio/github/lazily/StampFrontier;
 	public final fun getRegister ()Lio/github/lazily/CrdtRegister;
@@ -4781,7 +4796,7 @@ public final class io/github/lazily/RetryPolicyCell {
 	public fun <init> (Lio/github/lazily/Context;JJ)V
 	public final fun delay (Lio/github/lazily/ComputeOps;)J
 	public static synthetic fun delay$default (Lio/github/lazily/RetryPolicyCell;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)J
-	public final fun getDelayCell-cNV08Q8 ()I
+	public final fun getDelayCell-cNV08Q8 ()J
 	public final fun nextDelay ()J
 	public final fun reset ()V
 }
@@ -4891,7 +4906,7 @@ public final class io/github/lazily/RungResult {
 
 public final class io/github/lazily/SampleCell {
 	public fun <init> (Lio/github/lazily/Context;Lio/github/lazily/SampleMode;)V
-	public final fun getOutputCell-cNV08Q8 ()I
+	public final fun getOutputCell-cNV08Q8 ()J
 	public final fun input (Ljava/lang/Object;)Ljava/lang/Object;
 	public final fun output (Lio/github/lazily/ComputeOps;)Ljava/lang/Object;
 	public static synthetic fun output$default (Lio/github/lazily/SampleCell;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)Ljava/lang/Object;
@@ -4964,10 +4979,10 @@ public abstract interface class io/github/lazily/SemFold {
 
 public final class io/github/lazily/SemTree {
 	public static final field Companion Lio/github/lazily/SemTree$Companion;
-	public synthetic fun <init> (ILjava/util/Map;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public synthetic fun <init> (JLjava/util/Map;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun node-Deh3l1U (Ljava/lang/Object;)Lio/github/lazily/Computed;
 	public final fun nodeValue (Lio/github/lazily/ComputeOps;Ljava/lang/Object;)Ljava/lang/Object;
-	public final fun root-ue6j58o ()I
+	public final fun root-ue6j58o ()J
 	public final fun value (Lio/github/lazily/ComputeOps;)Ljava/lang/Object;
 }
 
@@ -4978,7 +4993,7 @@ public final class io/github/lazily/SemTree$Companion {
 public final class io/github/lazily/SemaphoreCell {
 	public fun <init> (Lio/github/lazily/Context;J)V
 	public final fun acquire ()Z
-	public final fun getPermitsAvailableCell-cNV08Q8 ()I
+	public final fun getPermitsAvailableCell-cNV08Q8 ()J
 	public final fun permitsAvailable (Lio/github/lazily/ComputeOps;)J
 	public static synthetic fun permitsAvailable$default (Lio/github/lazily/SemaphoreCell;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)J
 	public final fun release ()V
@@ -5164,7 +5179,7 @@ public final class io/github/lazily/ServerMessage$Welcome : io/github/lazily/Ser
 public final class io/github/lazily/ServiceRegistry {
 	public fun <init> (Lio/github/lazily/Context;)V
 	public final fun deregister (Ljava/lang/String;)V
-	public final fun getProjectionCell-cNV08Q8 ()I
+	public final fun getProjectionCell-cNV08Q8 ()J
 	public final fun projection (Lio/github/lazily/ComputeOps;)Ljava/util/Map;
 	public static synthetic fun projection$default (Lio/github/lazily/ServiceRegistry;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)Ljava/util/Map;
 	public final fun register (Ljava/lang/String;Ljava/lang/String;)V
@@ -5188,7 +5203,7 @@ public final class io/github/lazily/SessionCore {
 public final class io/github/lazily/SessionWindow {
 	public fun <init> (Lio/github/lazily/Context;JLkotlin/jvm/functions/Function2;)V
 	public final fun flush (J)Ljava/lang/Object;
-	public final fun getOutputCell-cNV08Q8 ()I
+	public final fun getOutputCell-cNV08Q8 ()J
 	public final fun output (Lio/github/lazily/ComputeOps;)Ljava/lang/Object;
 	public static synthetic fun output$default (Lio/github/lazily/SessionWindow;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)Ljava/lang/Object;
 	public final fun push (JLjava/lang/Object;)Ljava/lang/Object;
@@ -5656,7 +5671,7 @@ public final class io/github/lazily/SlidingCore {
 
 public final class io/github/lazily/SlidingWindow {
 	public fun <init> (Lio/github/lazily/Context;JJLkotlin/jvm/functions/Function2;)V
-	public final fun getOutputCell-cNV08Q8 ()I
+	public final fun getOutputCell-cNV08Q8 ()J
 	public final fun output (Lio/github/lazily/ComputeOps;)Ljava/lang/Object;
 	public static synthetic fun output$default (Lio/github/lazily/SlidingWindow;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)Ljava/lang/Object;
 	public final fun push (Ljava/lang/Object;)Ljava/lang/Object;
@@ -5707,25 +5722,27 @@ public final class io/github/lazily/SortKey : java/lang/Comparable {
 }
 
 public final class io/github/lazily/Source : io/github/lazily/Cell {
-	public static final synthetic fun box-impl (I)Lio/github/lazily/Source;
-	public static fun constructor-impl (I)I
+	public static final synthetic fun box-impl (J)Lio/github/lazily/Source;
+	public static fun constructor-impl (J)J
 	public fun equals (Ljava/lang/Object;)Z
-	public static fun equals-impl (ILjava/lang/Object;)Z
-	public static final fun equals-impl0 (II)Z
-	public final fun getId ()I
+	public static fun equals-impl (JLjava/lang/Object;)Z
+	public static final fun equals-impl0 (JJ)Z
+	public static final fun getId-impl (J)I
+	public fun getNodeGeneration ()I
+	public static fun getNodeGeneration-impl (J)I
 	public fun getNodeId ()I
-	public static fun getNodeId-impl (I)I
+	public static fun getNodeId-impl (J)I
 	public fun hashCode ()I
-	public static fun hashCode-impl (I)I
+	public static fun hashCode-impl (J)I
 	public fun toString ()Ljava/lang/String;
-	public static fun toString-impl (I)Ljava/lang/String;
-	public final synthetic fun unbox-impl ()I
+	public static fun toString-impl (J)Ljava/lang/String;
+	public final synthetic fun unbox-impl ()J
 }
 
 public final class io/github/lazily/SourceMap : io/github/lazily/ReactiveMap {
 	public fun <init> (Lio/github/lazily/Context;Ljava/util/List;)V
 	public synthetic fun <init> (Lio/github/lazily/Context;Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
-	public final fun contains-A2r3zBs (Ljava/lang/Object;)I
+	public final fun contains-A2r3zBs (Ljava/lang/Object;)J
 	public final fun containsNow (Ljava/lang/Object;)Z
 	public final fun entriesNow ()Ljava/util/List;
 	public final fun get (Ljava/lang/Object;Lio/github/lazily/ComputeOps;)Ljava/lang/Object;
@@ -5735,9 +5752,9 @@ public final class io/github/lazily/SourceMap : io/github/lazily/ReactiveMap {
 	public final fun insert (Ljava/lang/Object;Ljava/lang/Object;Lio/github/lazily/InsertAt;)Z
 	public static synthetic fun insert$default (Lio/github/lazily/SourceMap;Ljava/lang/Object;Ljava/lang/Object;Lio/github/lazily/InsertAt;ILjava/lang/Object;)Z
 	public fun isPresent (Ljava/lang/Object;)Z
-	public final fun keys-ue6j58o ()I
+	public final fun keys-ue6j58o ()J
 	public final fun keysNow ()Ljava/util/List;
-	public final fun len-ue6j58o ()I
+	public final fun len-ue6j58o ()J
 	public final fun moveAfter (Ljava/lang/Object;Ljava/lang/Object;)V
 	public final fun moveBefore (Ljava/lang/Object;Ljava/lang/Object;)V
 	public final fun moveTo (Ljava/lang/Object;I)V
@@ -5746,7 +5763,7 @@ public final class io/github/lazily/SourceMap : io/github/lazily/ReactiveMap {
 	public final fun remove (Ljava/lang/Object;)Z
 	public final fun setValue (Ljava/lang/Object;Ljava/lang/Object;)V
 	public fun toString ()Ljava/lang/String;
-	public final fun value-Wh8GREY (Ljava/lang/Object;)I
+	public final fun value-Wh8GREY (Ljava/lang/Object;)J
 }
 
 public final class io/github/lazily/SourceTree {
@@ -5762,7 +5779,7 @@ public final class io/github/lazily/SourceTree {
 	public final fun remove (Ljava/lang/Object;)Z
 	public final fun rootsNow ()Ljava/util/List;
 	public final fun setValue (Ljava/lang/Object;Ljava/lang/Object;)V
-	public final fun value-Wh8GREY (Ljava/lang/Object;)I
+	public final fun value-Wh8GREY (Ljava/lang/Object;)J
 }
 
 public final class io/github/lazily/SpillMode : java/lang/Enum {
@@ -5871,9 +5888,9 @@ public final class io/github/lazily/StateMachine {
 	public final fun getState ()Ljava/lang/Object;
 	public final fun onTransition (Lkotlin/jvm/functions/Function2;)Lio/github/lazily/Effect;
 	public final fun send (Ljava/lang/Object;)Z
-	public final fun stateCell-cNV08Q8 ()I
+	public final fun stateCell-cNV08Q8 ()J
 	public final fun stateId ()I
-	public final fun stateIs-A2r3zBs (Ljava/lang/Object;)I
+	public final fun stateIs-A2r3zBs (Ljava/lang/Object;)J
 }
 
 public final class io/github/lazily/StateProjectionBridgeSupport {
@@ -5980,19 +5997,21 @@ public final class io/github/lazily/TextOp {
 }
 
 public final class io/github/lazily/ThreadSafeComputed : io/github/lazily/ThreadSafeGraphNode {
-	public static final synthetic fun box-impl (I)Lio/github/lazily/ThreadSafeComputed;
-	public static fun constructor-impl (I)I
+	public static final synthetic fun box-impl (J)Lio/github/lazily/ThreadSafeComputed;
+	public static fun constructor-impl (J)J
 	public fun equals (Ljava/lang/Object;)Z
-	public static fun equals-impl (ILjava/lang/Object;)Z
-	public static final fun equals-impl0 (II)Z
-	public final fun getId ()I
+	public static fun equals-impl (JLjava/lang/Object;)Z
+	public static final fun equals-impl0 (JJ)Z
+	public static final fun getId-impl (J)I
+	public fun getNodeGeneration ()I
+	public static fun getNodeGeneration-impl (J)I
 	public fun getNodeId ()I
-	public static fun getNodeId-impl (I)I
+	public static fun getNodeId-impl (J)I
 	public fun hashCode ()I
-	public static fun hashCode-impl (I)I
+	public static fun hashCode-impl (J)I
 	public fun toString ()Ljava/lang/String;
-	public static fun toString-impl (I)Ljava/lang/String;
-	public final synthetic fun unbox-impl ()I
+	public static fun toString-impl (J)Ljava/lang/String;
+	public final synthetic fun unbox-impl ()J
 }
 
 public final class io/github/lazily/ThreadSafeComputedMap : io/github/lazily/ReactiveMap {
@@ -6023,26 +6042,27 @@ public final class io/github/lazily/ThreadSafeContext {
 	public final fun cellAny (Ljava/lang/Object;)I
 	public final fun dependencyCount (Lio/github/lazily/ThreadSafeGraphNode;)I
 	public final fun dependentCount (Lio/github/lazily/ThreadSafeGraphNode;)I
-	public final fun disposeCell-SfWaMPA (I)V
-	public final fun disposeEffect-W4KLDXg (I)V
+	public final fun disposeCell-SfWaMPA (J)V
+	public final fun disposeEffect-W4KLDXg (J)V
 	public final fun disposeNode (Lio/github/lazily/ThreadSafeGraphNode;)V
 	public final fun disposeSignal (Lio/github/lazily/ThreadSafeSignalHandle;)V
 	public final fun disposeSignalNode (Lio/github/lazily/ThreadSafeSignalHandle;)V
-	public final fun disposeSlot-MqHn5z4 (I)V
-	public final fun effect-MWA_4nY (Lkotlin/jvm/functions/Function1;)I
+	public final fun disposeSlot-MqHn5z4 (J)V
+	public final fun effect-MWA_4nY (Lkotlin/jvm/functions/Function1;)J
 	public final fun effectAny (Lkotlin/jvm/functions/Function1;)I
 	public final fun finishBatch ()V
 	public final fun getBatchDepth ()I
 	public final fun getCellAny (I)Ljava/lang/Object;
 	public final fun getSlotAny (I)Ljava/lang/Object;
+	public final fun handleToken (I)J
 	public final fun isDisposed (Lio/github/lazily/ThreadSafeGraphNode;)Z
-	public final fun isEffectActive-W4KLDXg (I)Z
-	public final fun isSet-MqHn5z4 (I)Z
+	public final fun isEffectActive-W4KLDXg (J)Z
+	public final fun isSet-MqHn5z4 (J)Z
 	public final fun isSignalActive (Lio/github/lazily/ThreadSafeSignalHandle;)Z
 	public final fun scope ()Lio/github/lazily/ThreadSafeTeardownScope;
-	public final fun set-km83mr8 (ILjava/lang/Object;)V
+	public final fun set-km83mr8 (JLjava/lang/Object;)V
 	public final fun setBatchDepth (I)V
-	public final fun setCell-km83mr8 (ILjava/lang/Object;)V
+	public final fun setCell-km83mr8 (JLjava/lang/Object;)V
 	public final fun setCellAny (ILjava/lang/Object;)V
 	public final fun signalAny (Lkotlin/jvm/functions/Function1;)Lio/github/lazily/ThreadSafeContext$SignalIds;
 	public final fun slotAny (ZLkotlin/jvm/functions/Function1;)I
@@ -6064,22 +6084,25 @@ public final class io/github/lazily/ThreadSafeDependencyMap {
 }
 
 public final class io/github/lazily/ThreadSafeEffectHandle : io/github/lazily/ThreadSafeGraphNode {
-	public static final synthetic fun box-impl (I)Lio/github/lazily/ThreadSafeEffectHandle;
-	public static fun constructor-impl (I)I
+	public static final synthetic fun box-impl (J)Lio/github/lazily/ThreadSafeEffectHandle;
+	public static fun constructor-impl (J)J
 	public fun equals (Ljava/lang/Object;)Z
-	public static fun equals-impl (ILjava/lang/Object;)Z
-	public static final fun equals-impl0 (II)Z
-	public final fun getId ()I
+	public static fun equals-impl (JLjava/lang/Object;)Z
+	public static final fun equals-impl0 (JJ)Z
+	public static final fun getId-impl (J)I
+	public fun getNodeGeneration ()I
+	public static fun getNodeGeneration-impl (J)I
 	public fun getNodeId ()I
-	public static fun getNodeId-impl (I)I
+	public static fun getNodeId-impl (J)I
 	public fun hashCode ()I
-	public static fun hashCode-impl (I)I
+	public static fun hashCode-impl (J)I
 	public fun toString ()Ljava/lang/String;
-	public static fun toString-impl (I)Ljava/lang/String;
-	public final synthetic fun unbox-impl ()I
+	public static fun toString-impl (J)Ljava/lang/String;
+	public final synthetic fun unbox-impl ()J
 }
 
 public abstract interface class io/github/lazily/ThreadSafeGraphNode {
+	public abstract fun getNodeGeneration ()I
 	public abstract fun getNodeId ()I
 }
 
@@ -6087,15 +6110,15 @@ public final class io/github/lazily/ThreadSafeIngressCell {
 	public fun <init> (Lio/github/lazily/ThreadSafeContext;Lio/github/lazily/IngressPolicy;Lio/github/lazily/MergePolicy;Lio/github/lazily/IngressTransportKind;J)V
 	public synthetic fun <init> (Lio/github/lazily/ThreadSafeContext;Lio/github/lazily/IngressPolicy;Lio/github/lazily/MergePolicy;Lio/github/lazily/IngressTransportKind;JILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun accepted ()Ljava/util/List;
-	public final fun acceptedHandle-XICJqRI ()I
+	public final fun acceptedHandle-XICJqRI ()J
 	public final fun admit (Lio/github/lazily/IngressEnvelope;)Lio/github/lazily/IngressAdmission;
 	public final fun authority (Ljava/lang/Object;)Lio/github/lazily/IngressAuthority;
 	public final fun close (Ljava/lang/Object;)V
 	public final fun drain (Ljava/lang/Object;)Ljava/lang/Object;
 	public final fun dropped ()Ljava/util/List;
-	public final fun droppedHandle-XICJqRI ()I
+	public final fun droppedHandle-XICJqRI ()J
 	public final fun errors ()Ljava/util/List;
-	public final fun errorsHandle-XICJqRI ()I
+	public final fun errorsHandle-XICJqRI ()J
 	public final fun fail (Ljava/lang/Object;Lio/github/lazily/IngressError;)V
 	public final fun open (Ljava/lang/Object;J)V
 	public final fun policy ()Lio/github/lazily/IngressPolicy;
@@ -6105,7 +6128,7 @@ public final class io/github/lazily/ThreadSafeIngressCell {
 	public final fun reconnect (Ljava/lang/Object;J)Lio/github/lazily/ReplayRequest;
 	public final fun retry (Ljava/lang/Object;)Lio/github/lazily/IngressRetry;
 	public final fun schedule ()Lio/github/lazily/IngressSchedule;
-	public final fun scheduleHandle-XICJqRI ()I
+	public final fun scheduleHandle-XICJqRI ()J
 	public final fun scopeKeys ()Ljava/util/List;
 	public final fun setPollInterval (J)V
 	public final fun setTransport (Lio/github/lazily/IngressTransportKind;)V
@@ -6116,19 +6139,19 @@ public final class io/github/lazily/ThreadSafeIngressCell {
 }
 
 public final class io/github/lazily/ThreadSafeIngressScopeReaders {
-	public final fun getAuthority-XICJqRI ()I
-	public final fun getReadiness-XICJqRI ()I
-	public final fun getRetry-XICJqRI ()I
-	public final fun getValue-XICJqRI ()I
+	public final fun getAuthority-XICJqRI ()J
+	public final fun getReadiness-XICJqRI ()J
+	public final fun getRetry-XICJqRI ()J
+	public final fun getValue-XICJqRI ()J
 }
 
 public final class io/github/lazily/ThreadSafeLatestDurableProjection {
 	public fun <init> (Lio/github/lazily/ThreadSafeContext;J)V
 	public final fun ackApplied (Ljava/lang/Object;JJ)Lio/github/lazily/LatestDurableAck;
 	public final fun claim (Ljava/lang/Object;J)Lio/github/lazily/LatestDurableClaim;
-	public final fun entry-UzLJJWs (Ljava/lang/Object;)I
+	public final fun entry-UzLJJWs (Ljava/lang/Object;)J
 	public final fun failRetryable (Ljava/lang/Object;JJ)Lio/github/lazily/LatestDurableFailure;
-	public final fun generation-XICJqRI ()I
+	public final fun generation-XICJqRI ()J
 	public final fun reconnect (J)Lio/github/lazily/LatestDurableReconnect;
 	public final fun upsertDesired (Ljava/lang/Object;JLjava/lang/Object;)Lio/github/lazily/LatestDurableUpsert;
 }
@@ -6154,51 +6177,53 @@ public final class io/github/lazily/ThreadSafeQueueCell$Companion {
 }
 
 public final class io/github/lazily/ThreadSafeQueueReaderHandles {
-	public synthetic fun <init> (IIIIILkotlin/jvm/internal/DefaultConstructorMarker;)V
-	public final fun component1-XICJqRI ()I
-	public final fun component2-XICJqRI ()I
-	public final fun component3-XICJqRI ()I
-	public final fun component4-XICJqRI ()I
-	public final fun component5-urBJTkk ()I
-	public final fun copy-1eIPwP0 (IIIII)Lio/github/lazily/ThreadSafeQueueReaderHandles;
-	public static synthetic fun copy-1eIPwP0$default (Lio/github/lazily/ThreadSafeQueueReaderHandles;IIIIIILjava/lang/Object;)Lio/github/lazily/ThreadSafeQueueReaderHandles;
+	public synthetic fun <init> (JJJJJLkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1-XICJqRI ()J
+	public final fun component2-XICJqRI ()J
+	public final fun component3-XICJqRI ()J
+	public final fun component4-XICJqRI ()J
+	public final fun component5-urBJTkk ()J
+	public final fun copy-1eIPwP0 (JJJJJ)Lio/github/lazily/ThreadSafeQueueReaderHandles;
+	public static synthetic fun copy-1eIPwP0$default (Lio/github/lazily/ThreadSafeQueueReaderHandles;JJJJJILjava/lang/Object;)Lio/github/lazily/ThreadSafeQueueReaderHandles;
 	public fun equals (Ljava/lang/Object;)Z
-	public final fun getClosed-urBJTkk ()I
-	public final fun getHead-XICJqRI ()I
-	public final fun getLen-XICJqRI ()I
+	public final fun getClosed-urBJTkk ()J
+	public final fun getHead-XICJqRI ()J
+	public final fun getLen-XICJqRI ()J
 	public fun hashCode ()I
-	public final fun isEmpty-XICJqRI ()I
-	public final fun isFull-XICJqRI ()I
+	public final fun isEmpty-XICJqRI ()J
+	public final fun isFull-XICJqRI ()J
 	public fun toString ()Ljava/lang/String;
 }
 
 public final class io/github/lazily/ThreadSafeSignalHandle {
-	public synthetic fun <init> (IILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public synthetic fun <init> (JJLkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun dispose (Lio/github/lazily/ThreadSafeContext;)V
-	public final fun getEffect-wK4hVAc ()I
-	public final fun getSlot-XICJqRI ()I
+	public final fun getEffect-wK4hVAc ()J
+	public final fun getSlot-XICJqRI ()J
 }
 
 public final class io/github/lazily/ThreadSafeSource : io/github/lazily/ThreadSafeGraphNode {
-	public static final synthetic fun box-impl (I)Lio/github/lazily/ThreadSafeSource;
-	public static fun constructor-impl (I)I
+	public static final synthetic fun box-impl (J)Lio/github/lazily/ThreadSafeSource;
+	public static fun constructor-impl (J)J
 	public fun equals (Ljava/lang/Object;)Z
-	public static fun equals-impl (ILjava/lang/Object;)Z
-	public static final fun equals-impl0 (II)Z
-	public final fun getId ()I
+	public static fun equals-impl (JLjava/lang/Object;)Z
+	public static final fun equals-impl0 (JJ)Z
+	public static final fun getId-impl (J)I
+	public fun getNodeGeneration ()I
+	public static fun getNodeGeneration-impl (J)I
 	public fun getNodeId ()I
-	public static fun getNodeId-impl (I)I
+	public static fun getNodeId-impl (J)I
 	public fun hashCode ()I
-	public static fun hashCode-impl (I)I
+	public static fun hashCode-impl (J)I
 	public fun toString ()Ljava/lang/String;
-	public static fun toString-impl (I)Ljava/lang/String;
-	public final synthetic fun unbox-impl ()I
+	public static fun toString-impl (J)Ljava/lang/String;
+	public final synthetic fun unbox-impl ()J
 }
 
 public final class io/github/lazily/ThreadSafeSourceMap : io/github/lazily/ReactiveMap {
 	public fun <init> ()V
 	public final fun containsKey (Lio/github/lazily/ThreadSafeContext;Ljava/lang/Object;)Z
-	public final fun entry-kQujimI (Lio/github/lazily/ThreadSafeContext;Ljava/lang/Object;Lkotlin/jvm/functions/Function1;)I
+	public final fun entry-kQujimI (Lio/github/lazily/ThreadSafeContext;Ljava/lang/Object;Lkotlin/jvm/functions/Function1;)J
 	public final fun get (Lio/github/lazily/ThreadSafeContext;Ljava/lang/Object;)Ljava/lang/Object;
 	public fun getEntryKind ()Lio/github/lazily/EntryKind;
 	public final fun getLenUntracked ()I
@@ -6232,7 +6257,7 @@ public final class io/github/lazily/ThreadSafeStateChart {
 public final class io/github/lazily/ThreadSafeStateMachine {
 	public fun <init> (Lio/github/lazily/ThreadSafeContext;Ljava/lang/Object;Lkotlin/jvm/functions/Function2;)V
 	public final fun getState ()Ljava/lang/Object;
-	public final fun onTransition-MWA_4nY (Lkotlin/jvm/functions/Function2;)I
+	public final fun onTransition-MWA_4nY (Lkotlin/jvm/functions/Function2;)J
 	public final fun send (Ljava/lang/Object;)Z
 	public final fun stateId ()I
 	public final fun stateIs (Ljava/lang/Object;)Lio/github/lazily/ThreadSafeSignalHandle;
@@ -6242,7 +6267,7 @@ public final class io/github/lazily/ThreadSafeTeardownScope : java/lang/AutoClos
 	public final fun adopt (Lio/github/lazily/ThreadSafeGraphNode;)Lio/github/lazily/ThreadSafeGraphNode;
 	public fun close ()V
 	public final fun disarm ()V
-	public final fun effect-MWA_4nY (Lkotlin/jvm/functions/Function1;)I
+	public final fun effect-MWA_4nY (Lkotlin/jvm/functions/Function1;)J
 	public final fun end ()V
 	public final fun getCtx ()Lio/github/lazily/ThreadSafeContext;
 	public final fun getSize ()I
@@ -6291,25 +6316,25 @@ public final class io/github/lazily/ThreadSafeWorkQueueCell {
 }
 
 public final class io/github/lazily/ThreadSafeWorkQueueReaderHandles {
-	public synthetic fun <init> (IIIILkotlin/jvm/internal/DefaultConstructorMarker;)V
-	public final fun component1-XICJqRI ()I
-	public final fun component2-XICJqRI ()I
-	public final fun component3-XICJqRI ()I
-	public final fun component4-XICJqRI ()I
-	public final fun copy-CGkMvK8 (IIII)Lio/github/lazily/ThreadSafeWorkQueueReaderHandles;
-	public static synthetic fun copy-CGkMvK8$default (Lio/github/lazily/ThreadSafeWorkQueueReaderHandles;IIIIILjava/lang/Object;)Lio/github/lazily/ThreadSafeWorkQueueReaderHandles;
+	public synthetic fun <init> (JJJJLkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1-XICJqRI ()J
+	public final fun component2-XICJqRI ()J
+	public final fun component3-XICJqRI ()J
+	public final fun component4-XICJqRI ()J
+	public final fun copy-CGkMvK8 (JJJJ)Lio/github/lazily/ThreadSafeWorkQueueReaderHandles;
+	public static synthetic fun copy-CGkMvK8$default (Lio/github/lazily/ThreadSafeWorkQueueReaderHandles;JJJJILjava/lang/Object;)Lio/github/lazily/ThreadSafeWorkQueueReaderHandles;
 	public fun equals (Ljava/lang/Object;)Z
-	public final fun getDeadLetterLen-XICJqRI ()I
-	public final fun getInFlightLen-XICJqRI ()I
-	public final fun getPendingLen-XICJqRI ()I
+	public final fun getDeadLetterLen-XICJqRI ()J
+	public final fun getInFlightLen-XICJqRI ()J
+	public final fun getPendingLen-XICJqRI ()J
 	public fun hashCode ()I
-	public final fun isEmpty-XICJqRI ()I
+	public final fun isEmpty-XICJqRI ()J
 	public fun toString ()Ljava/lang/String;
 }
 
 public final class io/github/lazily/ThrottleCell {
 	public fun <init> (Lio/github/lazily/Context;Lio/github/lazily/ThrottleEdge;J)V
-	public final fun getOutputCell-cNV08Q8 ()I
+	public final fun getOutputCell-cNV08Q8 ()J
 	public final fun input (JLjava/lang/Object;)Ljava/lang/Object;
 	public final fun output (Lio/github/lazily/ComputeOps;)Ljava/lang/Object;
 	public static synthetic fun output$default (Lio/github/lazily/ThrottleCell;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)Ljava/lang/Object;
@@ -6350,7 +6375,7 @@ public final class io/github/lazily/TimeoutCancellation : java/lang/Enum {
 public final class io/github/lazily/TimeoutCell {
 	public fun <init> (Lio/github/lazily/Context;)V
 	public final fun arm (JJ)V
-	public final fun getTimedOutCell-cNV08Q8 ()I
+	public final fun getTimedOutCell-cNV08Q8 ()J
 	public final fun isTimedOut (Lio/github/lazily/ComputeOps;)Z
 	public static synthetic fun isTimedOut$default (Lio/github/lazily/TimeoutCell;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)Z
 	public final fun tick (J)Z
@@ -6430,7 +6455,7 @@ public final class io/github/lazily/Timer {
 
 public final class io/github/lazily/TimerCell {
 	public fun <init> (Lio/github/lazily/Context;J)V
-	public final fun getFiredCell-cNV08Q8 ()I
+	public final fun getFiredCell-cNV08Q8 ()J
 	public final fun hasFired (Lio/github/lazily/ComputeOps;)Z
 	public static synthetic fun hasFired$default (Lio/github/lazily/TimerCell;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)Z
 	public final fun nextFire ()Ljava/lang/Long;
@@ -6735,7 +6760,7 @@ public final class io/github/lazily/TumblingCountCore {
 
 public final class io/github/lazily/TumblingCountWindow {
 	public fun <init> (Lio/github/lazily/Context;JLkotlin/jvm/functions/Function2;)V
-	public final fun getOutputCell-cNV08Q8 ()I
+	public final fun getOutputCell-cNV08Q8 ()J
 	public final fun output (Lio/github/lazily/ComputeOps;)Ljava/lang/Object;
 	public static synthetic fun output$default (Lio/github/lazily/TumblingCountWindow;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)Ljava/lang/Object;
 	public final fun push (Ljava/lang/Object;)Ljava/lang/Object;
@@ -6749,7 +6774,7 @@ public final class io/github/lazily/TumblingTimeCore {
 
 public final class io/github/lazily/TumblingTimeWindow {
 	public fun <init> (Lio/github/lazily/Context;JLkotlin/jvm/functions/Function2;)V
-	public final fun getOutputCell-cNV08Q8 ()I
+	public final fun getOutputCell-cNV08Q8 ()J
 	public final fun output (Lio/github/lazily/ComputeOps;)Ljava/lang/Object;
 	public static synthetic fun output$default (Lio/github/lazily/TumblingTimeWindow;Lio/github/lazily/ComputeOps;ILjava/lang/Object;)Ljava/lang/Object;
 	public final fun push (JLjava/lang/Object;)V
@@ -6948,19 +6973,19 @@ public final class io/github/lazily/WorkQueueItem {
 }
 
 public final class io/github/lazily/WorkQueueReaderHandles {
-	public synthetic fun <init> (IIIILkotlin/jvm/internal/DefaultConstructorMarker;)V
-	public final fun component1-ue6j58o ()I
-	public final fun component2-ue6j58o ()I
-	public final fun component3-ue6j58o ()I
-	public final fun component4-ue6j58o ()I
-	public final fun copy-_T4wtpk (IIII)Lio/github/lazily/WorkQueueReaderHandles;
-	public static synthetic fun copy-_T4wtpk$default (Lio/github/lazily/WorkQueueReaderHandles;IIIIILjava/lang/Object;)Lio/github/lazily/WorkQueueReaderHandles;
+	public synthetic fun <init> (JJJJLkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1-ue6j58o ()J
+	public final fun component2-ue6j58o ()J
+	public final fun component3-ue6j58o ()J
+	public final fun component4-ue6j58o ()J
+	public final fun copy-_T4wtpk (JJJJ)Lio/github/lazily/WorkQueueReaderHandles;
+	public static synthetic fun copy-_T4wtpk$default (Lio/github/lazily/WorkQueueReaderHandles;JJJJILjava/lang/Object;)Lio/github/lazily/WorkQueueReaderHandles;
 	public fun equals (Ljava/lang/Object;)Z
-	public final fun getDeadLetterLen-ue6j58o ()I
-	public final fun getInFlightLen-ue6j58o ()I
-	public final fun getPendingLen-ue6j58o ()I
+	public final fun getDeadLetterLen-ue6j58o ()J
+	public final fun getInFlightLen-ue6j58o ()J
+	public final fun getPendingLen-ue6j58o ()J
 	public fun hashCode ()I
-	public final fun isEmpty-ue6j58o ()I
+	public final fun isEmpty-ue6j58o ()J
 	public fun toString ()Ljava/lang/String;
 }
 

@@ -129,6 +129,7 @@ class ReactiveGraphConformanceTest {
                 "merge_per_settled_cone_not_per_write.json",
                 "read_after_dispose_is_an_error.json",
                 "recycled_id_inherits_nothing.json",
+                "stale_effect_handle_cannot_remove_recycled_source.json",
                 "scope_teardown_equals_fold_of_disposals.json",
                 "scoping_bounds_teardown_not_visibility.json",
                 "signal_materializes_once_per_batch.json",
@@ -186,6 +187,7 @@ class ReactiveGraphConformanceTest {
         val KNOWN_EXPECT_KEYS =
             setOf(
                 "cleanup_order",
+                "cleanups_of",
                 "computes_of",
                 "dependencies_of",
                 "dependents_of",
@@ -195,8 +197,10 @@ class ReactiveGraphConformanceTest {
                 "observed_count",
                 "read",
                 "readable",
+                "recycled_id_confirmed",
                 "scope_owned_count",
                 "value",
+                "writable",
             )
 
         /**
@@ -406,6 +410,12 @@ class ReactiveGraphConformanceTest {
 
         fun kindOf(id: String): Kind
 
+        /** Arena identity, used to prove a stale-handle scenario really recycled its slot. */
+        fun rawNodeId(id: String): Int
+
+        /** Whether [id] is a live writable source rather than a computed/effect handle. */
+        fun writable(id: String): Boolean
+
         fun isEffectActive(id: String): Boolean
 
         fun dependentsOf(id: String): Int
@@ -563,6 +573,11 @@ class ReactiveGraphConformanceTest {
                 else -> Kind.SLOT
             }
 
+        override fun rawNodeId(id: String): Int = nodes.getValue(id).nodeId
+
+        override fun writable(id: String): Boolean =
+            nodes[id].let { it is Source<*> && !ctx.isDisposed(it) }
+
         override fun isEffectActive(id: String): Boolean = ctx.isEffectActive(nodes[id] as Effect)
 
         override fun dependentsOf(id: String): Int = ctx.dependentCount(nodes[id]!!)
@@ -694,6 +709,11 @@ class ReactiveGraphConformanceTest {
                 is ThreadSafeEffectHandle -> Kind.EFFECT
                 else -> Kind.SLOT
             }
+
+        override fun rawNodeId(id: String): Int = nodes.getValue(id).nodeId
+
+        override fun writable(id: String): Boolean =
+            nodes[id].let { it is ThreadSafeSource<*> && !ctx.isDisposed(it) }
 
         override fun isEffectActive(id: String): Boolean = ctx.isEffectActive(nodes[id] as ThreadSafeEffectHandle)
 
@@ -873,6 +893,11 @@ class ReactiveGraphConformanceTest {
                 is AsyncContext.AsyncEffectHandle -> Kind.EFFECT
                 else -> Kind.SLOT
             }
+
+        override fun rawNodeId(id: String): Int = nodes.getValue(id).nodeId
+
+        override fun writable(id: String): Boolean =
+            nodes[id].let { it is AsyncContext.AsyncSource<*> && !ctx.isDisposed(it) }
 
         override fun isEffectActive(id: String): Boolean = !ctx.isDisposed(nodes[id] as AsyncContext.AsyncEffectHandle)
 
@@ -1123,6 +1148,7 @@ class ReactiveGraphConformanceTest {
             val runsBefore = model.runLog.size
             var opValue: Any? = null
             var opError = false
+            var recycledIdConfirmed = false
             report.ops++
 
             when (type) {
@@ -1204,17 +1230,31 @@ class ReactiveGraphConformanceTest {
                 // name so a later `end_scope` is the no-op the fixture asserts.
                 "disarm" -> model.disarmScope(op["scope"]!!.jsonPrimitive.content)
                 "dispose_stale_handle" -> {
-                    // The point of the op: the handle's id has been recycled
-                    // onto a node of another kind, so tearing down through it
-                    // must be a no-op. lazily-kt's arena recycles ids for real,
-                    // so `disposeNode` reads the kind out of the arena and
-                    // declines — the guard `Context.resolve` documents.
                     val of = op["handle_of"]!!.jsonPrimitive.content
                     val wantKind = op["handle_kind"]!!.jsonPrimitive.content
+                    val successor = op["successor"]!!.jsonPrimitive.content
+                    val wantSuccessorKind = op["successor_kind"]!!.jsonPrimitive.content
+                    fun Kind.contractName(): String =
+                        when (this) {
+                            Kind.CELL -> "cell"
+                            Kind.SLOT -> "computed"
+                            Kind.EFFECT -> "effect"
+                        }
                     assertEquals(
                         wantKind,
-                        model.kindOf(of).name.lowercase(),
+                        model.kindOf(of).contractName(),
                         "$fixture#$i: handle_kind does not match the recorded handle",
+                    )
+                    assertEquals(
+                        wantSuccessorKind,
+                        model.kindOf(successor).contractName(),
+                        "$fixture#$i: successor_kind does not match the current node",
+                    )
+                    recycledIdConfirmed = model.rawNodeId(successor) == model.rawNodeId(of)
+                    assertEquals(
+                        true,
+                        recycledIdConfirmed,
+                        "$fixture#$i: stale handle and successor do not share a recycled raw id",
                     )
                     model.disposeId(of)
                 }
@@ -1261,6 +1301,10 @@ class ReactiveGraphConformanceTest {
                         "computes_of" ->
                             assertExpectedEntries(expect, keys, key) { id, want ->
                                 check("computes_of.$id", model.computesOf(id), want)
+                            }
+                        "cleanups_of" ->
+                            assertExpectedEntries(expect, keys, key) { id, want ->
+                                check("cleanups_of.$id", model.cleanupLog.count { it == id }, want)
                             }
                         "dependents_of" ->
                             assertExpectedEntries(expect, keys, key) { id, want ->
@@ -1317,6 +1361,10 @@ class ReactiveGraphConformanceTest {
                             assertExpectedEntries(expect, keys, key) { id, want ->
                                 check("readable.$id", alive(model, id), want)
                             }
+                        "recycled_id_confirmed" ->
+                            assertExpected(expect, keys, key) { want ->
+                                check("recycled_id_confirmed", recycledIdConfirmed, want)
+                            }
                         "observed_by" ->
                             assertExpected(expect, keys, key) { want ->
                                 checkList("observed_by", observed, strs(want))
@@ -1338,6 +1386,10 @@ class ReactiveGraphConformanceTest {
                         "scope_owned_count" ->
                             assertExpectedEntries(expect, keys, key) { name, want ->
                                 check("scope_owned_count.$name", model.scopeOwned(name), want)
+                            }
+                        "writable" ->
+                            assertExpectedEntries(expect, keys, key) { id, want ->
+                                check("writable.$id", model.writable(id), want)
                             }
                         else -> error("$fixture#$i: unhandled assertion key '$key'")
                     }
@@ -1757,6 +1809,12 @@ class ReactiveGraphConformanceTest {
                     """["e_first","e_second","e_third"]""",
                 ),
                 Mutation(
+                    "cleanups_of",
+                    "stale_effect_handle_cannot_remove_recycled_source.json",
+                    "$area/stale_effect_handle_cannot_remove_recycled_source.json|scenarios[2].steps[4].expect",
+                    """{"successor":1}""",
+                ),
+                Mutation(
                     "computes_of",
                     "dispose_signal_reverts_to_lazy.json",
                     "$area/dispose_signal_reverts_to_lazy.json|steps[1].expect",
@@ -1805,6 +1863,12 @@ class ReactiveGraphConformanceTest {
                     """{"topic":false}""",
                 ),
                 Mutation(
+                    "recycled_id_confirmed",
+                    "stale_effect_handle_cannot_remove_recycled_source.json",
+                    "$area/stale_effect_handle_cannot_remove_recycled_source.json|scenarios[0].steps[4].expect",
+                    "false",
+                ),
+                Mutation(
                     "scope_owned_count",
                     "disarm_disposes_nothing.json",
                     "$area/disarm_disposes_nothing.json|steps[6].expect",
@@ -1815,6 +1879,12 @@ class ReactiveGraphConformanceTest {
                     "cross_scope_teardown_hazard.json",
                     "$area/cross_scope_teardown_hazard.json|steps[11].expect",
                     "3",
+                ),
+                Mutation(
+                    "writable",
+                    "stale_effect_handle_cannot_remove_recycled_source.json",
+                    "$area/stale_effect_handle_cannot_remove_recycled_source.json|scenarios[0].steps[4].expect",
+                    """{"successor":false}""",
                 ),
             )
 
@@ -1879,9 +1949,11 @@ class ReactiveGraphConformanceTest {
         failure: Throwable,
     ): String? {
         val step = Regex("""steps\[(\d+)]\.expect$""").find(siteId)!!.groupValues[1]
+        val scenario = Regex("""scenarios\[(\d+)]\.steps""").find(siteId)?.groupValues?.get(1)
+        val scenarioTag = scenario?.let { "[$it]" }.orEmpty()
         val divergence =
             Regex(
-                Regex.escape("Context-mutation-$key/$fixture#$step:$key") +
+                Regex.escape("Context-mutation-$key/$fixture$scenarioTag#$step:$key") +
                     """(?:\.[^\s,\]]+)? — got .*?, want .*?(?=, Context-mutation-|]>)""",
             )
         return divergence.find(failure.message.orEmpty())?.value
@@ -1961,7 +2033,7 @@ class ReactiveGraphConformanceTest {
                     val fixture = json.parseToJsonElement(ConformanceFixtures.read(path))
                     ConformanceFixtures.blockSitesOf(path, fixture).keys.filter(stepSitePattern::matches)
                 }.toSet()
-        assertEquals(88, declaredReplayableStepSites.size, "reactive-graph replayable step-site pin")
+        assertEquals(115, declaredReplayableStepSites.size, "reactive-graph replayable step-site pin")
 
         val models: List<Pair<String, () -> Model>> =
             listOf(

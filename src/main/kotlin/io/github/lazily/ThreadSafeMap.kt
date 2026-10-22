@@ -53,7 +53,8 @@ class ThreadSafeSourceMap<K : Any, V : Any> : ReactiveMap<K, V> {
         val (stored, mutation) =
             lock.withLock {
                 keyed.get(key)?.let { return it }
-                keyed.insert(key, ThreadSafeSource<V>(ctx.cellAny(initial)))
+                val id = ctx.cellAny(initial)
+                keyed.insert(key, ThreadSafeSource<V>(ctx.handleToken(id)))
             }
         // Bump off the map lock: a set can drive a dependent recompute that
         // re-enters this map.
@@ -262,7 +263,8 @@ class ThreadSafeComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
         // Fast path: already allocated. Release the map lock before touching `ctx`
         // so a context operation can never re-enter this lock.
         lock.withLock { keyed.get(key)?.let { return it } }
-        val handle = ThreadSafeComputed<V>(ctx.slotAny(memo = false) { factory(key) })
+        val handleId = ctx.slotAny(memo = false) { factory(key) }
+        val handle = ThreadSafeComputed<V>(ctx.handleToken(handleId))
         // Lost a race: first writer wins so the key keeps a stable handle; our
         // freshly-allocated node is orphaned in `ctx` (never observed).
         val (stored, mutation) = lock.withLock { keyed.insert(key, handle) }

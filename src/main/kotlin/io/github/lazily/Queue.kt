@@ -510,16 +510,14 @@ class TopicCell<T : Any>(
 
     private fun ensureReader(id: String): Computed<List<T>> =
         readers.getOrPut(id) {
-            Computed(
-                ctx.slotAny {
-                    val sub = subscriptions[id]
-                    if (sub == null || !sub.connected) {
-                        emptyList<T>()
-                    } else {
-                        retained.drop((sub.cursor - baseOffset).coerceAtLeast(0).toInt())
-                    }
-                },
-            )
+            ctx.slotAny {
+                val sub = subscriptions[id]
+                if (sub == null || !sub.connected) {
+                    emptyList<T>()
+                } else {
+                    retained.drop((sub.cursor - baseOffset).coerceAtLeast(0).toInt())
+                }
+            }.let { Computed(ctx.handleToken(it)) }
         }
 
     /**

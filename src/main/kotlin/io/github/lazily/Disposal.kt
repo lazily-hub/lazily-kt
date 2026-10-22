@@ -12,10 +12,9 @@ package io.github.lazily
  * ## Why an id, not a handle
  *
  * lazily-kt's three contexts all store nodes in a dense arena indexed by a
- * recycled integer id (the same shape as `lazily-rs`), so the only stable thing
- * to name here is the id and the kind the caller *expected* to find. That is
- * also the whole read-after-dispose test: a handle is stale exactly when the
- * arena slot is empty or holds a node of a different kind.
+ * recycled integer id plus allocation generation, so the stable diagnostic is
+ * the id and the kind the caller *expected* to find. A handle is stale when the
+ * arena slot is empty, its generation changed, or it holds a different kind.
  *
  * Extends [IllegalStateException] so it is catchable specifically without
  * breaking callers that already catch the broader type the arena lookups used
@@ -28,8 +27,21 @@ class DisposedNodeException internal constructor(
     val expectedKind: String,
 ) : IllegalStateException(
     "read after dispose: no live $expectedKind at node id $nodeId — it was disposed " +
-        "(or its id was recycled onto a node of another kind)",
+        "(or its id was recycled onto another node)",
 )
+
+/** Pack a dense arena id and its allocation generation into one copyable handle word. */
+@PublishedApi
+internal fun nodeToken(
+    id: Int,
+    generation: Int,
+): Long = (generation.toLong() shl 32) or (id.toLong() and 0xffff_ffffL)
+
+@PublishedApi
+internal fun nodeId(token: Long): Int = token.toInt()
+
+@PublishedApi
+internal fun nodeGeneration(token: Long): Int = (token ushr 32).toInt()
 
 /**
  * A node in a [Context]'s reactive graph (`#lzspecedgeindex`).
@@ -55,16 +67,25 @@ class DisposedNodeException internal constructor(
 sealed interface GraphNode {
     /** Dense-arena id this handle names. Not a public identity — see the class doc. */
     val nodeId: Int
+
+    /** Allocation generation captured with [nodeId]. */
+    val nodeGeneration: Int
 }
 
 /** A node in a [ThreadSafeContext]'s reactive graph. See [GraphNode]. */
 sealed interface ThreadSafeGraphNode {
     /** Dense-arena id this handle names. */
     val nodeId: Int
+
+    /** Allocation generation captured with [nodeId]. */
+    val nodeGeneration: Int
 }
 
 /** A node in an [AsyncContext]'s reactive graph. See [GraphNode]. */
 sealed interface AsyncGraphNode {
     /** Dense-arena id this handle names. */
     val nodeId: Int
+
+    /** Allocation generation captured with [nodeId]. */
+    val nodeGeneration: Int
 }

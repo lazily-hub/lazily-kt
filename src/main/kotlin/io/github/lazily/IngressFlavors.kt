@@ -77,7 +77,8 @@ class ThreadSafeIngressCell<K : Any, T : Any>(
         }
 
     private fun receiptReader(channel: IngressReceiptChannel): ThreadSafeComputed<List<IngressReceipt<K>>> =
-        ThreadSafeComputed(ctx.slotAny(memo = true) { lock.withLock { core.receipts(channel) } })
+        ctx.slotAny(memo = true) { lock.withLock { core.receipts(channel) } }
+            .let { ThreadSafeComputed(ctx.handleToken(it)) }
 
     /**
      * Mint (or return) one scope's four readers. Minted **off** the core lock: a read
@@ -89,27 +90,20 @@ class ThreadSafeIngressCell<K : Any, T : Any>(
         val minted =
             ThreadSafeIngressScopeReaders<T>(
                 value =
-                ThreadSafeComputed(
-                    ctx.slotAny(memo = true) {
-                        IngressReading(lock.withLock { core.peek(key) })
-                    },
-                ),
+                ctx.slotAny(memo = true) {
+                    IngressReading(lock.withLock { core.peek(key) })
+                }.let { ThreadSafeComputed(ctx.handleToken(it)) },
                 readiness =
-                ThreadSafeComputed(
-                    ctx.slotAny(memo = true) { lock.withLock { core.readiness(key) } },
-                ),
+                ctx.slotAny(memo = true) { lock.withLock { core.readiness(key) } }
+                    .let { ThreadSafeComputed(ctx.handleToken(it)) },
                 authority =
-                ThreadSafeComputed(
-                    ctx.slotAny(memo = true) {
-                        IngressReading(lock.withLock { core.authority(key) })
-                    },
-                ),
+                ctx.slotAny(memo = true) {
+                    IngressReading(lock.withLock { core.authority(key) })
+                }.let { ThreadSafeComputed(ctx.handleToken(it)) },
                 retry =
-                ThreadSafeComputed(
-                    ctx.slotAny(memo = true) {
-                        IngressReading(lock.withLock { core.retry(key) })
-                    },
-                ),
+                ctx.slotAny(memo = true) {
+                    IngressReading(lock.withLock { core.retry(key) })
+                }.let { ThreadSafeComputed(ctx.handleToken(it)) },
             )
         return lock.withLock { scopeReaders.getOrPut(key) { minted } }
     }

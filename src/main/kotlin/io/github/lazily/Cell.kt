@@ -80,7 +80,7 @@ sealed interface Cell<T : Any> : GraphNode
 /**
  * A typed handle to a **source cell** — a node written from outside, keep-latest
  * by default (a policy-carrying source keeps its [MergePolicy] via [MergeCell]).
- * Lightweight: a dense-arena id and nothing else; the value lives inside the
+ * Lightweight: a packed dense-arena id plus allocation generation; the value lives inside the
  * `Context`. The kernel's source kind — reads via [Context.get], writes via
  * [set] / [merge].
  */
@@ -88,9 +88,11 @@ sealed interface Cell<T : Any> : GraphNode
 value class Source<T : Any>
 @PublishedApi
 internal constructor(
-    val id: Int,
+    @PublishedApi internal val token: Long,
 ) : Cell<T> {
+    @PublishedApi internal val id: Int get() = nodeId(token)
     override val nodeId: Int get() = id
+    override val nodeGeneration: Int get() = nodeGeneration(token)
 }
 
 /**
@@ -103,9 +105,11 @@ internal constructor(
 value class Computed<T : Any>
 @PublishedApi
 internal constructor(
-    val id: Int,
+    @PublishedApi internal val token: Long,
 ) : Cell<T> {
+    @PublishedApi internal val id: Int get() = nodeId(token)
     override val nodeId: Int get() = id
+    override val nodeGeneration: Int get() = nodeGeneration(token)
 }
 
 // -- Source-only writes (§3) -------------------------------------------------
@@ -152,7 +156,7 @@ fun <T : Any> Source<T>.merge(
  * per-write puller cannot be built (`#lzsignaleager` becomes unwritable).
  */
 fun <T : Any> Computed<T>.eager(ctx: Context): Computed<T> {
-    ctx.makeEager(id)
+    ctx.makeEager(this)
     return this
 }
 
@@ -161,10 +165,10 @@ fun <T : Any> Computed<T>.eager(ctx: Context): Computed<T> {
  * stays readable and reverts to lazy (recomputed on next read). No-op if the
  * computed cell is not eager.
  */
-fun Computed<*>.lazy(ctx: Context): Unit = ctx.makeLazy(nodeId)
+fun Computed<*>.lazy(ctx: Context): Unit = ctx.makeLazy(this)
 
 /** Whether this computed cell is currently eager (has an active puller). */
-fun Computed<*>.isEager(ctx: Context): Boolean = ctx.isEagerId(nodeId)
+fun Computed<*>.isEager(ctx: Context): Boolean = ctx.isEager(this)
 
 // -- Disposal (genus-level) --------------------------------------------------
 

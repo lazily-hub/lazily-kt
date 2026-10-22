@@ -67,7 +67,7 @@ class IngressCell<K : Any, T : Any>(
         }
 
     private fun receiptReader(channel: IngressReceiptChannel): Computed<List<IngressReceipt<K>>> =
-        Computed(ctx.slotAny { core.receipts(channel) })
+        ctx.slotAny { core.receipts(channel) }.let { Computed(ctx.handleToken(it)) }
 
     /**
      * Mint (or return) one scope's four readers. Idempotent, so a consumer may hold
@@ -77,10 +77,10 @@ class IngressCell<K : Any, T : Any>(
     fun readers(key: K): IngressScopeReaders<T> =
         scopeReaders.getOrPut(key) {
             IngressScopeReaders(
-                value = Computed(ctx.slotAny { IngressReading(core.peek(key)) }),
-                readiness = Computed(ctx.slotAny { core.readiness(key) }),
-                authority = Computed(ctx.slotAny { IngressReading(core.authority(key)) }),
-                retry = Computed(ctx.slotAny { IngressReading(core.retry(key)) }),
+                value = ctx.slotAny { IngressReading(core.peek(key)) }.let { Computed(ctx.handleToken(it)) },
+                readiness = ctx.slotAny { core.readiness(key) }.let { Computed(ctx.handleToken(it)) },
+                authority = ctx.slotAny { IngressReading(core.authority(key)) }.let { Computed(ctx.handleToken(it)) },
+                retry = ctx.slotAny { IngressReading(core.retry(key)) }.let { Computed(ctx.handleToken(it)) },
             )
         }
 

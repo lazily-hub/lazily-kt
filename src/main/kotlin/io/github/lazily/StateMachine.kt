@@ -30,7 +30,8 @@ class StateMachine<S : Any, E>(
     initial: S,
     private val transition: (S, E) -> S?,
 ) {
-    private val stateId: Int = ctx.cellAny(initial)
+    private val stateToken: Long = ctx.cellAny(initial).let(ctx::handleToken)
+    private val stateId: Int get() = nodeId(stateToken)
 
     /** Send an event. Returns `true` if accepted, `false` if rejected (guard). */
     fun send(event: E): Boolean {
@@ -60,7 +61,7 @@ class StateMachine<S : Any, E>(
      * writes via [send]; this handle is the composition read surface, like
      * [stateId] but typed.)
      */
-    fun stateCell(): Source<S> = Source(stateId)
+    fun stateCell(): Source<S> = Source(stateToken)
 
     /**
      * Register an effect that fires with `(old, new)` whenever the machine

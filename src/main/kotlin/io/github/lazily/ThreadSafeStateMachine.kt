@@ -77,8 +77,8 @@ class ThreadSafeStateMachine<S : Any, E>(
     fun stateIs(target: S): ThreadSafeSignalHandle<Boolean> {
         val ids = ctx.signalAny { state == target }
         return ThreadSafeSignalHandle(
-            ThreadSafeComputed(ids.slot),
-            ThreadSafeEffectHandle(ids.effect),
+            ThreadSafeComputed(ctx.handleToken(ids.slot)),
+            ThreadSafeEffectHandle(ctx.handleToken(ids.effect)),
         )
     }
 }

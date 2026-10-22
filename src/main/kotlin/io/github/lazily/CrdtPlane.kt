@@ -47,7 +47,8 @@ private class LwwFamilyFactory<V : Any>(
         val value = decodeCrdtValue(codec, bytes) as V
         // Seed the backing cell with the decoded value; the caller's applyRemote(op)
         // sets the register's real stamp and drives the reactive graph.
-        val handle = Source<V>(ctx.cellAny(value))
+        val nodeId = ctx.cellAny(value)
+        val handle = Source<V>(ctx.handleToken(nodeId))
         return ReplicatedCell(ctx, handle, LwwRegister(codec), codec, clock)
     }
 }
@@ -245,7 +246,10 @@ class CrdtPlaneRuntime(
         codec: CrdtCodec<V>,
     ) {
         familyCtx = ctx
-        if (membershipEpochCell == null) membershipEpochCell = Source(ctx.cellAny(0L))
+        if (membershipEpochCell == null) {
+            val id = ctx.cellAny(0L)
+            membershipEpochCell = Source(ctx.handleToken(id))
+        }
         familyMembers.getOrPut(namespace) { mutableListOf() }
         families[namespace] = LwwFamilyFactory(namespace, codec, clock)
     }
@@ -292,7 +296,8 @@ class CrdtPlaneRuntime(
         val stamp = clock.tick()
         val reg = LwwRegister(factory.codec)
         reg.merge(value, stamp)
-        val handle = Source<V>(ctx.cellAny(value))
+        val handleId = ctx.cellAny(value)
+        val handle = Source<V>(ctx.handleToken(handleId))
         val cell = ReplicatedCell(ctx, handle, reg, factory.codec, clock)
         register(node, key, cell)
         recordFamilyMember(namespace, key)

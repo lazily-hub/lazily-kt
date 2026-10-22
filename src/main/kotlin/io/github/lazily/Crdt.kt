@@ -490,7 +490,8 @@ fun <V : Any> Context.replicatedCell(
     codec: CrdtCodec<V>,
     clock: CrdtClock,
 ): ReplicatedCell<V> {
-    val handle = Source<V>(cellAny(initial))
+    val handleId = cellAny(initial)
+    val handle = Source<V>(handleToken(handleId))
     val cell = ReplicatedCell(this, handle, register, codec, clock)
     // Seed the register with the initial value at a pre-history stamp so the
     // first real remote write (any stamp > (0,0,0)) supersedes it cleanly.

@@ -173,7 +173,8 @@ class ComputedMap<K : Any, V : Any> : ReactiveMap<K, V> {
         factory: ComputeOps.(K) -> V,
     ): Computed<V> {
         keyed.get(key)?.let { return it } // warm: already allocated.
-        val (stored, mutation) = keyed.insert(key, Computed<V>(ctx.slotAny { factory(key) }))
+        val handleId = ctx.slotAny { factory(key) }
+        val (stored, mutation) = keyed.insert(key, Computed<V>(ctx.handleToken(handleId)))
         if (mutation.changed) bumpMembership(ctx)
         return stored
     }
