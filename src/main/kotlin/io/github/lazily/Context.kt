@@ -10,9 +10,11 @@ package io.github.lazily
 class Effect
 @PublishedApi
 internal constructor(
-    val id: Int,
+    @PublishedApi internal val token: Long,
 ) : GraphNode {
+    internal val id: Int get() = nodeId(token)
     override val nodeId: Int get() = id
+    override val nodeGeneration: Int get() = nodeGeneration(token)
 }
 
 // -- Context -----------------------------------------------------------------
@@ -89,6 +91,7 @@ class Context : ComputeOps {
     // LIFO recycling via [freeIds], so a direct array index replaces the
     // `HashMap<Int,Node>` lookup and eliminates Int autoboxing on every op.
     private var nodes: Array<Node?> = arrayOfNulls(INITIAL_NODE_CAPACITY)
+    private var generations: IntArray = IntArray(INITIAL_NODE_CAPACITY)
     private var nextId: Int = 1
     private val freeIds: ArrayDeque<Int> = ArrayDeque()
 
@@ -125,7 +128,7 @@ class Context : ComputeOps {
     // Owner-keyed, so it MUST be cleared on computed disposal/lazy or LIFO id
     // recycling would alias a stale puller onto an unrelated node — the same
     // hazard `recycled_id_inherits_nothing` guards. A lazy computed is absent.
-    private val eagerBy: HashMap<Int, Int> = HashMap()
+    private val eagerBy: HashMap<Int, Effect> = HashMap()
 
     /**
      * Depth of the disposal-driven invalidation cascade (`#lzspecedgeindex`).
@@ -155,7 +158,10 @@ class Context : ComputeOps {
      * invalidates dependents on `==` change. Defaults to the keep-latest policy;
      * a policy-carrying source is [mergeCell] (see Merge.kt).
      */
-    inline fun <reified T : Any> source(value: T): Source<T> = Source(cellAny(value))
+    inline fun <reified T : Any> source(value: T): Source<T> {
+        val id = cellAny(value)
+        return Source(handleToken(id))
+    }
 
     /** @suppress Renamed to [source] (the Cell kernel — #lzcellkernel). */
     @Deprecated("Renamed to source (the Cell kernel — #lzcellkernel).", ReplaceWith("source(value)"))
@@ -178,7 +184,10 @@ class Context : ComputeOps {
      * form), and `computed` — which historically named the *unguarded* form in
      * these bindings — is now the guarded default.
      */
-    inline fun <reified T : Any> computed(noinline compute: Compute.() -> T): Computed<T> = Computed(slotAny { compute() })
+    inline fun <reified T : Any> computed(noinline compute: Compute.() -> T): Computed<T> {
+        val id = slotAny { compute() }
+        return Computed(handleToken(id))
+    }
 
     /** @suppress Renamed to [computed]. */
     @Deprecated("Renamed to computed (guarded by default; v2 Cell kernel — #lzcellkernel).", ReplaceWith("computed(compute)"))
@@ -212,17 +221,15 @@ class Context : ComputeOps {
         noinline compute: Compute.() -> T,
         noinline changed: (old: T, new: T) -> Boolean,
     ): Computed<T> =
-        Computed(
-            slotAnyWithEquals(
-                { compute() },
-                // Internal engine guards on equality (true = equal = suppress);
-                // `changed` is its negation (true = propagate).
-                { old, new ->
-                    @Suppress("UNCHECKED_CAST")
-                    !changed(old as T, new as T)
-                },
-            ),
-        )
+        slotAnyWithEquals(
+            { compute() },
+            // Internal engine guards on equality (true = equal = suppress);
+            // `changed` is its negation (true = propagate).
+            { old, new ->
+                @Suppress("UNCHECKED_CAST")
+                !changed(old as T, new as T)
+            },
+        ).let { Computed(handleToken(it)) }
 
     @PublishedApi
     internal fun slotAny(compute: Compute.() -> Any?): Int {
@@ -246,7 +253,10 @@ class Context : ComputeOps {
      * reads invalidates. [run] may return a cleanup closure (`(() -> Unit)?`);
      * cleanup runs before each rerun and on dispose.
      */
-    fun effect(run: Compute.() -> (() -> Unit)?): Effect = Effect(effectAny(run))
+    fun effect(run: Compute.() -> (() -> Unit)?): Effect {
+        val id = effectAny(run)
+        return Effect(handleToken(id))
+    }
 
     @PublishedApi
     internal fun effectAny(run: Compute.() -> (() -> Unit)?): Int {
@@ -468,29 +478,28 @@ class Context : ComputeOps {
     /** Dispose an effect: deschedule, drop edges, run its cleanup, recycle the id. */
     fun disposeEffect(handle: Effect) = disposeNode(handle)
 
-    fun isEffectActive(handle: Effect): Boolean = nodes[handle.id] is Node.Effect
+    fun isEffectActive(handle: Effect): Boolean = resolve(handle) is Node.Effect
 
     // -- Disposal + degree introspection (`#lzspecedgeindex`) --------------
 
     /**
      * Resolve a handle to its live node, or `null` if the handle is stale.
      *
-     * A handle is stale when the arena slot is empty **or** holds a node of a
-     * different kind. The second case is not hypothetical here: ids are recycled
-     * LIFO, so a disposed cell's id is handed to the next node created, and a
+     * A handle is stale when the arena slot is empty, its allocation generation
+     * differs, **or** it holds a node of a different kind. The last case is not
+     * hypothetical here: ids are recycled LIFO, so a disposed cell's id is handed to the next node created, and a
      * caller still holding the old [Source] would otherwise tear down an
      * unrelated slot. Reading the node's kind out of the arena before acting is
      * exactly what `recycled_id_inherits_nothing.json` requires.
      *
-     * Same-kind recycling (a slot id handed to another slot) is *not*
-     * distinguishable this way and is explicitly out of contract — that would
-     * need generational ids or refcounted handles, and the spec requires
-     * neither.
+     * The generation comparison closes the same-kind ABA case before any graph,
+     * scheduler, or cleanup state is touched.
      */
     private fun resolve(node: GraphNode): Node? {
         val id = node.nodeId
         if (id < 0 || id >= nodes.size) return null
         val n = nodes[id] ?: return null
+        if (generations[id] != node.nodeGeneration) return null
         return when (node) {
             is Source<*> -> n as? Node.Cell
             is Computed<*> -> n as? Node.Slot
@@ -544,7 +553,7 @@ class Context : ComputeOps {
      * [DisposedNodeException]. Idempotent, and a no-op on a stale handle, so
      * teardown paths compose.
      *
-     * Without this a node is permanent. Handles are copyable ids, not owners, so
+     * Without this a node is permanent. Handles are copyable id/generation values, not owners, so
      * dropping every handle reclaims nothing — and the JVM's tracing GC does not
      * help either, because the arena and the reverse edge set hold *strong*
      * references to every node that ever read a source. A long-lived source's
@@ -603,7 +612,7 @@ class Context : ComputeOps {
                 // the owner-keyed side-table entry, or LIFO id recycling would
                 // strand the puller and alias its id onto the next node
                 // (#lzcellkernel §9.3.4). The bit means disposal always knows.
-                if (node.eager) eagerBy.remove(id)?.let { disposeNode(Effect(it)) }
+                if (node.eager) eagerBy.remove(id)?.let { disposeNode(it) }
                 for (dep in node.dependencies) removeDependentEdge(dep, id)
                 node.dependencies.clear()
                 detachDependents(id, node.dependents)
@@ -697,8 +706,9 @@ class Context : ComputeOps {
      * formula never accumulates two pullers (the `#lzsignaleager` double-compute
      * cannot be built).
      */
-    internal fun makeEager(id: Int) {
-        val node = nodes[id] as? Node.Slot ?: throw DisposedNodeException(id, "formula")
+    internal fun makeEager(handle: Computed<*>) {
+        val id = handle.id
+        val node = resolve(handle) as? Node.Slot ?: throw DisposedNodeException(id, "formula")
         if (node.eager) return
         val effect =
             effectAny {
@@ -706,37 +716,44 @@ class Context : ComputeOps {
                 null
             }
         node.eager = true
-        eagerBy[id] = effect
+        eagerBy[id] = Effect(handleToken(effect))
     }
 
     /** Make the computed lazy at [id]: dispose its puller, clear the bit and side-table entry. */
-    internal fun makeLazy(id: Int) {
-        val node = nodes[id] as? Node.Slot ?: return
+    internal fun makeLazy(handle: Computed<*>) {
+        val node = resolve(handle) as? Node.Slot ?: return
+        val id = handle.id
         if (!node.eager) return
         node.eager = false
-        eagerBy.remove(id)?.let { disposeNode(Effect(it)) }
+        eagerBy.remove(id)?.let { disposeNode(it) }
     }
 
     /** Whether the formula at [id] is currently eager. */
-    internal fun isEagerId(id: Int): Boolean = (nodes[id] as? Node.Slot)?.eager == true
+    internal fun isEager(handle: Computed<*>): Boolean = (resolve(handle) as? Node.Slot)?.eager == true
 
     /** Whether a computed cell currently has a fresh cached value (testing). */
     fun isSet(handle: Computed<*>): Boolean {
-        val node = nodes[handle.id] as? Node.Slot ?: return false
+        val node = resolve(handle) as? Node.Slot ?: return false
         return node.hasValue && !node.dirty
     }
 
     // -- Internals: id + edges --------------------------------------------
 
     private fun allocId(): Int {
-        val id = freeIds.removeLastOrNull() ?: nextId++
+        val recycled = freeIds.removeLastOrNull()
+        val id = recycled ?: nextId++
         if (id >= nodes.size) {
             var newCap = nodes.size
             while (newCap <= id) newCap *= 2
             nodes = nodes.copyOf(newCap)
+            generations = generations.copyOf(newCap)
         }
+        generations[id] = generations[id] + 1
         return id
     }
+
+    @PublishedApi
+    internal fun handleToken(id: Int): Long = nodeToken(id, generations[id])
 
     // Edge containers: see EdgeList.kt. SmallEdgeList inlines the 0-2 edge case
     // (#lzktsmalledgelist), scans for dedup while the degree is small, and

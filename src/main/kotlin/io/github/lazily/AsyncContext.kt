@@ -69,6 +69,7 @@ class AsyncContext(
     private val pendingEffects = ArrayDeque<Int>()
     private val scheduledEffects = LinkedHashSet<Int>()
     private var nodes: Array<AsyncNode?> = arrayOfNulls(INITIAL_NODE_CAPACITY)
+    private var generations: IntArray = IntArray(INITIAL_NODE_CAPACITY)
 
     /**
      * Depth of the disposal-driven invalidation cascade (`#lzspecedgeindex`).
@@ -104,6 +105,7 @@ class AsyncContext(
     /** A mutable input cell — the synchronous input layer. */
     open inner class AsyncSource<T> internal constructor(
         internal val id: Int,
+        override val nodeGeneration: Int,
     ) : AsyncGraphNode {
         override val nodeId: Int get() = id
     }
@@ -111,6 +113,7 @@ class AsyncContext(
     /** A computed/memoized async slot. */
     open inner class AsyncComputed<T> internal constructor(
         internal val id: Int,
+        override val nodeGeneration: Int,
     ) : AsyncGraphNode {
         override val nodeId: Int get() = id
     }
@@ -118,16 +121,19 @@ class AsyncContext(
     @Deprecated("Use AsyncSource", ReplaceWith("AsyncSource<T>"))
     inner class AsyncCellHandle<T> internal constructor(
         id: Int,
-    ) : AsyncSource<T>(id)
+        generation: Int,
+    ) : AsyncSource<T>(id, generation)
 
     @Deprecated("Use AsyncComputed", ReplaceWith("AsyncComputed<T>"))
     inner class AsyncSlotHandle<T> internal constructor(
         id: Int,
-    ) : AsyncComputed<T>(id)
+        generation: Int,
+    ) : AsyncComputed<T>(id, generation)
 
     /** An async effect handle. */
     inner class AsyncEffectHandle internal constructor(
         internal val id: Int,
+        override val nodeGeneration: Int,
     ) : AsyncGraphNode {
         override val nodeId: Int get() = id
     }
@@ -247,20 +253,18 @@ class AsyncContext(
             var newCap = nodes.size
             while (newCap <= id) newCap *= 2
             nodes = nodes.copyOf(newCap)
+            generations = generations.copyOf(newCap)
         }
+        generations[id] = generations[id] + 1
         return id
     }
 
     // -- Cells (synchronous input layer) ----------------------------------
 
-    fun <T : Any> source(value: T): AsyncSource<T> {
-        val id =
-            locked {
-                val id = allocId()
-                nodes[id] = AsyncNode.Cell(value, LinkedHashSet())
-                id
-            }
-        return AsyncSource(id)
+    fun <T : Any> source(value: T): AsyncSource<T> = locked {
+        val id = allocId()
+        nodes[id] = AsyncNode.Cell(value, LinkedHashSet())
+        AsyncSource<T>(id, generations[id])
     }
 
     @Deprecated("Renamed to source (#lzcellkernel).", ReplaceWith("source(value)"))
@@ -322,26 +326,22 @@ class AsyncContext(
      * and have nothing to await, so they resolve inline on [get] just like the
      * equivalent readers on [Context] and [ThreadSafeContext].
      */
-    fun <T : Any> computed(compute: AsyncComputeContext.() -> T): AsyncComputed<T> {
-        val id =
-            locked {
-                val id = allocId()
-                nodes[id] =
-                    AsyncNode.Slot(
-                        state = SlotState.Empty,
-                        value = null,
-                        revision = 0L,
-                        compute = { error("synchronous computed reached async compute path") },
-                        syncCompute = { compute(it) },
-                        equals = { a, b -> a == b },
-                        dependencies = LinkedHashSet(),
-                        dependents = LinkedHashSet(),
-                        inFlight = null,
-                        job = null,
-                    )
-                id
-            }
-        return AsyncComputed(id)
+    fun <T : Any> computed(compute: AsyncComputeContext.() -> T): AsyncComputed<T> = locked {
+        val id = allocId()
+        nodes[id] =
+            AsyncNode.Slot(
+                state = SlotState.Empty,
+                value = null,
+                revision = 0L,
+                compute = { error("synchronous computed reached async compute path") },
+                syncCompute = { compute(it) },
+                equals = { a, b -> a == b },
+                dependencies = LinkedHashSet(),
+                dependents = LinkedHashSet(),
+                inFlight = null,
+                job = null,
+            )
+        AsyncComputed<T>(id, generations[id])
     }
 
     /**
@@ -356,26 +356,22 @@ class AsyncContext(
     private fun <T : Any> slotAsyncWithEquals(
         compute: suspend AsyncComputeContext.() -> T,
         equals: ((Any?, Any?) -> Boolean)?,
-    ): AsyncComputed<T> {
-        val id =
-            locked {
-                val id = allocId()
-                nodes[id] =
-                    AsyncNode.Slot(
-                        state = SlotState.Empty,
-                        value = null,
-                        revision = 0L,
-                        compute = { compute() },
-                        syncCompute = null,
-                        equals = equals,
-                        dependencies = LinkedHashSet(),
-                        dependents = LinkedHashSet(),
-                        inFlight = null,
-                        job = null,
-                    )
-                id
-            }
-        return AsyncComputed(id)
+    ): AsyncComputed<T> = locked {
+        val id = allocId()
+        nodes[id] =
+            AsyncNode.Slot(
+                state = SlotState.Empty,
+                value = null,
+                revision = 0L,
+                compute = { compute() },
+                syncCompute = null,
+                equals = equals,
+                dependencies = LinkedHashSet(),
+                dependents = LinkedHashSet(),
+                inFlight = null,
+                job = null,
+            )
+        AsyncComputed<T>(id, generations[id])
     }
 
     /** Synchronous cached read; the value if `Resolved`, else null. */
@@ -527,7 +523,7 @@ class AsyncContext(
      * Reruns are serialized per effect and executor-scheduled.
      */
     fun effectAsync(effect: suspend AsyncComputeContext.() -> (suspend () -> Unit)?): AsyncEffectHandle {
-        val id =
+        val handle =
             locked {
                 val id = allocId()
                 nodes[id] =
@@ -539,10 +535,10 @@ class AsyncContext(
                         forceRun = true,
                     )
                 scheduleEffectLocked(id)
-                id
+                AsyncEffectHandle(id, generations[id])
             }
         flushEffects()
-        return AsyncEffectHandle(id)
+        return handle
     }
 
     /** Dispose an async effect: drop pending reruns, cancel in-flight run, run cleanup. */
@@ -567,6 +563,7 @@ class AsyncContext(
         val id = node.nodeId
         if (id < 0 || id >= nodes.size) return null
         val n = nodes[id] ?: return null
+        if (generations[id] != node.nodeGeneration) return null
         return when (node) {
             is AsyncSource<*> -> n as? AsyncNode.Cell
             is AsyncComputed<*> -> n as? AsyncNode.Slot

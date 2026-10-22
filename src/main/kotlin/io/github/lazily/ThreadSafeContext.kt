@@ -15,9 +15,11 @@ import kotlin.concurrent.withLock
 value class ThreadSafeComputed<T : Any>
 @PublishedApi
 internal constructor(
-    val id: Int,
+    @PublishedApi internal val token: Long,
 ) : ThreadSafeGraphNode {
+    @PublishedApi internal val id: Int get() = nodeId(token)
     override val nodeId: Int get() = id
+    override val nodeGeneration: Int get() = nodeGeneration(token)
 }
 
 /**
@@ -28,9 +30,11 @@ internal constructor(
 value class ThreadSafeSource<T : Any>
 @PublishedApi
 internal constructor(
-    val id: Int,
+    @PublishedApi internal val token: Long,
 ) : ThreadSafeGraphNode {
+    @PublishedApi internal val id: Int get() = nodeId(token)
     override val nodeId: Int get() = id
+    override val nodeGeneration: Int get() = nodeGeneration(token)
 }
 
 @Deprecated("Use ThreadSafeComputed", ReplaceWith("ThreadSafeComputed<T>"))
@@ -47,9 +51,11 @@ typealias ThreadSafeCellHandle<T> = ThreadSafeSource<T>
 value class ThreadSafeEffectHandle
 @PublishedApi
 internal constructor(
-    val id: Int,
+    @PublishedApi internal val token: Long,
 ) : ThreadSafeGraphNode {
+    @PublishedApi internal val id: Int get() = nodeId(token)
     override val nodeId: Int get() = id
+    override val nodeGeneration: Int get() = nodeGeneration(token)
 }
 
 /**
@@ -145,6 +151,7 @@ class ThreadSafeContext {
     // Dense node arena indexed directly by id (mirrors lazily-rs
     // `Vec<Option<Node>>`; see Context for the recycling contract).
     private var nodes: Array<Node?> = arrayOfNulls(INITIAL_NODE_CAPACITY)
+    private var generations: IntArray = IntArray(INITIAL_NODE_CAPACITY)
     private var nextId: Int = 1
     private val freeIds: ArrayDeque<Int> = ArrayDeque()
 
@@ -174,7 +181,10 @@ class ThreadSafeContext {
     // -- Creation ----------------------------------------------------------
 
     /** A mutable source with an initial value. `set` invalidates dependents on `==` change. */
-    inline fun <reified T : Any> source(value: T): ThreadSafeSource<T> = ThreadSafeSource(cellAny(value))
+    inline fun <reified T : Any> source(value: T): ThreadSafeSource<T> {
+        val id = cellAny(value)
+        return ThreadSafeSource(handleToken(id))
+    }
 
     @Deprecated("Renamed to source (#lzcellkernel).", ReplaceWith("source(value)"))
     inline fun <reified T : Any> cell(value: T): ThreadSafeSource<T> = source(value)
@@ -189,7 +199,7 @@ class ThreadSafeContext {
 
     /** A lazy guarded computed: equal recomputation suppresses downstream invalidation. */
     inline fun <reified T : Any> computed(noinline compute: ThreadSafeContext.() -> T): ThreadSafeComputed<T> =
-        ThreadSafeComputed(slotAny(memo = true) { compute() })
+        slotAny(memo = true) { compute() }.let { ThreadSafeComputed(handleToken(it)) }
 
     /** Deprecated compatibility spelling for guarded [computed]. */
     @Deprecated("Renamed to computed (#lzcellkernel).", ReplaceWith("computed(compute)"))
@@ -224,7 +234,10 @@ class ThreadSafeContext {
     )
     inline fun <reified T : Any> signal(noinline compute: ThreadSafeContext.() -> T): ThreadSafeSignalHandle<T> {
         val ids = signalAny { compute() }
-        return ThreadSafeSignalHandle(ThreadSafeComputed(ids.slot), ThreadSafeEffectHandle(ids.effect))
+        return ThreadSafeSignalHandle(
+            ThreadSafeComputed(handleToken(ids.slot)),
+            ThreadSafeEffectHandle(handleToken(ids.effect)),
+        )
     }
 
     @PublishedApi
@@ -250,7 +263,10 @@ class ThreadSafeContext {
      * reads invalidates. [run] may return a cleanup closure (`(() -> Unit)?`);
      * cleanup runs before each rerun and on dispose.
      */
-    fun effect(run: ThreadSafeContext.() -> (() -> Unit)?): ThreadSafeEffectHandle = ThreadSafeEffectHandle(effectAny(run))
+    fun effect(run: ThreadSafeContext.() -> (() -> Unit)?): ThreadSafeEffectHandle {
+        val id = effectAny(run)
+        return ThreadSafeEffectHandle(handleToken(id))
+    }
 
     @PublishedApi
     internal fun effectAny(run: ThreadSafeContext.() -> (() -> Unit)?): Int =
@@ -419,6 +435,7 @@ class ThreadSafeContext {
         val id = node.nodeId
         if (id < 0 || id >= nodes.size) return null
         val n = nodes[id] ?: return null
+        if (generations[id] != node.nodeGeneration) return null
         return when (node) {
             is ThreadSafeSource<*> -> n as? Node.Cell
             is ThreadSafeComputed<*> -> n as? Node.Slot
@@ -534,7 +551,7 @@ class ThreadSafeContext {
 
     fun isEffectActive(handle: ThreadSafeEffectHandle): Boolean =
         locked {
-            nodes[handle.id] is Node.Effect
+            resolve(handle) is Node.Effect
         }
 
     /** Dispose a signal's eager puller; the backing value stays readable (reverts to lazy). */
@@ -545,7 +562,7 @@ class ThreadSafeContext {
     /** Whether a slot currently has a fresh cached value (testing). */
     fun isSet(handle: ThreadSafeComputed<*>): Boolean =
         locked {
-            val node = nodes[handle.id] as? Node.Slot ?: return@locked false
+            val node = resolve(handle) as? Node.Slot ?: return@locked false
             node.hasValue && !node.dirty
         }
 
@@ -556,14 +573,20 @@ class ThreadSafeContext {
     // -- Internals: id + edges --------------------------------------------
 
     private fun allocId(): Int {
-        val id = freeIds.removeLastOrNull() ?: nextId++
+        val recycled = freeIds.removeLastOrNull()
+        val id = recycled ?: nextId++
         if (id >= nodes.size) {
             var newCap = nodes.size
             while (newCap <= id) newCap *= 2
             nodes = nodes.copyOf(newCap)
+            generations = generations.copyOf(newCap)
         }
+        generations[id] = generations[id] + 1
         return id
     }
+
+    @PublishedApi
+    internal fun handleToken(id: Int): Long = locked { nodeToken(id, generations[id]) }
 
     private fun currentFrame(): Int? = trackingStack.get().lastOrNull()
 

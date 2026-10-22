@@ -33,7 +33,8 @@ fun interface SemFold<V, D> {
 private fun ComputeOps.slotValue(id: Int): Any = getSlotAny(id)
 
 /** Allocate a memo slot over [compute] without a reified type parameter. */
-private fun Context.allocSemSlot(compute: Compute.() -> Any?): Computed<Any> = Computed(slotAny(compute))
+private fun Context.allocSemSlot(compute: Compute.() -> Any?): Computed<Any> =
+    slotAny(compute).let { Computed(handleToken(it)) }
 
 /**
  * A memoized semantic derivation over a [SourceTree]: one `memo` slot per node,
@@ -43,16 +44,16 @@ private fun Context.allocSemSlot(compute: Compute.() -> Any?): Computed<Any> = C
  * @param D derived value type
  */
 class SemTree<K : Any, D : Any> private constructor(
-    private val rootId: Int,
-    private val nodes: Map<K, Int>,
+    private val rootToken: Long,
+    private val nodes: Map<K, Long>,
 ) {
     /** The root derived slot. */
-    fun root(): Computed<@UnsafeVariance D> = Computed(rootId)
+    fun root(): Computed<@UnsafeVariance D> = Computed(rootToken)
 
     /** Read the derived value at the root (reactive). */
     fun value(ops: ComputeOps): D {
         @Suppress("UNCHECKED_CAST")
-        return ops.slotValue(rootId) as D
+        return ops.slotValue(nodeId(rootToken)) as D
     }
 
     /** The derived slot for a node id, if it was present at build time. */
@@ -63,9 +64,9 @@ class SemTree<K : Any, D : Any> private constructor(
         ops: ComputeOps,
         id: K,
     ): D? {
-        val slotId = nodes[id] ?: return null
+        val slotToken = nodes[id] ?: return null
         @Suppress("UNCHECKED_CAST")
-        return ops.slotValue(slotId) as D
+        return ops.slotValue(nodeId(slotToken)) as D
     }
 
     companion object {
@@ -81,7 +82,7 @@ class SemTree<K : Any, D : Any> private constructor(
             rootId: K,
             fold: SemFold<V, D>,
         ): SemTree<K, D> {
-            val nodes = LinkedHashMap<K, Int>()
+            val nodes = LinkedHashMap<K, Long>()
             val rootSlot = derive(ctx, tree, rootId, fold, nodes)
             nodes[rootId] = rootSlot
             return SemTree(rootSlot, nodes)
@@ -101,10 +102,10 @@ class SemTree<K : Any, D : Any> private constructor(
             tree: SourceTree<K, V>,
             nodeId: K,
             fold: SemFold<V, D>,
-            nodes: MutableMap<K, Int>,
-        ): Int {
+            nodes: MutableMap<K, Long>,
+        ): Long {
             val childIds = tree.children(nodeId).keysNow()
-            val childSlots = LinkedHashMap<K, Int>()
+            val childSlots = LinkedHashMap<K, Long>()
             for (c in childIds) {
                 val s = derive(ctx, tree, c, fold, nodes)
                 nodes[c] = s
@@ -124,10 +125,10 @@ class SemTree<K : Any, D : Any> private constructor(
 
                     @Suppress("UNCHECKED_CAST")
                     val ds = ArrayList<Any?>(ids.size)
-                    for (id in ids) childSlots[id]?.let { ds.add(slotValue(it)) }
+                    for (id in ids) childSlots[id]?.let { ds.add(slotValue(nodeId(it))) }
                     fold.fold(v, ds as List<D>) as Any
                 }
-            return slot.id
+            return slot.token
         }
     }
 }

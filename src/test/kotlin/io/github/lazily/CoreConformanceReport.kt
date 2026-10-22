@@ -32,6 +32,7 @@ private fun jsonPointerToken(value: String): String = value.replace("~", "~0").r
 private val negativeControlFamilies =
     listOf(
         "cleanup_order",
+        "cleanups_of",
         "computes_of",
         "dependencies_of",
         "dependents_of",
@@ -40,8 +41,10 @@ private val negativeControlFamilies =
         "observed_count",
         "read",
         "readable",
+        "recycled_id_confirmed",
         "scope_owned_count",
         "value",
+        "writable",
     )
 
 /**
