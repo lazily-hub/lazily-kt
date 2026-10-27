@@ -402,6 +402,7 @@ EXPECTED_CLOSURE_TARGETS=(
 	ci-reach
 	core-api-check
 	core-artifact-consumer-check
+	core-evidence-check
 	fmt
 	published-dependency-check
 	test
@@ -469,6 +470,7 @@ EXPECTED_CI_STEPS=(
 	'ci-reach=CI-reachability guard (#lzcheckcireachguard)'
 	'core-api-check=Core API compatibility'
 	'core-artifact-consumer-check=Core artifact consumer (minimum/current)'
+	'core-evidence-check=Core evidence gate (#lzbindingevidenceci)'
 	'published-dependency-check=Published dependency floor (#lzktoptionaldeps)'
 	'test=Test'
 	'test=Guard — conformance fixtures actually replayed (#lzspecconf)'
