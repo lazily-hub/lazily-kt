@@ -48,6 +48,20 @@ class InMemoryOutbox : io.github.lazily.outbox.Outbox<InMemoryStore>(InMemorySto
  * Minimal boundary an Android host can implement with a Room `@Dao`.
  * Keeping Room annotations in the application module avoids forcing Android
  * dependencies into the portable lazily JVM artifact.
+ *
+ * The host owns the SQLite connection, so the cross-binding SQLite store
+ * contract (`#lazilysqlitestoreopen`, `lazily-spec/sqlite-stores.json`) is the
+ * host's obligation here:
+ * - the connection needs a busy timeout of at least 30 seconds (lazily-rs
+ *   `SQLITE_STORE_BUSY_TIMEOUT`): the outbox tables may share a database with
+ *   other writers, and a contended write that gives up fails with
+ *   `database is locked`;
+ * - every operation is one autocommit statement or a transaction that takes
+ *   the write lock up front (`BEGIN IMMEDIATE`). A DEFERRED transaction that
+ *   reads and then writes is refused with an immediate `SQLITE_BUSY` that no
+ *   busy timeout waits out, so [saveCursor]'s `max(stored, epoch)` is either
+ *   one upsert statement or a read and write inside an IMMEDIATE (or
+ *   EXCLUSIVE) transaction, never a deferred read followed by a write.
  */
 interface RoomOutboxDao {
     fun upsert(
