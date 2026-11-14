@@ -10,8 +10,8 @@ on:
 # Immutable lazily-spec release carrying the generation-fenced stale-handle
 # contract and its discriminating 3x3 conformance matrix.
 env:
-  LAZILY_SPEC_REF: v0.43.0
-  LAZILY_SPEC_COMMIT: 4b34879b26566a0616b97cf661ac4f1a23762af6
+  LAZILY_SPEC_REF: v0.46.0
+  LAZILY_SPEC_COMMIT: ca676a1a7173525066e90bca48b2ead230a9cd88
 
 jobs:
   test:
