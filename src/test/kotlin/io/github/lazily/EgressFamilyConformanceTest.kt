@@ -347,6 +347,11 @@ class EgressFamilyConformanceTest {
                     put("ack", "unchanged")
                     put("through", nullableLong(ack.through))
                 }
+            is EgressAck.BeyondSent ->
+                buildJsonObject {
+                    put("ack", "beyond_sent")
+                    put("next_sequence", ack.nextSequence)
+                }
             is EgressAck.StaleGeneration ->
                 buildJsonObject {
                     put("ack", "stale_generation")

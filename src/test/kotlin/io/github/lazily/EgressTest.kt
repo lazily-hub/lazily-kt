@@ -160,6 +160,47 @@ class EgressTest {
     }
 
     @Test
+    fun `an ack beyond the sent sequence space is refused and changes nothing`() {
+        val core = EgressCore<Int>(1)
+        assertEquals(EgressTransition(EgressChange.NONE, EgressAck.BeyondSent(0)), core.ack(1, 0))
+        core.enqueue(10)
+        core.enqueue(20)
+        assertEquals(EgressTransition(EgressChange.NONE, EgressAck.BeyondSent(2)), core.ack(1, 2))
+        assertEquals(null, core.ackedThrough)
+        assertEquals(listOf(0L, 1L), core.pending().map { it.sequence })
+        core.enqueue(30)
+        assertEquals(listOf(0L, 1L, 2L), core.pending().map { it.sequence }, "a later enqueue is not pre-pruned")
+        assertEquals(EgressAck.Advanced(2), core.ack(1, 2).result)
+
+        val ctx = Context()
+        val egress = EgressCell<Int>(ctx, 1)
+        egress.enqueue(1)
+        egress.pending()
+        egress.ackedThrough()
+        assertEquals(EgressAck.BeyondSent(1), egress.ack(1, 5))
+        assertTrue(ctx.isSet(egress.pendingHandle()) && ctx.isSet(egress.ackedThroughHandle()), "a refusal invalidates nothing")
+    }
+
+    @Test
+    fun `reconnect refreshes pending when only never-claimed records are pending`() {
+        val core = EgressCore<Int>(4)
+        core.enqueue(7)
+        val reconnect = core.reconnect(5)
+        assertEquals(EgressReconnect.Advanced(5, 0), reconnect.result)
+        assertEquals(EgressChange(pending = true), reconnect.change, "pending envelopes were rewritten to the new generation")
+        assertEquals(listOf(5L), core.pending().map { it.generation })
+        assertEquals(EgressChange.NONE, EgressCore<Int>(1).reconnect(2).change, "nothing pending, nothing replayed")
+
+        val ctx = Context()
+        val egress = EgressCell<Int>(ctx, 4)
+        egress.enqueue(7)
+        egress.pending()
+        egress.reconnect(5)
+        assertEquals(false, ctx.isSet(egress.pendingHandle()))
+        assertEquals(5L, egress.pending().single().generation, "the reader sees the new generation, not a stale cache")
+    }
+
+    @Test
     fun `an inadmissible policy is refused`() {
         assertEquals(
             EgressConfigError.ZeroInflightLimit,

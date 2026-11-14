@@ -92,6 +92,14 @@ sealed interface EgressAck {
 
     data class Unchanged(val through: Long?) : EgressAck
 
+    /**
+     * Refused: `through` names a sequence this producer never assigned
+     * (`through >= nextSequence`). Nothing changes and nothing is invalidated —
+     * acknowledging unsent records would let the watermark run ahead of the
+     * sequence space and silently prune future enqueues.
+     */
+    data class BeyondSent(val nextSequence: Long) : EgressAck
+
     data class StaleGeneration(val current: Long) : EgressAck
 }
 
@@ -226,6 +234,9 @@ class EgressCore<T : Any>(
         if (generation != this.generation) {
             return EgressTransition(EgressChange.NONE, EgressAck.StaleGeneration(this.generation))
         }
+        if (through >= nextSequence) {
+            return EgressTransition(EgressChange.NONE, EgressAck.BeyondSent(nextSequence))
+        }
         val current = ackedThrough
         if (current != null && through <= current) {
             return EgressTransition(EgressChange.NONE, EgressAck.Unchanged(current))
@@ -309,8 +320,12 @@ class EgressCore<T : Any>(
         for (record in pendingRecords) record.generation = generation
         val retryChanged = retry != null
         retry = null
+        // Every pending envelope was rewritten to the new generation, so the
+        // `pending` projection changed whenever anything is pending — not only
+        // when in-flight or parked records were replayed into it.
+        val pendingChanged = replayed > 0 || pendingRecords.isNotEmpty()
         return EgressTransition(
-            EgressChange(pending = replayed > 0, inflight = replayed > 0, retry = retryChanged),
+            EgressChange(pending = pendingChanged, inflight = replayed > 0, retry = retryChanged),
             EgressReconnect.Advanced(generation, replayed),
         )
     }
