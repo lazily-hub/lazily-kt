@@ -922,13 +922,11 @@ KNOWN_UNCOVERED=(
   # implemented here, but this binding has no canonical replay for the new
   # registers corpus yet; the Registers coverage row is `~` until it does.
   "collections/registers_convergence.json"
-  # The latest-durable per-key projection is replayed by
-  # LatestDurableProjectionConformanceTest. These older FIFO-stream fixtures
-  # describe a distinct egress contract that Kotlin does not yet implement.
-  "egress/egress_generation_fence.json"
-  "egress/egress_inflight_window.json"
-  "egress/egress_ordered_ack.json"
-  "egress/egress_retry_budget.json"
+  # The four FIFO-stream egress fixtures were excused here while Kotlin had no
+  # EgressCore. They are now REPLAYED against all three flavors (#lzegress,
+  # EgressCore.kt + Egress.kt + EgressFamilyConformanceTest.kt), and
+  # egress/effect_cas.json by EffectCasConformanceTest.kt (#lzeffectcas), so the
+  # entries are gone rather than kept as stale excuses.
   # codec/frame_roundtrip_msgpack.json was excused here while lazily-kt spoke
   # only the `json` half of the frame-codec obligation. It is now REPLAYED
   # (#lzmsgpackseven, MsgpackCodec.kt + CodecConformanceTest.kt), so the entry
@@ -1458,7 +1456,10 @@ done
 # requiring. Do not lower this to fix a red run — the shrink is the finding.
 # Raised to 29 with the canonical consumer simulation testkit fixture: the
 # `simulation` area is now replayed and required above.
-MIN_OPENED_AREAS="${MIN_OPENED_AREAS:-29}"
+# Re-pinned to 30 (exact) with the egress/effect-CAS replays (#lzegress,
+# #lzeffectcas): the completed gate reported 30 opened areas against a floor of
+# 29, which was one area of slack.
+MIN_OPENED_AREAS="${MIN_OPENED_AREAS:-30}"
 if [ "$opened_area_count" -lt "$MIN_OPENED_AREAS" ]; then
   echo "ERROR: the suite OPENED fixtures in only $opened_area_count corpus area(s)," >&2
   echo "       expected >= $MIN_OPENED_AREAS. The corpus is a partial checkout, or the" >&2
@@ -1479,9 +1480,10 @@ fi
 # Positive runtime evidence for scenario replay magnitude. The exact per-id set
 # checks above remain the primary proof; this floor independently refuses a run
 # whose scenario recorder silently shrank while still producing a non-empty
-# ledger. Derived from the completed gate's own 157/157 report. Override only for
-# the n+1 exactness probe; never lower it to repair a red run.
-MIN_SCENARIOS="${MIN_SCENARIOS:-171}"
+# ledger. Derived from the completed gate's own report — re-pinned to 180/180
+# when egress/effect_cas.json (9 scenarios, #lzeffectcas) began replaying.
+# Override only for the n+1 exactness probe; never lower it to repair a red run.
+MIN_SCENARIOS="${MIN_SCENARIOS:-180}"
 if [ "$sc_replayed" -lt "$MIN_SCENARIOS" ]; then
   echo "ERROR: the runtime ledger records only $sc_replayed replayed scenario(s)," >&2
   echo "       expected >= MIN_SCENARIOS=$MIN_SCENARIOS. The replay population shrank;" >&2

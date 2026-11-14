@@ -126,6 +126,37 @@ Use `LatestDurableProjection`, `ThreadSafeLatestDurableProjection`, or
 `generation()` views. Sink side effects remain outside the graph: serialize the
 four mutation operations and the actual sink write on the same per-key lane.
 
+### Reactive egress
+
+`EgressCore<T>` is the send-side mirror of ingress (`#lzegress`): monotone
+sequence assignment, a bounded unacknowledged window, a cumulative ACK
+watermark, bounded retry/backoff/exhaustion, and a producer-generation fence.
+`EgressCell`, `ThreadSafeEgressCell`, and `AsyncEgressCell` project `pending`,
+`inflight`, `ackedThrough`, and `retry` as Computeds and clear exactly the
+reader kinds each transition changes. `attachTransport` installs the one
+transport Effect for the current incarnation; after `reconnect` the old
+attachment is inert and a replacement replays the retained records. Only the
+async flavor's attachment is async-coloured (`AsyncEgressTransport`).
+
+```kotlin
+val ctx = Context()
+val egress = EgressCell<String>(ctx, generation = 1, EgressPolicy(inflightLimit = 8))
+egress.attachTransport { envelope -> socket.trySend(envelope) } // true = accepted
+egress.enqueue("hello")       // claimed and sent by the attachment Effect
+egress.ack(generation = 1, through = 0) // reopens the window reactively
+```
+
+### Generic effect compare-and-swap
+
+`EffectCasCore<K, A, P, R, E>` (`#lzeffectcas`) owns stable effect identity,
+keyed single-flight, latest-wins supersession, logical-clock retry, reconnect
+fencing, exact terminal receipts, and resumable ordered plans around an opaque
+authority token `A`. The application adapter (`CompareAndApply`) only observes
+the token and performs one atomic compare-and-apply. `durableState()` /
+`EffectCasCore.hydrate(...)` round-trip the full retained image for crash
+recovery; a successor then `reconnect`s at a newer generation and replays the
+same effect identity.
+
 ```kotlin
 import io.github.lazily.Context
 

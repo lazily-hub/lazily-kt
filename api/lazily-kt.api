@@ -172,6 +172,32 @@ public final class io/github/lazily/AsyncDependencyMap {
 	public final fun unpublish (Lio/github/lazily/AsyncContext;Ljava/lang/Object;)V
 }
 
+public final class io/github/lazily/AsyncEgressCell {
+	public fun <init> (Lio/github/lazily/AsyncContext;JLio/github/lazily/EgressPolicy;)V
+	public synthetic fun <init> (Lio/github/lazily/AsyncContext;JLio/github/lazily/EgressPolicy;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun ack (JJ)Lio/github/lazily/EgressAck;
+	public final fun ackedThrough ()Ljava/lang/Long;
+	public final fun ackedThroughHandle ()Lio/github/lazily/AsyncContext$AsyncComputed;
+	public final fun attachTransport (Lio/github/lazily/AsyncEgressTransport;)Lio/github/lazily/AsyncContext$AsyncEffectHandle;
+	public final fun claim (J)Lio/github/lazily/EgressClaim;
+	public final fun enqueue (Ljava/lang/Object;)J
+	public final fun fail (JJ)Lio/github/lazily/EgressFailure;
+	public final fun getGeneration ()J
+	public final fun getNextSequence ()J
+	public final fun inflight ()Ljava/util/List;
+	public final fun inflightHandle ()Lio/github/lazily/AsyncContext$AsyncComputed;
+	public final fun pending ()Ljava/util/List;
+	public final fun pendingHandle ()Lio/github/lazily/AsyncContext$AsyncComputed;
+	public final fun reconnect (J)Lio/github/lazily/EgressReconnect;
+	public final fun retry ()Lio/github/lazily/EgressRetry;
+	public final fun retryHandle ()Lio/github/lazily/AsyncContext$AsyncComputed;
+	public final fun retryNow (JJ)Lio/github/lazily/EgressRetryAction;
+}
+
+public abstract interface class io/github/lazily/AsyncEgressTransport {
+	public abstract fun send (Lio/github/lazily/EgressEnvelope;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
 public abstract interface class io/github/lazily/AsyncGraphNode {
 	public abstract fun getNodeGeneration ()I
 	public abstract fun getNodeId ()I
@@ -1282,6 +1308,11 @@ public abstract interface class io/github/lazily/CommandTransport {
 	public abstract fun send (Lio/github/lazily/CommandMessage;)V
 }
 
+public abstract interface class io/github/lazily/CompareAndApply {
+	public abstract fun compareAndApply (Lio/github/lazily/EffectAttempt;)Lio/github/lazily/EffectApply;
+	public abstract fun observe (Ljava/lang/Object;)Ljava/lang/Object;
+}
+
 public final class io/github/lazily/Compute : io/github/lazily/ComputeOps {
 	public fun <init> (Lio/github/lazily/Context;IJ)V
 	public fun getCellAny (I)Ljava/lang/Object;
@@ -2100,6 +2131,1010 @@ public final class io/github/lazily/Effect : io/github/lazily/GraphNode {
 	public fun getNodeGeneration ()I
 	public fun getNodeId ()I
 	public final fun getToken ()J
+}
+
+public abstract interface class io/github/lazily/EffectApply {
+}
+
+public final class io/github/lazily/EffectApply$Applied : io/github/lazily/EffectApply {
+	public fun <init> (Ljava/lang/Object;Ljava/lang/Object;)V
+	public final fun component1 ()Ljava/lang/Object;
+	public final fun component2 ()Ljava/lang/Object;
+	public final fun copy (Ljava/lang/Object;Ljava/lang/Object;)Lio/github/lazily/EffectApply$Applied;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectApply$Applied;Ljava/lang/Object;Ljava/lang/Object;ILjava/lang/Object;)Lio/github/lazily/EffectApply$Applied;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAuthority ()Ljava/lang/Object;
+	public final fun getReceipt ()Ljava/lang/Object;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectApply$Rejected : io/github/lazily/EffectApply {
+	public fun <init> (Ljava/lang/Object;)V
+	public final fun component1 ()Ljava/lang/Object;
+	public final fun copy (Ljava/lang/Object;)Lio/github/lazily/EffectApply$Rejected;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectApply$Rejected;Ljava/lang/Object;ILjava/lang/Object;)Lio/github/lazily/EffectApply$Rejected;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getError ()Ljava/lang/Object;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectApply$Retryable : io/github/lazily/EffectApply {
+	public fun <init> (Ljava/lang/Object;)V
+	public final fun component1 ()Ljava/lang/Object;
+	public final fun copy (Ljava/lang/Object;)Lio/github/lazily/EffectApply$Retryable;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectApply$Retryable;Ljava/lang/Object;ILjava/lang/Object;)Lio/github/lazily/EffectApply$Retryable;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getError ()Ljava/lang/Object;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectApply$Superseded : io/github/lazily/EffectApply {
+	public fun <init> (Ljava/lang/Object;)V
+	public final fun component1 ()Ljava/lang/Object;
+	public final fun copy (Ljava/lang/Object;)Lio/github/lazily/EffectApply$Superseded;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectApply$Superseded;Ljava/lang/Object;ILjava/lang/Object;)Lio/github/lazily/EffectApply$Superseded;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getObserved ()Ljava/lang/Object;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectAttempt {
+	public fun <init> (Lio/github/lazily/EffectAttemptIdentity;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/util/List;)V
+	public final fun component1 ()Lio/github/lazily/EffectAttemptIdentity;
+	public final fun component2 ()Ljava/lang/Object;
+	public final fun component3 ()Ljava/lang/Object;
+	public final fun component4 ()Ljava/lang/Object;
+	public final fun component5 ()Ljava/util/List;
+	public final fun copy (Lio/github/lazily/EffectAttemptIdentity;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/util/List;)Lio/github/lazily/EffectAttempt;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectAttempt;Lio/github/lazily/EffectAttemptIdentity;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/util/List;ILjava/lang/Object;)Lio/github/lazily/EffectAttempt;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getExpected ()Ljava/lang/Object;
+	public final fun getIdentity ()Lio/github/lazily/EffectAttemptIdentity;
+	public final fun getKey ()Ljava/lang/Object;
+	public final fun getPayload ()Ljava/lang/Object;
+	public final fun getPriorReceipts ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectAttemptIdentity {
+	public fun <init> (Lio/github/lazily/EffectIdentity;JJII)V
+	public final fun component1 ()Lio/github/lazily/EffectIdentity;
+	public final fun component2 ()J
+	public final fun component3 ()J
+	public final fun component4 ()I
+	public final fun component5 ()I
+	public final fun copy (Lio/github/lazily/EffectIdentity;JJII)Lio/github/lazily/EffectAttemptIdentity;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectAttemptIdentity;Lio/github/lazily/EffectIdentity;JJIIILjava/lang/Object;)Lio/github/lazily/EffectAttemptIdentity;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAttempt ()I
+	public final fun getEffect ()Lio/github/lazily/EffectIdentity;
+	public final fun getEpoch ()J
+	public final fun getGeneration ()J
+	public final fun getStep ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/github/lazily/EffectCasApplied {
+}
+
+public final class io/github/lazily/EffectCasApplied$Completed : io/github/lazily/EffectCasApplied {
+	public fun <init> (J)V
+	public final fun component1 ()J
+	public final fun copy (J)Lio/github/lazily/EffectCasApplied$Completed;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectCasApplied$Completed;JILjava/lang/Object;)Lio/github/lazily/EffectCasApplied$Completed;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAppliedThrough ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectCasApplied$Duplicate : io/github/lazily/EffectCasApplied {
+	public static final field INSTANCE Lio/github/lazily/EffectCasApplied$Duplicate;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectCasApplied$StaleGeneration : io/github/lazily/EffectCasApplied {
+	public fun <init> (J)V
+	public final fun component1 ()J
+	public final fun copy (J)Lio/github/lazily/EffectCasApplied$StaleGeneration;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectCasApplied$StaleGeneration;JILjava/lang/Object;)Lio/github/lazily/EffectCasApplied$StaleGeneration;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCurrent ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectCasApplied$StepApplied : io/github/lazily/EffectCasApplied {
+	public fun <init> (I)V
+	public final fun component1 ()I
+	public final fun copy (I)Lio/github/lazily/EffectCasApplied$StepApplied;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectCasApplied$StepApplied;IILjava/lang/Object;)Lio/github/lazily/EffectCasApplied$StepApplied;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getNextStep ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectCasApplied$Superseded : io/github/lazily/EffectCasApplied {
+	public static final field INSTANCE Lio/github/lazily/EffectCasApplied$Superseded;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectCasApplied$UnknownAttempt : io/github/lazily/EffectCasApplied {
+	public static final field INSTANCE Lio/github/lazily/EffectCasApplied$UnknownAttempt;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectCasChange {
+	public static final field Companion Lio/github/lazily/EffectCasChange$Companion;
+	public fun <init> ()V
+	public fun <init> (Z)V
+	public synthetic fun <init> (ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Z
+	public final fun copy (Z)Lio/github/lazily/EffectCasChange;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectCasChange;ZILjava/lang/Object;)Lio/github/lazily/EffectCasChange;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getState ()Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectCasChange$Companion {
+	public final fun getNONE ()Lio/github/lazily/EffectCasChange;
+	public final fun getSTATE ()Lio/github/lazily/EffectCasChange;
+}
+
+public abstract interface class io/github/lazily/EffectCasClaim {
+}
+
+public final class io/github/lazily/EffectCasClaim$Busy : io/github/lazily/EffectCasClaim {
+	public static final field INSTANCE Lio/github/lazily/EffectCasClaim$Busy;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectCasClaim$Claimed : io/github/lazily/EffectCasClaim {
+	public fun <init> (Lio/github/lazily/EffectAttempt;)V
+	public final fun component1 ()Lio/github/lazily/EffectAttempt;
+	public final fun copy (Lio/github/lazily/EffectAttempt;)Lio/github/lazily/EffectCasClaim$Claimed;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectCasClaim$Claimed;Lio/github/lazily/EffectAttempt;ILjava/lang/Object;)Lio/github/lazily/EffectCasClaim$Claimed;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAttempt ()Lio/github/lazily/EffectAttempt;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectCasClaim$Empty : io/github/lazily/EffectCasClaim {
+	public static final field INSTANCE Lio/github/lazily/EffectCasClaim$Empty;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectCasClaim$StaleGeneration : io/github/lazily/EffectCasClaim {
+	public fun <init> (J)V
+	public final fun component1 ()J
+	public final fun copy (J)Lio/github/lazily/EffectCasClaim$StaleGeneration;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectCasClaim$StaleGeneration;JILjava/lang/Object;)Lio/github/lazily/EffectCasClaim$StaleGeneration;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCurrent ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectCasClaim$Waiting : io/github/lazily/EffectCasClaim {
+	public fun <init> (J)V
+	public final fun component1 ()J
+	public final fun copy (J)Lio/github/lazily/EffectCasClaim$Waiting;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectCasClaim$Waiting;JILjava/lang/Object;)Lio/github/lazily/EffectCasClaim$Waiting;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getRetryAt ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectCasCore {
+	public static final field Companion Lio/github/lazily/EffectCasCore$Companion;
+	public fun <init> (J)V
+	public final fun claim (Ljava/lang/Comparable;JJ)Lio/github/lazily/EffectCasTransition;
+	public final fun durableState ()Lio/github/lazily/EffectCasDurableState;
+	public final fun getGeneration ()J
+	public final fun pendingKeys (J)Ljava/util/List;
+	public final fun reconnect (J)Lio/github/lazily/EffectCasTransition;
+	public final fun recordApplied (Ljava/lang/Comparable;Lio/github/lazily/EffectAttemptIdentity;Ljava/lang/Object;Ljava/lang/Object;)Lio/github/lazily/EffectCasTransition;
+	public final fun recordOutcome (Ljava/lang/Comparable;Lio/github/lazily/EffectAttemptIdentity;Lio/github/lazily/EffectApply;J)Lio/github/lazily/EffectCasTransition;
+	public final fun recordRejected (Ljava/lang/Comparable;Lio/github/lazily/EffectAttemptIdentity;Ljava/lang/Object;)Lio/github/lazily/EffectCasTransition;
+	public final fun recordRetryable (Ljava/lang/Comparable;Lio/github/lazily/EffectAttemptIdentity;Ljava/lang/Object;J)Lio/github/lazily/EffectCasTransition;
+	public final fun recordSuperseded (Ljava/lang/Comparable;Lio/github/lazily/EffectAttemptIdentity;Ljava/lang/Object;)Lio/github/lazily/EffectCasTransition;
+	public final fun snapshot ()Lio/github/lazily/EffectCasSnapshot;
+	public final fun state (Ljava/lang/Comparable;)Lio/github/lazily/EffectCasKeyState;
+	public final fun upsertDesired (Lio/github/lazily/EffectIntent;)Lio/github/lazily/EffectCasTransition;
+}
+
+public final class io/github/lazily/EffectCasCore$Companion {
+	public final fun hydrate (Lio/github/lazily/EffectCasDurableState;)Lio/github/lazily/EffectCasCore;
+}
+
+public final class io/github/lazily/EffectCasDurableInflight {
+	public fun <init> (Lio/github/lazily/EffectPending;Lio/github/lazily/EffectAttempt;)V
+	public final fun component1 ()Lio/github/lazily/EffectPending;
+	public final fun component2 ()Lio/github/lazily/EffectAttempt;
+	public final fun copy (Lio/github/lazily/EffectPending;Lio/github/lazily/EffectAttempt;)Lio/github/lazily/EffectCasDurableInflight;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectCasDurableInflight;Lio/github/lazily/EffectPending;Lio/github/lazily/EffectAttempt;ILjava/lang/Object;)Lio/github/lazily/EffectCasDurableInflight;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAttempt ()Lio/github/lazily/EffectAttempt;
+	public final fun getRetained ()Lio/github/lazily/EffectPending;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectCasDurableKey {
+	public fun <init> (Ljava/lang/Object;Lio/github/lazily/EffectPending;Lio/github/lazily/EffectCasDurableInflight;Lio/github/lazily/EffectRetry;Ljava/lang/Long;Lio/github/lazily/EffectTerminal;Lio/github/lazily/EffectIntent;)V
+	public final fun component1 ()Ljava/lang/Object;
+	public final fun component2 ()Lio/github/lazily/EffectPending;
+	public final fun component3 ()Lio/github/lazily/EffectCasDurableInflight;
+	public final fun component4 ()Lio/github/lazily/EffectRetry;
+	public final fun component5 ()Ljava/lang/Long;
+	public final fun component6 ()Lio/github/lazily/EffectTerminal;
+	public final fun component7 ()Lio/github/lazily/EffectIntent;
+	public final fun copy (Ljava/lang/Object;Lio/github/lazily/EffectPending;Lio/github/lazily/EffectCasDurableInflight;Lio/github/lazily/EffectRetry;Ljava/lang/Long;Lio/github/lazily/EffectTerminal;Lio/github/lazily/EffectIntent;)Lio/github/lazily/EffectCasDurableKey;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectCasDurableKey;Ljava/lang/Object;Lio/github/lazily/EffectPending;Lio/github/lazily/EffectCasDurableInflight;Lio/github/lazily/EffectRetry;Ljava/lang/Long;Lio/github/lazily/EffectTerminal;Lio/github/lazily/EffectIntent;ILjava/lang/Object;)Lio/github/lazily/EffectCasDurableKey;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAppliedThrough ()Ljava/lang/Long;
+	public final fun getInflight ()Lio/github/lazily/EffectCasDurableInflight;
+	public final fun getKey ()Ljava/lang/Object;
+	public final fun getPending ()Lio/github/lazily/EffectPending;
+	public final fun getRetry ()Lio/github/lazily/EffectRetry;
+	public final fun getTerminal ()Lio/github/lazily/EffectTerminal;
+	public final fun getTerminalIntent ()Lio/github/lazily/EffectIntent;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectCasDurableState {
+	public fun <init> (JLjava/util/List;)V
+	public final fun component1 ()J
+	public final fun component2 ()Ljava/util/List;
+	public final fun copy (JLjava/util/List;)Lio/github/lazily/EffectCasDurableState;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectCasDurableState;JLjava/util/List;ILjava/lang/Object;)Lio/github/lazily/EffectCasDurableState;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getGeneration ()J
+	public final fun getKeys ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/github/lazily/EffectCasFailure {
+}
+
+public final class io/github/lazily/EffectCasFailure$Rejected : io/github/lazily/EffectCasFailure {
+	public static final field INSTANCE Lio/github/lazily/EffectCasFailure$Rejected;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectCasFailure$Retrying : io/github/lazily/EffectCasFailure {
+	public fun <init> (J)V
+	public final fun component1 ()J
+	public final fun copy (J)Lio/github/lazily/EffectCasFailure$Retrying;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectCasFailure$Retrying;JILjava/lang/Object;)Lio/github/lazily/EffectCasFailure$Retrying;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getRetryAt ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectCasFailure$StaleGeneration : io/github/lazily/EffectCasFailure {
+	public fun <init> (J)V
+	public final fun component1 ()J
+	public final fun copy (J)Lio/github/lazily/EffectCasFailure$StaleGeneration;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectCasFailure$StaleGeneration;JILjava/lang/Object;)Lio/github/lazily/EffectCasFailure$StaleGeneration;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCurrent ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectCasFailure$Superseded : io/github/lazily/EffectCasFailure {
+	public static final field INSTANCE Lio/github/lazily/EffectCasFailure$Superseded;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectCasFailure$UnknownAttempt : io/github/lazily/EffectCasFailure {
+	public static final field INSTANCE Lio/github/lazily/EffectCasFailure$UnknownAttempt;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectCasHydrateError : java/lang/Enum {
+	public static final field AttemptMismatch Lio/github/lazily/EffectCasHydrateError;
+	public static final field CursorOutOfRange Lio/github/lazily/EffectCasHydrateError;
+	public static final field DuplicateKey Lio/github/lazily/EffectCasHydrateError;
+	public static final field FutureGeneration Lio/github/lazily/EffectCasHydrateError;
+	public static final field KeyMismatch Lio/github/lazily/EffectCasHydrateError;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/lazily/EffectCasHydrateError;
+	public static fun values ()[Lio/github/lazily/EffectCasHydrateError;
+}
+
+public final class io/github/lazily/EffectCasHydrateException : java/lang/IllegalArgumentException {
+	public fun <init> (Lio/github/lazily/EffectCasHydrateError;)V
+	public final fun getError ()Lio/github/lazily/EffectCasHydrateError;
+}
+
+public final class io/github/lazily/EffectCasKeyState {
+	public fun <init> (Lio/github/lazily/EffectPending;Lio/github/lazily/EffectAttempt;Lio/github/lazily/EffectRetry;Ljava/lang/Long;Lio/github/lazily/EffectTerminal;)V
+	public final fun component1 ()Lio/github/lazily/EffectPending;
+	public final fun component2 ()Lio/github/lazily/EffectAttempt;
+	public final fun component3 ()Lio/github/lazily/EffectRetry;
+	public final fun component4 ()Ljava/lang/Long;
+	public final fun component5 ()Lio/github/lazily/EffectTerminal;
+	public final fun copy (Lio/github/lazily/EffectPending;Lio/github/lazily/EffectAttempt;Lio/github/lazily/EffectRetry;Ljava/lang/Long;Lio/github/lazily/EffectTerminal;)Lio/github/lazily/EffectCasKeyState;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectCasKeyState;Lio/github/lazily/EffectPending;Lio/github/lazily/EffectAttempt;Lio/github/lazily/EffectRetry;Ljava/lang/Long;Lio/github/lazily/EffectTerminal;ILjava/lang/Object;)Lio/github/lazily/EffectCasKeyState;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAppliedThrough ()Ljava/lang/Long;
+	public final fun getInflight ()Lio/github/lazily/EffectAttempt;
+	public final fun getPending ()Lio/github/lazily/EffectPending;
+	public final fun getRetry ()Lio/github/lazily/EffectRetry;
+	public final fun getTerminal ()Lio/github/lazily/EffectTerminal;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/github/lazily/EffectCasOutcome {
+}
+
+public final class io/github/lazily/EffectCasOutcome$Applied : io/github/lazily/EffectCasOutcome {
+	public fun <init> (Lio/github/lazily/EffectCasApplied;)V
+	public final fun component1 ()Lio/github/lazily/EffectCasApplied;
+	public final fun copy (Lio/github/lazily/EffectCasApplied;)Lio/github/lazily/EffectCasOutcome$Applied;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectCasOutcome$Applied;Lio/github/lazily/EffectCasApplied;ILjava/lang/Object;)Lio/github/lazily/EffectCasOutcome$Applied;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getOutcome ()Lio/github/lazily/EffectCasApplied;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectCasOutcome$Failure : io/github/lazily/EffectCasOutcome {
+	public fun <init> (Lio/github/lazily/EffectCasFailure;)V
+	public final fun component1 ()Lio/github/lazily/EffectCasFailure;
+	public final fun copy (Lio/github/lazily/EffectCasFailure;)Lio/github/lazily/EffectCasOutcome$Failure;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectCasOutcome$Failure;Lio/github/lazily/EffectCasFailure;ILjava/lang/Object;)Lio/github/lazily/EffectCasOutcome$Failure;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getOutcome ()Lio/github/lazily/EffectCasFailure;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/github/lazily/EffectCasReconnect {
+}
+
+public final class io/github/lazily/EffectCasReconnect$Advanced : io/github/lazily/EffectCasReconnect {
+	public fun <init> (JII)V
+	public final fun component1 ()J
+	public final fun component2 ()I
+	public final fun component3 ()I
+	public final fun copy (JII)Lio/github/lazily/EffectCasReconnect$Advanced;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectCasReconnect$Advanced;JIIILjava/lang/Object;)Lio/github/lazily/EffectCasReconnect$Advanced;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getGeneration ()J
+	public final fun getRequeued ()I
+	public final fun getSuperseded ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectCasReconnect$StaleGeneration : io/github/lazily/EffectCasReconnect {
+	public fun <init> (J)V
+	public final fun component1 ()J
+	public final fun copy (J)Lio/github/lazily/EffectCasReconnect$StaleGeneration;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectCasReconnect$StaleGeneration;JILjava/lang/Object;)Lio/github/lazily/EffectCasReconnect$StaleGeneration;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCurrent ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectCasReconnect$Unchanged : io/github/lazily/EffectCasReconnect {
+	public fun <init> (J)V
+	public final fun component1 ()J
+	public final fun copy (J)Lio/github/lazily/EffectCasReconnect$Unchanged;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectCasReconnect$Unchanged;JILjava/lang/Object;)Lio/github/lazily/EffectCasReconnect$Unchanged;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getGeneration ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectCasSnapshot {
+	public fun <init> (JLjava/util/Map;)V
+	public final fun component1 ()J
+	public final fun component2 ()Ljava/util/Map;
+	public final fun copy (JLjava/util/Map;)Lio/github/lazily/EffectCasSnapshot;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectCasSnapshot;JLjava/util/Map;ILjava/lang/Object;)Lio/github/lazily/EffectCasSnapshot;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getGeneration ()J
+	public final fun getKeys ()Ljava/util/Map;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectCasTransition {
+	public fun <init> (Lio/github/lazily/EffectCasChange;Ljava/lang/Object;)V
+	public final fun component1 ()Lio/github/lazily/EffectCasChange;
+	public final fun component2 ()Ljava/lang/Object;
+	public final fun copy (Lio/github/lazily/EffectCasChange;Ljava/lang/Object;)Lio/github/lazily/EffectCasTransition;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectCasTransition;Lio/github/lazily/EffectCasChange;Ljava/lang/Object;ILjava/lang/Object;)Lio/github/lazily/EffectCasTransition;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getChange ()Lio/github/lazily/EffectCasChange;
+	public final fun getResult ()Ljava/lang/Object;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/github/lazily/EffectCasUpsert {
+}
+
+public final class io/github/lazily/EffectCasUpsert$Accepted : io/github/lazily/EffectCasUpsert {
+	public static final field INSTANCE Lio/github/lazily/EffectCasUpsert$Accepted;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectCasUpsert$AlreadyApplied : io/github/lazily/EffectCasUpsert {
+	public fun <init> (J)V
+	public final fun component1 ()J
+	public final fun copy (J)Lio/github/lazily/EffectCasUpsert$AlreadyApplied;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectCasUpsert$AlreadyApplied;JILjava/lang/Object;)Lio/github/lazily/EffectCasUpsert$AlreadyApplied;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAppliedThrough ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectCasUpsert$EpochConflict : io/github/lazily/EffectCasUpsert {
+	public static final field INSTANCE Lio/github/lazily/EffectCasUpsert$EpochConflict;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectCasUpsert$StaleEpoch : io/github/lazily/EffectCasUpsert {
+	public fun <init> (J)V
+	public final fun component1 ()J
+	public final fun copy (J)Lio/github/lazily/EffectCasUpsert$StaleEpoch;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectCasUpsert$StaleEpoch;JILjava/lang/Object;)Lio/github/lazily/EffectCasUpsert$StaleEpoch;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCurrent ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectCasUpsert$Unchanged : io/github/lazily/EffectCasUpsert {
+	public static final field INSTANCE Lio/github/lazily/EffectCasUpsert$Unchanged;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectIdentity : java/lang/Comparable {
+	public fun <init> (Ljava/lang/String;)V
+	public fun compareTo (Lio/github/lazily/EffectIdentity;)I
+	public synthetic fun compareTo (Ljava/lang/Object;)I
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/github/lazily/EffectIdentity;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectIdentity;Ljava/lang/String;ILjava/lang/Object;)Lio/github/lazily/EffectIdentity;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getValue ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectIntent {
+	public fun <init> (Lio/github/lazily/EffectIdentity;JLjava/lang/Object;Ljava/lang/Object;Lio/github/lazily/EffectPlan;)V
+	public final fun component1 ()Lio/github/lazily/EffectIdentity;
+	public final fun component2 ()J
+	public final fun component3 ()Ljava/lang/Object;
+	public final fun component4 ()Ljava/lang/Object;
+	public final fun component5 ()Lio/github/lazily/EffectPlan;
+	public final fun copy (Lio/github/lazily/EffectIdentity;JLjava/lang/Object;Ljava/lang/Object;Lio/github/lazily/EffectPlan;)Lio/github/lazily/EffectIntent;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectIntent;Lio/github/lazily/EffectIdentity;JLjava/lang/Object;Ljava/lang/Object;Lio/github/lazily/EffectPlan;ILjava/lang/Object;)Lio/github/lazily/EffectIntent;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEpoch ()J
+	public final fun getExpected ()Ljava/lang/Object;
+	public final fun getIdentity ()Lio/github/lazily/EffectIdentity;
+	public final fun getKey ()Ljava/lang/Object;
+	public final fun getPlan ()Lio/github/lazily/EffectPlan;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectPending {
+	public fun <init> (Lio/github/lazily/EffectIntent;ILjava/lang/Object;Ljava/util/List;ILjava/lang/Long;)V
+	public final fun component1 ()Lio/github/lazily/EffectIntent;
+	public final fun component2 ()I
+	public final fun component3 ()Ljava/lang/Object;
+	public final fun component4 ()Ljava/util/List;
+	public final fun component5 ()I
+	public final fun component6 ()Ljava/lang/Long;
+	public final fun copy (Lio/github/lazily/EffectIntent;ILjava/lang/Object;Ljava/util/List;ILjava/lang/Long;)Lio/github/lazily/EffectPending;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectPending;Lio/github/lazily/EffectIntent;ILjava/lang/Object;Ljava/util/List;ILjava/lang/Long;ILjava/lang/Object;)Lio/github/lazily/EffectPending;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getExpected ()Ljava/lang/Object;
+	public final fun getIntent ()Lio/github/lazily/EffectIntent;
+	public final fun getNextAttempt ()I
+	public final fun getNextStep ()I
+	public final fun getReadyAt ()Ljava/lang/Long;
+	public final fun getReceipts ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectPlan {
+	public static final field Companion Lio/github/lazily/EffectPlan$Companion;
+	public fun <init> (Ljava/util/List;)V
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getSize ()I
+	public final fun getSteps ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectPlan$Companion {
+	public final fun single (Ljava/lang/Object;)Lio/github/lazily/EffectPlan;
+}
+
+public final class io/github/lazily/EffectReceipt {
+	public fun <init> (Lio/github/lazily/EffectAttemptIdentity;Ljava/lang/Object;Ljava/lang/Object;)V
+	public final fun component1 ()Lio/github/lazily/EffectAttemptIdentity;
+	public final fun component2 ()Ljava/lang/Object;
+	public final fun component3 ()Ljava/lang/Object;
+	public final fun copy (Lio/github/lazily/EffectAttemptIdentity;Ljava/lang/Object;Ljava/lang/Object;)Lio/github/lazily/EffectReceipt;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectReceipt;Lio/github/lazily/EffectAttemptIdentity;Ljava/lang/Object;Ljava/lang/Object;ILjava/lang/Object;)Lio/github/lazily/EffectReceipt;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAttempt ()Lio/github/lazily/EffectAttemptIdentity;
+	public final fun getAuthority ()Ljava/lang/Object;
+	public final fun getReceipt ()Ljava/lang/Object;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectRetry {
+	public fun <init> (Lio/github/lazily/EffectAttemptIdentity;Ljava/lang/Object;J)V
+	public final fun component1 ()Lio/github/lazily/EffectAttemptIdentity;
+	public final fun component2 ()Ljava/lang/Object;
+	public final fun component3 ()J
+	public final fun copy (Lio/github/lazily/EffectAttemptIdentity;Ljava/lang/Object;J)Lio/github/lazily/EffectRetry;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectRetry;Lio/github/lazily/EffectAttemptIdentity;Ljava/lang/Object;JILjava/lang/Object;)Lio/github/lazily/EffectRetry;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAttempt ()Lio/github/lazily/EffectAttemptIdentity;
+	public final fun getError ()Ljava/lang/Object;
+	public final fun getRetryAt ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/github/lazily/EffectTerminal {
+	public abstract fun getEpoch ()J
+	public abstract fun getIdentity ()Lio/github/lazily/EffectIdentity;
+	public abstract fun getReceipts ()Ljava/util/List;
+}
+
+public final class io/github/lazily/EffectTerminal$Applied : io/github/lazily/EffectTerminal {
+	public fun <init> (Lio/github/lazily/EffectIdentity;JLjava/util/List;)V
+	public final fun component1 ()Lio/github/lazily/EffectIdentity;
+	public final fun component2 ()J
+	public final fun component3 ()Ljava/util/List;
+	public final fun copy (Lio/github/lazily/EffectIdentity;JLjava/util/List;)Lio/github/lazily/EffectTerminal$Applied;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectTerminal$Applied;Lio/github/lazily/EffectIdentity;JLjava/util/List;ILjava/lang/Object;)Lio/github/lazily/EffectTerminal$Applied;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getEpoch ()J
+	public fun getIdentity ()Lio/github/lazily/EffectIdentity;
+	public fun getReceipts ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectTerminal$Rejected : io/github/lazily/EffectTerminal {
+	public fun <init> (Lio/github/lazily/EffectIdentity;JLjava/lang/Object;Ljava/util/List;)V
+	public final fun component1 ()Lio/github/lazily/EffectIdentity;
+	public final fun component2 ()J
+	public final fun component3 ()Ljava/lang/Object;
+	public final fun component4 ()Ljava/util/List;
+	public final fun copy (Lio/github/lazily/EffectIdentity;JLjava/lang/Object;Ljava/util/List;)Lio/github/lazily/EffectTerminal$Rejected;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectTerminal$Rejected;Lio/github/lazily/EffectIdentity;JLjava/lang/Object;Ljava/util/List;ILjava/lang/Object;)Lio/github/lazily/EffectTerminal$Rejected;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getEpoch ()J
+	public final fun getError ()Ljava/lang/Object;
+	public fun getIdentity ()Lio/github/lazily/EffectIdentity;
+	public fun getReceipts ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EffectTerminal$Superseded : io/github/lazily/EffectTerminal {
+	public fun <init> (Lio/github/lazily/EffectIdentity;JLjava/lang/Object;Ljava/util/List;)V
+	public final fun component1 ()Lio/github/lazily/EffectIdentity;
+	public final fun component2 ()J
+	public final fun component3 ()Ljava/lang/Object;
+	public final fun component4 ()Ljava/util/List;
+	public final fun copy (Lio/github/lazily/EffectIdentity;JLjava/lang/Object;Ljava/util/List;)Lio/github/lazily/EffectTerminal$Superseded;
+	public static synthetic fun copy$default (Lio/github/lazily/EffectTerminal$Superseded;Lio/github/lazily/EffectIdentity;JLjava/lang/Object;Ljava/util/List;ILjava/lang/Object;)Lio/github/lazily/EffectTerminal$Superseded;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getEpoch ()J
+	public fun getIdentity ()Lio/github/lazily/EffectIdentity;
+	public final fun getObserved ()Ljava/lang/Object;
+	public fun getReceipts ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/github/lazily/EgressAck {
+}
+
+public final class io/github/lazily/EgressAck$Advanced : io/github/lazily/EgressAck {
+	public fun <init> (J)V
+	public final fun component1 ()J
+	public final fun copy (J)Lio/github/lazily/EgressAck$Advanced;
+	public static synthetic fun copy$default (Lio/github/lazily/EgressAck$Advanced;JILjava/lang/Object;)Lio/github/lazily/EgressAck$Advanced;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getThrough ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EgressAck$StaleGeneration : io/github/lazily/EgressAck {
+	public fun <init> (J)V
+	public final fun component1 ()J
+	public final fun copy (J)Lio/github/lazily/EgressAck$StaleGeneration;
+	public static synthetic fun copy$default (Lio/github/lazily/EgressAck$StaleGeneration;JILjava/lang/Object;)Lio/github/lazily/EgressAck$StaleGeneration;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCurrent ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EgressAck$Unchanged : io/github/lazily/EgressAck {
+	public fun <init> (Ljava/lang/Long;)V
+	public final fun component1 ()Ljava/lang/Long;
+	public final fun copy (Ljava/lang/Long;)Lio/github/lazily/EgressAck$Unchanged;
+	public static synthetic fun copy$default (Lio/github/lazily/EgressAck$Unchanged;Ljava/lang/Long;ILjava/lang/Object;)Lio/github/lazily/EgressAck$Unchanged;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getThrough ()Ljava/lang/Long;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EgressCell {
+	public fun <init> (Lio/github/lazily/Context;JLio/github/lazily/EgressPolicy;)V
+	public synthetic fun <init> (Lio/github/lazily/Context;JLio/github/lazily/EgressPolicy;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun ack (JJ)Lio/github/lazily/EgressAck;
+	public final fun ackedThrough ()Ljava/lang/Long;
+	public final fun ackedThroughHandle-ue6j58o ()J
+	public final fun attachTransport (Lio/github/lazily/EgressTransport;)Lio/github/lazily/Effect;
+	public final fun claim (J)Lio/github/lazily/EgressClaim;
+	public final fun enqueue (Ljava/lang/Object;)J
+	public final fun fail (JJ)Lio/github/lazily/EgressFailure;
+	public final fun getGeneration ()J
+	public final fun getNextSequence ()J
+	public final fun inflight ()Ljava/util/List;
+	public final fun inflightHandle-ue6j58o ()J
+	public final fun pending ()Ljava/util/List;
+	public final fun pendingHandle-ue6j58o ()J
+	public final fun reconnect (J)Lio/github/lazily/EgressReconnect;
+	public final fun retry ()Lio/github/lazily/EgressRetry;
+	public final fun retryHandle-ue6j58o ()J
+	public final fun retryNow (JJ)Lio/github/lazily/EgressRetryAction;
+}
+
+public final class io/github/lazily/EgressChange {
+	public static final field Companion Lio/github/lazily/EgressChange$Companion;
+	public fun <init> ()V
+	public fun <init> (ZZZZ)V
+	public synthetic fun <init> (ZZZZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Z
+	public final fun component2 ()Z
+	public final fun component3 ()Z
+	public final fun component4 ()Z
+	public final fun copy (ZZZZ)Lio/github/lazily/EgressChange;
+	public static synthetic fun copy$default (Lio/github/lazily/EgressChange;ZZZZILjava/lang/Object;)Lio/github/lazily/EgressChange;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAckedThrough ()Z
+	public final fun getInflight ()Z
+	public final fun getPending ()Z
+	public final fun getRetry ()Z
+	public fun hashCode ()I
+	public final fun isEmpty ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EgressChange$Companion {
+	public final fun getNONE ()Lio/github/lazily/EgressChange;
+}
+
+public abstract interface class io/github/lazily/EgressClaim {
+}
+
+public final class io/github/lazily/EgressClaim$Claimed : io/github/lazily/EgressClaim {
+	public fun <init> (Lio/github/lazily/EgressEnvelope;)V
+	public final fun component1 ()Lio/github/lazily/EgressEnvelope;
+	public final fun copy (Lio/github/lazily/EgressEnvelope;)Lio/github/lazily/EgressClaim$Claimed;
+	public static synthetic fun copy$default (Lio/github/lazily/EgressClaim$Claimed;Lio/github/lazily/EgressEnvelope;ILjava/lang/Object;)Lio/github/lazily/EgressClaim$Claimed;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEnvelope ()Lio/github/lazily/EgressEnvelope;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EgressClaim$Empty : io/github/lazily/EgressClaim {
+	public static final field INSTANCE Lio/github/lazily/EgressClaim$Empty;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EgressClaim$StaleGeneration : io/github/lazily/EgressClaim {
+	public fun <init> (J)V
+	public final fun component1 ()J
+	public final fun copy (J)Lio/github/lazily/EgressClaim$StaleGeneration;
+	public static synthetic fun copy$default (Lio/github/lazily/EgressClaim$StaleGeneration;JILjava/lang/Object;)Lio/github/lazily/EgressClaim$StaleGeneration;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCurrent ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EgressClaim$WindowFull : io/github/lazily/EgressClaim {
+	public static final field INSTANCE Lio/github/lazily/EgressClaim$WindowFull;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EgressConfigError : java/lang/Enum {
+	public static final field NegativeRetryBudget Lio/github/lazily/EgressConfigError;
+	public static final field RetryCeilingBelowBase Lio/github/lazily/EgressConfigError;
+	public static final field ZeroInflightLimit Lio/github/lazily/EgressConfigError;
+	public static final field ZeroRetryBase Lio/github/lazily/EgressConfigError;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/lazily/EgressConfigError;
+	public static fun values ()[Lio/github/lazily/EgressConfigError;
+}
+
+public final class io/github/lazily/EgressConfigException : java/lang/IllegalArgumentException {
+	public fun <init> (Lio/github/lazily/EgressConfigError;)V
+	public final fun getError ()Lio/github/lazily/EgressConfigError;
+}
+
+public final class io/github/lazily/EgressCore {
+	public fun <init> (JLio/github/lazily/EgressPolicy;)V
+	public synthetic fun <init> (JLio/github/lazily/EgressPolicy;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun ack (JJ)Lio/github/lazily/EgressTransition;
+	public final fun claim (J)Lio/github/lazily/EgressTransition;
+	public final fun enqueue (Ljava/lang/Object;)Lio/github/lazily/EgressTransition;
+	public final fun fail (JJ)Lio/github/lazily/EgressTransition;
+	public final fun getAckedThrough ()Ljava/lang/Long;
+	public final fun getGeneration ()J
+	public final fun getNextSequence ()J
+	public final fun getPolicy ()Lio/github/lazily/EgressPolicy;
+	public final fun getRetry ()Lio/github/lazily/EgressRetry;
+	public final fun inflight ()Ljava/util/List;
+	public final fun pending ()Ljava/util/List;
+	public final fun reconnect (J)Lio/github/lazily/EgressTransition;
+	public final fun retryNow (JJ)Lio/github/lazily/EgressTransition;
+}
+
+public final class io/github/lazily/EgressEnvelope {
+	public fun <init> (JJILjava/lang/Object;)V
+	public final fun component1 ()J
+	public final fun component2 ()J
+	public final fun component3 ()I
+	public final fun component4 ()Ljava/lang/Object;
+	public final fun copy (JJILjava/lang/Object;)Lio/github/lazily/EgressEnvelope;
+	public static synthetic fun copy$default (Lio/github/lazily/EgressEnvelope;JJILjava/lang/Object;ILjava/lang/Object;)Lio/github/lazily/EgressEnvelope;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAttempt ()I
+	public final fun getGeneration ()J
+	public final fun getPayload ()Ljava/lang/Object;
+	public final fun getSequence ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/github/lazily/EgressFailure {
+}
+
+public final class io/github/lazily/EgressFailure$Exhausted : io/github/lazily/EgressFailure {
+	public fun <init> (Lio/github/lazily/EgressRetry;)V
+	public final fun component1 ()Lio/github/lazily/EgressRetry;
+	public final fun copy (Lio/github/lazily/EgressRetry;)Lio/github/lazily/EgressFailure$Exhausted;
+	public static synthetic fun copy$default (Lio/github/lazily/EgressFailure$Exhausted;Lio/github/lazily/EgressRetry;ILjava/lang/Object;)Lio/github/lazily/EgressFailure$Exhausted;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getRetry ()Lio/github/lazily/EgressRetry;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EgressFailure$Retrying : io/github/lazily/EgressFailure {
+	public fun <init> (Lio/github/lazily/EgressRetry;)V
+	public final fun component1 ()Lio/github/lazily/EgressRetry;
+	public final fun copy (Lio/github/lazily/EgressRetry;)Lio/github/lazily/EgressFailure$Retrying;
+	public static synthetic fun copy$default (Lio/github/lazily/EgressFailure$Retrying;Lio/github/lazily/EgressRetry;ILjava/lang/Object;)Lio/github/lazily/EgressFailure$Retrying;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getRetry ()Lio/github/lazily/EgressRetry;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EgressFailure$StaleGeneration : io/github/lazily/EgressFailure {
+	public fun <init> (J)V
+	public final fun component1 ()J
+	public final fun copy (J)Lio/github/lazily/EgressFailure$StaleGeneration;
+	public static synthetic fun copy$default (Lio/github/lazily/EgressFailure$StaleGeneration;JILjava/lang/Object;)Lio/github/lazily/EgressFailure$StaleGeneration;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCurrent ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EgressFailure$UnknownSequence : io/github/lazily/EgressFailure {
+	public static final field INSTANCE Lio/github/lazily/EgressFailure$UnknownSequence;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EgressPolicy {
+	public fun <init> ()V
+	public fun <init> (IIJJ)V
+	public synthetic fun <init> (IIJJILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()I
+	public final fun component2 ()I
+	public final fun component3 ()J
+	public final fun component4 ()J
+	public final fun copy (IIJJ)Lio/github/lazily/EgressPolicy;
+	public static synthetic fun copy$default (Lio/github/lazily/EgressPolicy;IIJJILjava/lang/Object;)Lio/github/lazily/EgressPolicy;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getInflightLimit ()I
+	public final fun getRetryBase ()J
+	public final fun getRetryBudget ()I
+	public final fun getRetryCeiling ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+	public final fun validate ()Lio/github/lazily/EgressConfigError;
+}
+
+public final class io/github/lazily/EgressReading {
+	public fun <init> (Ljava/lang/Object;)V
+	public final fun component1 ()Ljava/lang/Object;
+	public final fun copy (Ljava/lang/Object;)Lio/github/lazily/EgressReading;
+	public static synthetic fun copy$default (Lio/github/lazily/EgressReading;Ljava/lang/Object;ILjava/lang/Object;)Lio/github/lazily/EgressReading;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getValue ()Ljava/lang/Object;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/github/lazily/EgressReconnect {
+}
+
+public final class io/github/lazily/EgressReconnect$Advanced : io/github/lazily/EgressReconnect {
+	public fun <init> (JI)V
+	public final fun component1 ()J
+	public final fun component2 ()I
+	public final fun copy (JI)Lio/github/lazily/EgressReconnect$Advanced;
+	public static synthetic fun copy$default (Lio/github/lazily/EgressReconnect$Advanced;JIILjava/lang/Object;)Lio/github/lazily/EgressReconnect$Advanced;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getGeneration ()J
+	public final fun getReplayed ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EgressReconnect$StaleGeneration : io/github/lazily/EgressReconnect {
+	public fun <init> (J)V
+	public final fun component1 ()J
+	public final fun copy (J)Lio/github/lazily/EgressReconnect$StaleGeneration;
+	public static synthetic fun copy$default (Lio/github/lazily/EgressReconnect$StaleGeneration;JILjava/lang/Object;)Lio/github/lazily/EgressReconnect$StaleGeneration;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCurrent ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EgressReconnect$Unchanged : io/github/lazily/EgressReconnect {
+	public fun <init> (J)V
+	public final fun component1 ()J
+	public final fun copy (J)Lio/github/lazily/EgressReconnect$Unchanged;
+	public static synthetic fun copy$default (Lio/github/lazily/EgressReconnect$Unchanged;JILjava/lang/Object;)Lio/github/lazily/EgressReconnect$Unchanged;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getGeneration ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EgressRetry {
+	public fun <init> (JIJZ)V
+	public final fun component1 ()J
+	public final fun component2 ()I
+	public final fun component3 ()J
+	public final fun component4 ()Z
+	public final fun copy (JIJZ)Lio/github/lazily/EgressRetry;
+	public static synthetic fun copy$default (Lio/github/lazily/EgressRetry;JIJZILjava/lang/Object;)Lio/github/lazily/EgressRetry;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAttempt ()I
+	public final fun getBackoff ()J
+	public final fun getExhausted ()Z
+	public final fun getSequence ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/github/lazily/EgressRetryAction {
+}
+
+public final class io/github/lazily/EgressRetryAction$Scheduled : io/github/lazily/EgressRetryAction {
+	public fun <init> (J)V
+	public final fun component1 ()J
+	public final fun copy (J)Lio/github/lazily/EgressRetryAction$Scheduled;
+	public static synthetic fun copy$default (Lio/github/lazily/EgressRetryAction$Scheduled;JILjava/lang/Object;)Lio/github/lazily/EgressRetryAction$Scheduled;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getSequence ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EgressRetryAction$StaleGeneration : io/github/lazily/EgressRetryAction {
+	public fun <init> (J)V
+	public final fun component1 ()J
+	public final fun copy (J)Lio/github/lazily/EgressRetryAction$StaleGeneration;
+	public static synthetic fun copy$default (Lio/github/lazily/EgressRetryAction$StaleGeneration;JILjava/lang/Object;)Lio/github/lazily/EgressRetryAction$StaleGeneration;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCurrent ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EgressRetryAction$UnknownSequence : io/github/lazily/EgressRetryAction {
+	public static final field INSTANCE Lio/github/lazily/EgressRetryAction$UnknownSequence;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/EgressTransition {
+	public fun <init> (Lio/github/lazily/EgressChange;Ljava/lang/Object;)V
+	public final fun component1 ()Lio/github/lazily/EgressChange;
+	public final fun component2 ()Ljava/lang/Object;
+	public final fun copy (Lio/github/lazily/EgressChange;Ljava/lang/Object;)Lio/github/lazily/EgressTransition;
+	public static synthetic fun copy$default (Lio/github/lazily/EgressTransition;Lio/github/lazily/EgressChange;Ljava/lang/Object;ILjava/lang/Object;)Lio/github/lazily/EgressTransition;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getChange ()Lio/github/lazily/EgressChange;
+	public final fun getResult ()Ljava/lang/Object;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/github/lazily/EgressTransport {
+	public abstract fun send (Lio/github/lazily/EgressEnvelope;)Z
 }
 
 public final class io/github/lazily/EntryKind : java/lang/Enum {
@@ -6099,6 +7134,28 @@ public final class io/github/lazily/ThreadSafeEffectHandle : io/github/lazily/Th
 	public fun toString ()Ljava/lang/String;
 	public static fun toString-impl (J)Ljava/lang/String;
 	public final synthetic fun unbox-impl ()J
+}
+
+public final class io/github/lazily/ThreadSafeEgressCell {
+	public fun <init> (Lio/github/lazily/ThreadSafeContext;JLio/github/lazily/EgressPolicy;)V
+	public synthetic fun <init> (Lio/github/lazily/ThreadSafeContext;JLio/github/lazily/EgressPolicy;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun ack (JJ)Lio/github/lazily/EgressAck;
+	public final fun ackedThrough ()Ljava/lang/Long;
+	public final fun ackedThroughHandle-XICJqRI ()J
+	public final fun attachTransport-MWA_4nY (Lio/github/lazily/EgressTransport;)J
+	public final fun claim (J)Lio/github/lazily/EgressClaim;
+	public final fun enqueue (Ljava/lang/Object;)J
+	public final fun fail (JJ)Lio/github/lazily/EgressFailure;
+	public final fun getGeneration ()J
+	public final fun getNextSequence ()J
+	public final fun inflight ()Ljava/util/List;
+	public final fun inflightHandle-XICJqRI ()J
+	public final fun pending ()Ljava/util/List;
+	public final fun pendingHandle-XICJqRI ()J
+	public final fun reconnect (J)Lio/github/lazily/EgressReconnect;
+	public final fun retry ()Lio/github/lazily/EgressRetry;
+	public final fun retryHandle-XICJqRI ()J
+	public final fun retryNow (JJ)Lio/github/lazily/EgressRetryAction;
 }
 
 public abstract interface class io/github/lazily/ThreadSafeGraphNode {
