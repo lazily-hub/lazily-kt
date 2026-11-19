@@ -35,8 +35,6 @@ class AgentDocStateConformanceTest {
     // scratch corpus carries no `schemas/` at all. `LAZILY_SPEC_SCHEMAS_DIR`
     // redirects this file independently, so perturbing a schema no longer means
     // dirtying the shared lazily-spec checkout (#lzspecschemasoverride).
-    private val schemaRel = "agent-doc-state.json"
-
     private fun loadFixture(name: String): JsonObject {
         val text = ConformanceFixtures.read("agent-doc/$name")
         val fixture = json.parseToJsonElement(text).jsonObject
@@ -50,8 +48,12 @@ class AgentDocStateConformanceTest {
      * no pinned in-source fallback: a hardcoded copy silently masks schema drift
      * exactly the way the bundled fixtures did (#lzspecconf).
      */
-    private fun typeTagVocabulary(): Set<String> {
-        val schema = json.parseToJsonElement(ConformanceFixtures.readSchema(schemaRel)).jsonObject
+    private fun typeTagVocabulary(fixture: JsonObject): Set<String> {
+        val version = fixture.getValue("schema_version").jsonPrimitive.content
+        val name = if (version.startsWith("1.")) "agent-doc-state.json" else "workflow-state.json"
+        val schema = json.parseToJsonElement(ConformanceFixtures.readSchema(name)).jsonObject
+        val schemaVersion = schema.getValue("schema_version").jsonPrimitive.content
+        assertEquals(schemaVersion.substringBefore('.'), version.substringBefore('.'))
         val enum =
             schema
                 .getValue("\$defs")
@@ -79,14 +81,13 @@ class AgentDocStateConformanceTest {
     private fun payloadPhase(obj: JsonObject): String? = (obj["phase"] as? JsonPrimitive)?.contentOrNull
 
     @Test
-    fun `conformance agent-doc snapshot decodes round-trips and satisfies assertions`() {
+    fun `conformance workflow snapshot decodes round-trips and satisfies assertions`() {
         val fixture = loadFixture("snapshot_agent_doc_state.json")
         assertEquals("Snapshot", fixture.getValue("kind").jsonPrimitive.content)
-        assertEquals("1.0.0", fixture.getValue("schema_version").jsonPrimitive.content)
 
         val message = parseWire(fixture)
         val snapshot = assertIs<IpcMessage.SnapshotMessage>(message).snapshot
-        val vocab = typeTagVocabulary()
+        val vocab = typeTagVocabulary(fixture)
 
         fixture
             .getValue("assertions")
@@ -107,11 +108,11 @@ class AgentDocStateConformanceTest {
 
                 // Decoded payload phases: closeout.cycle and queue.head carry a `phase`.
                 assertions.assertString("cycle_phase") {
-                    val cycle = snapshot.nodes.single { it.typeTag == "agent_doc.closeout.cycle" }
+                    val cycle = snapshot.nodes.single { it.node == 102L }
                     payloadPhase(decodePayloadObject((cycle.state as NodeState.Payload).bytes))
                 }
                 assertions.assertString("queue_head_phase") {
-                    val queueHead = snapshot.nodes.single { it.typeTag == "agent_doc.queue.head" }
+                    val queueHead = snapshot.nodes.single { it.node == 103L }
                     payloadPhase(decodePayloadObject((queueHead.state as NodeState.Payload).bytes))
                 }
             }
@@ -120,14 +121,13 @@ class AgentDocStateConformanceTest {
     }
 
     @Test
-    fun `conformance agent-doc delta decodes round-trips and satisfies assertions`() {
+    fun `conformance workflow delta decodes round-trips and satisfies assertions`() {
         val fixture = loadFixture("delta_agent_doc_state.json")
         assertEquals("Delta", fixture.getValue("kind").jsonPrimitive.content)
-        assertEquals("1.0.0", fixture.getValue("schema_version").jsonPrimitive.content)
 
         val message = parseWire(fixture)
         val delta = assertIs<IpcMessage.DeltaMessage>(message).delta
-        val vocab = typeTagVocabulary()
+        val vocab = typeTagVocabulary(fixture)
 
         fixture
             .getValue("assertions")
@@ -175,7 +175,7 @@ class AgentDocStateConformanceTest {
     }
 
     @Test
-    fun `agent-doc snapshot then delta mirrors identically to a fresh snapshot`() {
+    fun `workflow snapshot then delta mirrors identically to a fresh snapshot`() {
         // The defining IPC property: applying the snapshot then the delta's ops
         // produces the same node view as a fresh snapshot of the resulting state.
         val snapshotFixture = loadFixture("snapshot_agent_doc_state.json")
@@ -208,18 +208,19 @@ class AgentDocStateConformanceTest {
 
         // After applying the delta: 3 original + 1 added transport.patch node.
         assertEquals(4, nodes.size)
-        assertTrue(nodes.values.all { it.typeTag in typeTagVocabulary() })
+        val vocab = typeTagVocabulary(deltaFixture)
+        assertTrue(nodes.values.all { it.typeTag in vocab })
 
         val cycle = nodes.getValue(102L)
-        assertEquals("agent_doc.closeout.cycle", cycle.typeTag)
+        assertEquals(snapshot.nodes.single { it.node == 102L }.typeTag, cycle.typeTag)
         assertEquals("committed", payloadPhase(decodePayloadObject((cycle.state as NodeState.Payload).bytes)))
 
         val queue = nodes.getValue(103L)
-        assertEquals("agent_doc.queue.head", queue.typeTag)
+        assertEquals(snapshot.nodes.single { it.node == 103L }.typeTag, queue.typeTag)
         assertEquals("completed", payloadPhase(decodePayloadObject((queue.state as NodeState.Payload).bytes)))
 
         val patch = nodes.getValue(104L)
-        assertEquals("agent_doc.transport.patch", patch.typeTag)
+        assertEquals(delta.ops.filterIsInstance<DeltaOp.NodeAdd>().single().typeTag, patch.typeTag)
         assertEquals("applied", payloadPhase(decodePayloadObject((patch.state as NodeState.Payload).bytes)))
     }
 
@@ -243,11 +244,14 @@ class AgentDocStateConformanceTest {
 
         fun phaseOf(id: Long): String? = payloadPhase(decodePayloadObject(replica.node(id)!!.payload!!))
 
-        assertEquals("agent_doc.closeout.cycle", replica.node(102L)!!.typeTag)
+        assertEquals(snapshot.nodes.single { it.node == 102L }.typeTag, replica.node(102L)!!.typeTag)
         assertEquals("committed", phaseOf(102L))
-        assertEquals("agent_doc.queue.head", replica.node(103L)!!.typeTag)
+        assertEquals(snapshot.nodes.single { it.node == 103L }.typeTag, replica.node(103L)!!.typeTag)
         assertEquals("completed", phaseOf(103L))
-        assertEquals("agent_doc.transport.patch", replica.node(104L)!!.typeTag)
+        assertEquals(
+            delta.ops.filterIsInstance<DeltaOp.NodeAdd>().single().typeTag,
+            replica.node(104L)!!.typeTag,
+        )
         assertEquals("applied", phaseOf(104L))
     }
 }

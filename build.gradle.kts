@@ -243,7 +243,7 @@ tasks.test {
     //
     // `LAZILY_SPEC_CONFORMANCE_DIR` redirects the corpus and nothing else, so a
     // probe that had to perturb a SCHEMA — AgentDocStateConformanceTest reads the
-    // `type_tag` vocabulary straight out of `schemas/agent-doc-state.json` — could
+    // `type_tag` vocabulary from the fixture revision’s schema — could
     // only do it by editing the shared `../lazily-spec` checkout, reddening all ten
     // bindings at once and dirtying a repo other sessions read.
     // `LAZILY_SPEC_SCHEMAS_DIR` gives that seam its own knob, and it is deliberately

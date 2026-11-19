@@ -331,7 +331,7 @@ lazily-kt replays the shared [`lazily-spec`][spec] conformance fixtures:
 
 - IPC fixtures round-trip through `IpcMessage.fromJson` / `toJson`
   (`IpcConformanceTest`).
-- The agent-doc state-projection IPC fixtures
+- The sample workflow state-projection IPC fixtures
   (`conformance/agent-doc/snapshot_agent_doc_state.json`,
   `conformance/agent-doc/delta_agent_doc_state.json`) decode, round-trip, and
   validate their `type_tag` vocabulary + decoded payload phases

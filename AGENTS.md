@@ -131,7 +131,7 @@ and `Reactive.trackedSharedRead_registers_edge` formal pins.
   implementation-status note; `final` states are accepted as leaves (completion/
   `done` events not raised — the deferred slice the spec permits). Conformance fixtures are read
   from the canonical sibling `../lazily-spec/conformance/statechart/` and
-  replayed by `StateChartConformanceTest`. The agent-doc state-projection IPC
+  replayed by `StateChartConformanceTest`. The workflow state-projection IPC
   fixtures (`../lazily-spec/conformance/agent-doc/`) are replayed by
   `AgentDocStateConformanceTest`, validating the pinned `type_tag` vocabulary and
   decoded payload phases.
