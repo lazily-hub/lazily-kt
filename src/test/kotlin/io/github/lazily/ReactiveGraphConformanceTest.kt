@@ -96,6 +96,45 @@ private class ComputeFailedException(
     id: String,
 ) : RuntimeException("reactive-graph: compute_failed (fail_next) for $id")
 
+/**
+ * The `effect` op's `cleanup` field (#lzeffectvoid): which runs of the body
+ * return a cleanup. A run that returns none returns the binding's IDIOMATIC
+ * no-cleanup form — an explicit trailing `null` from the body, which is what
+ * `Compute.() -> (() -> Unit)?` (and its thread-safe and async twins) already
+ * require. Never a no-op closure: that is observationally identical to a
+ * cleanup and would exercise nothing.
+ */
+private enum class EffectCleanup {
+    /** Every run returns a cleanup (absent or `"every_run"`). */
+    EVERY_RUN,
+
+    /** No run returns a cleanup (`"none"`). */
+    NONE,
+
+    /** Runs 1, 3, 5, ... return a cleanup; runs 2, 4, ... return none (`"alternate"`). */
+    ALTERNATE,
+    ;
+
+    /** Whether the [run]-th run (1-based; creation is run 1) returns a cleanup. */
+    fun returnsCleanup(run: Int): Boolean =
+        when (this) {
+            EVERY_RUN -> true
+            NONE -> false
+            ALTERNATE -> run % 2 == 1
+        }
+
+    companion object {
+        /** An unknown value is a hard runner failure, never a silent default. */
+        fun parse(value: String?): EffectCleanup =
+            when (value) {
+                null, "every_run" -> EVERY_RUN
+                "none" -> NONE
+                "alternate" -> ALTERNATE
+                else -> error("unknown effect cleanup shape '$value'")
+            }
+    }
+}
+
 class ReactiveGraphConformanceTest {
     private val json = Json
 
@@ -115,6 +154,9 @@ class ReactiveGraphConformanceTest {
                 "disposal_does_not_run_surviving_effects.json",
                 "dispose_detaches_edges_both_directions.json",
                 "dispose_signal_reverts_to_lazy.json",
+                // #lzeffectvoid: the `effect` op's `cleanup` field (every_run /
+                // none / alternate); replayed on every context.
+                "effect_cleanup_is_optional.json",
                 "failed_compute_is_never_cached.json",
                 // #lzmergefeed (lazily-spec, Step 3): the accumulate/fold write
                 // surface. Five exercise the `merge_cell` op this runner does not
@@ -367,6 +409,7 @@ class ReactiveGraphConformanceTest {
             id: String,
             reads: List<String>,
             scope: String?,
+            cleanup: EffectCleanup = EffectCleanup.EVERY_RUN,
         )
 
         /**
@@ -534,7 +577,9 @@ class ReactiveGraphConformanceTest {
             id: String,
             reads: List<String>,
             scope: String?,
+            cleanup: EffectCleanup,
         ) {
+            var runs = 0
             val run: Compute.() -> (() -> Unit)? = {
                 runLog.add(id)
                 // Swallowed, not propagated: an effect that reads through a
@@ -546,7 +591,12 @@ class ReactiveGraphConformanceTest {
                 } catch (_: DisposedNodeException) {
                     // Observed by the top-level read that names the same node.
                 }
-                { cleanupLog.add(id) }
+                // The idiomatic no-cleanup form: an explicit trailing `null`.
+                if (cleanup.returnsCleanup(++runs)) {
+                    { cleanupLog.add(id) }
+                } else {
+                    null
+                }
             }
             nodes[id] = scopes[scope]?.effect(run) ?: ctx.effect(run)
         }
@@ -675,7 +725,9 @@ class ReactiveGraphConformanceTest {
             id: String,
             reads: List<String>,
             scope: String?,
+            cleanup: EffectCleanup,
         ) {
+            var runs = 0
             val run: ThreadSafeContext.() -> (() -> Unit)? = {
                 runLog.add(id)
                 try {
@@ -683,7 +735,11 @@ class ReactiveGraphConformanceTest {
                 } catch (_: DisposedNodeException) {
                     // See SyncModel.defineEffect.
                 }
-                { cleanupLog.add(id) }
+                if (cleanup.returnsCleanup(++runs)) {
+                    { cleanupLog.add(id) }
+                } else {
+                    null
+                }
             }
             nodes[id] = scopes[scope]?.effect(run) ?: ctx.effect(run)
         }
@@ -853,7 +909,9 @@ class ReactiveGraphConformanceTest {
             id: String,
             reads: List<String>,
             scope: String?,
+            cleanup: EffectCleanup,
         ) {
+            var runs = 0
             val run: suspend AsyncComputeContext.() -> (suspend () -> Unit)? = {
                 runLog.add(id)
                 try {
@@ -861,9 +919,14 @@ class ReactiveGraphConformanceTest {
                 } catch (_: DisposedNodeException) {
                     // See SyncModel.defineEffect.
                 }
-                suspend {
-                    cleanupLog.add(id)
-                    Unit
+                // Reruns are serialized per effect, so the counter needs no lock.
+                if (cleanup.returnsCleanup(++runs)) {
+                    suspend {
+                        cleanupLog.add(id)
+                        Unit
+                    }
+                } else {
+                    null
                 }
             }
             nodes[id] = scopes[scope]?.effectAsync(run) ?: ctx.effectAsync(run)
@@ -1190,6 +1253,7 @@ class ReactiveGraphConformanceTest {
                         op["id"]!!.jsonPrimitive.content,
                         strs(op["reads"]),
                         scope,
+                        EffectCleanup.parse(op["cleanup"]?.jsonPrimitive?.content),
                     )
                 "read" -> {
                     opValue = readOrError(model, op["id"]!!.jsonPrimitive.content)
@@ -2033,7 +2097,7 @@ class ReactiveGraphConformanceTest {
                     val fixture = json.parseToJsonElement(ConformanceFixtures.read(path))
                     ConformanceFixtures.blockSitesOf(path, fixture).keys.filter(stepSitePattern::matches)
                 }.toSet()
-        assertEquals(115, declaredReplayableStepSites.size, "reactive-graph replayable step-site pin")
+        assertEquals(129, declaredReplayableStepSites.size, "reactive-graph replayable step-site pin")
 
         val models: List<Pair<String, () -> Model>> =
             listOf(
