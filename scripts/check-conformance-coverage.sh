@@ -1031,6 +1031,7 @@ lossless-tree
   simulation
   statechart
   stdlib
+  view
   temporal
   windowing
 )
