@@ -294,6 +294,11 @@ tasks.test {
     // Naming the paths themselves makes "which tree" part of the verdict.
     inputs.property("conformanceCorpusDir", corpusDir)
     inputs.property("specSchemasDir", schemasDir)
+    val requireRealtimeView = providers.environmentVariable("LAZILY_REQUIRE_REALTIME_VIEW_FIXTURE").orElse("0")
+    inputs.property("requireRealtimeViewFixture", requireRealtimeView)
+    inputs.files(specDir.map { file("$it/conformance-extensions/realtime-view/explorer.json") })
+        .withPropertyName("realtimeViewFixture")
+    environment("LAZILY_REQUIRE_REALTIME_VIEW_FIXTURE", requireRealtimeView.get())
 
     // Pass the locations EXPLICITLY rather than letting them be inherited.
     //

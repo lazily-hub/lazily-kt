@@ -10,13 +10,14 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.longOrNull
 
+internal const val MAX_SAFE_VIEW_INTEGER = 9_007_199_254_740_991L
+
 /**
  * Host-neutral view compute document. A signal is a [Source], each standing
  * text/hidden/disabled expression is a guarded [Computed], and an optional
- * chart is one [StateChart] cell. Internal: conformance replay, not a widget
- * toolkit and not part of the published core surface.
+ * chart is one [StateChart] cell. Rendering and input are owned by the host.
  */
-internal class View private constructor(
+class View private constructor(
     private val ctx: Context,
     private val root: String,
     private val nodes: Map<String, Node>,
@@ -44,7 +45,14 @@ internal class View private constructor(
         private val effectOps = setOf("set", "batch", "send")
         private val calls = setOf("event", "not", "add", "len")
 
-        fun install(ctx: Context, doc: JsonElement): View {
+        fun install(ctx: Context, doc: JsonElement): View = install(ctx, doc, emptyMap(), safeIntegers = false)
+
+        internal fun install(
+            ctx: Context,
+            doc: JsonElement,
+            values: Map<String, JsonElement>,
+            safeIntegers: Boolean = true,
+        ): View {
             val obj = obj(doc, "view")
             allow(obj, "view", "id", "root", "signals", "nodes", "chart")
             val id = str(obj["id"], "view id")
@@ -98,14 +106,16 @@ internal class View private constructor(
             if (root !in nodes) error("root `$root` is not a node")
             checkTree(root, nodes)
             val sources = LinkedHashMap<String, Source<ViewValue>>()
-            for ((sid, initial) in signalIds) sources[sid] = ctx.source(initial)
+            for ((sid, initial) in signalIds) {
+                sources[sid] = ctx.source(values[sid]?.let(::literal) ?: initial)
+            }
             fun readBare(sid: String): ViewValue {
                 val src = sources[sid] ?: error("unknown signal `$sid`")
                 return ctx.get(src)
             }
             for ((key, expr) in exprDocs) {
                 try {
-                    evalExpr(expr, ::readBare, null, false)
+                    evalExpr(expr, ::readBare, null, false, safeIntegers)
                 } catch (err: IllegalStateException) {
                     error("$key: ${err.message}")
                 }
@@ -114,7 +124,13 @@ internal class View private constructor(
             for ((key, expr) in exprDocs) {
                 exprs[key] = ctx.computed {
                     val cx = this
-                    evalExpr(expr, { sid -> cx.get(sources[sid] ?: error("unknown signal `$sid`")) }, null, false)
+                    evalExpr(
+                        expr,
+                        { sid -> cx.get(sources[sid] ?: error("unknown signal `$sid`")) },
+                        null,
+                        false,
+                        safeIntegers,
+                    )
                 }
             }
             val chart = if (hasChart) StateChart(ctx, ChartDef.fromJson(chartEl!!)) else null
@@ -309,6 +325,7 @@ internal class View private constructor(
             read: (String) -> ViewValue,
             payload: ViewValue?,
             inEffect: Boolean,
+            safeIntegers: Boolean,
         ): ViewValue {
             val obj = expr.jsonObject
             val op = (obj["op"] as JsonPrimitive).content
@@ -316,19 +333,19 @@ internal class View private constructor(
             return when (op) {
                 "lit" -> literal(args[0])
                 "ref" -> read((args[0] as JsonPrimitive).content)
-                "call" -> evalCall(args, read, payload, inEffect)
+                "call" -> evalCall(args, read, payload, inEffect, safeIntegers)
                 "if" -> {
-                    val cond = evalArg(args[0], read, payload, inEffect)
+                    val cond = evalArg(args[0], read, payload, inEffect, safeIntegers)
                     if (cond !is ViewValue.Bool) error("if condition must be a boolean")
-                    evalArg(if (cond.v) args[1] else args[2], read, payload, inEffect)
+                    evalArg(if (cond.v) args[1] else args[2], read, payload, inEffect, safeIntegers)
                 }
                 "eq" -> {
-                    val left = evalArg(args[0], read, payload, inEffect)
-                    val right = evalArg(args[1], read, payload, inEffect)
+                    val left = evalArg(args[0], read, payload, inEffect, safeIntegers)
+                    val right = evalArg(args[1], read, payload, inEffect, safeIntegers)
                     ViewValue.Bool(left == right)
                 }
-                "concat" -> ViewValue.Str(args.joinToString("") { stringify(evalArg(it, read, payload, inEffect)) })
-                "trim" -> ViewValue.Str(stringify(evalArg(args[0], read, payload, inEffect)).trim())
+                "concat" -> ViewValue.Str(args.joinToString("") { stringify(evalArg(it, read, payload, inEffect, safeIntegers)) })
+                "trim" -> ViewValue.Str(stringify(evalArg(args[0], read, payload, inEffect, safeIntegers)).trim())
                 else -> error("unknown expression op `$op`")
             }
         }
@@ -338,29 +355,31 @@ internal class View private constructor(
             read: (String) -> ViewValue,
             payload: ViewValue?,
             inEffect: Boolean,
+            safeIntegers: Boolean,
         ): ViewValue {
             val name = (args[0] as JsonPrimitive).content
             val rest = args.drop(1)
             return when (name) {
                 "event" -> payload ?: error("event is illegal outside an effect")
                 "not" -> {
-                    val value = evalArg(rest[0], read, payload, inEffect)
+                    val value = evalArg(rest[0], read, payload, inEffect, safeIntegers)
                     if (value !is ViewValue.Bool) error("not expects a boolean")
                     ViewValue.Bool(!value.v)
                 }
                 "add" -> {
                     var sum = 0L
                     for (arg in rest) {
-                        val value = evalArg(arg, read, payload, inEffect)
+                        val value = evalArg(arg, read, payload, inEffect, safeIntegers)
                         if (value !is ViewValue.Int) error("add expects integers")
                         val next = sum + value.n
                         if ((value.n > 0 && next < sum) || (value.n < 0 && next > sum)) error("add overflow")
+                        if (safeIntegers && next !in -MAX_SAFE_VIEW_INTEGER..MAX_SAFE_VIEW_INTEGER) error("add exceeds safe integer range")
                         sum = next
                     }
                     ViewValue.Int(sum)
                 }
                 "len" -> {
-                    val value = evalArg(rest[0], read, payload, inEffect)
+                    val value = evalArg(rest[0], read, payload, inEffect, safeIntegers)
                     if (value !is ViewValue.Str) error("len expects a string")
                     ViewValue.Int(value.v.codePointCount(0, value.v.length).toLong())
                 }
@@ -373,7 +392,8 @@ internal class View private constructor(
             read: (String) -> ViewValue,
             payload: ViewValue?,
             inEffect: Boolean,
-        ): ViewValue = if (value is JsonObject) evalExpr(value, read, payload, inEffect) else literal(value)
+            safeIntegers: Boolean = false,
+        ): ViewValue = if (value is JsonObject) evalExpr(value, read, payload, inEffect, safeIntegers) else literal(value)
 
         private fun stringify(value: ViewValue): String = when (value) {
             ViewValue.Null -> ""

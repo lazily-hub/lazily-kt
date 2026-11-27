@@ -1,0 +1,34 @@
+name: Realtime View conformance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  kotlin:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lazily-kt
+    env:
+      LAZILY_REQUIRE_REALTIME_VIEW_FIXTURE: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: lazily-kt
+      - uses: actions/checkout@v4
+        with:
+          repository: lazily-hub/lazily-spec
+          ref: "6b3a686c1931a88cd5e6fb23c21618481ad0dc74"
+          path: lazily-spec
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew test --tests '*ViewConformanceTest' --no-daemon

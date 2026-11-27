@@ -46,6 +46,15 @@ class GraphView {
 
     val nodeCount: Int get() = nodes.size
 
+    /** An independent projection for validating an update before publishing it. */
+    internal fun fork(): GraphView =
+        GraphView().also { candidate ->
+            for ((id, node) in nodes) candidate.nodes[id] = node.copy(payload = node.payload?.copyOf())
+            candidate.edges.addAll(edges)
+            candidate.epoch = epoch
+            candidate.isInitialized = isInitialized
+        }
+
     /** Apply a cold-read [Snapshot], replacing the whole graph image. */
     fun applySnapshot(snapshot: Snapshot) {
         nodes.clear()

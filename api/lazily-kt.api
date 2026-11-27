@@ -5310,6 +5310,46 @@ public final class io/github/lazily/ReadinessCore {
 	public final fun set (Ljava/lang/String;Z)V
 }
 
+public final class io/github/lazily/RealtimeView {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun applyDelta (Lio/github/lazily/Delta;)Lio/github/lazily/ViewUpdate;
+	public final fun attach (Lkotlinx/serialization/json/JsonElement;Lio/github/lazily/Snapshot;)Lio/github/lazily/ViewUpdate;
+	public final fun getEpoch ()Ljava/lang/Long;
+	public final fun getInstance ()Ljava/lang/String;
+	public final fun getNodes ()Ljava/util/List;
+	public final fun getRevision ()Ljava/lang/Long;
+	public final fun getSignals ()Ljava/util/Map;
+	public final fun replace (Lkotlinx/serialization/json/JsonElement;)Lio/github/lazily/ViewUpdate;
+	public final fun routeEvent (Lio/github/lazily/ViewEvent;Lkotlin/jvm/functions/Function2;)Lio/github/lazily/ViewEventResult;
+}
+
+public final class io/github/lazily/RealtimeViewNode {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/Object;Ljava/lang/Object;ZZ)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/util/List;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Ljava/lang/Object;
+	public final fun component7 ()Ljava/lang/Object;
+	public final fun component8 ()Z
+	public final fun component9 ()Z
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/Object;Ljava/lang/Object;ZZ)Lio/github/lazily/RealtimeViewNode;
+	public static synthetic fun copy$default (Lio/github/lazily/RealtimeViewNode;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/Object;Ljava/lang/Object;ZZILjava/lang/Object;)Lio/github/lazily/RealtimeViewNode;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBinding ()Ljava/lang/String;
+	public final fun getChildren ()Ljava/util/List;
+	public final fun getDisabled ()Z
+	public final fun getFlow ()Ljava/lang/String;
+	public final fun getHidden ()Z
+	public final fun getId ()Ljava/lang/String;
+	public final fun getIdentity ()Ljava/lang/Object;
+	public final fun getRole ()Ljava/lang/String;
+	public final fun getText ()Ljava/lang/Object;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public abstract interface class io/github/lazily/ReceiptApplyStatus {
 }
 
@@ -7881,6 +7921,121 @@ public final class io/github/lazily/VecDequeStorage : io/github/lazily/QueueStor
 	public fun peek ()Ljava/lang/Object;
 	public fun tryPop ()Lio/github/lazily/QueuePop;
 	public fun tryPush (Ljava/lang/Object;)Lio/github/lazily/QueuePushError;
+}
+
+public final class io/github/lazily/View {
+	public static final field Companion Lio/github/lazily/View$Companion;
+	public synthetic fun <init> (Lio/github/lazily/Context;Ljava/lang/String;Ljava/util/Map;Ljava/util/Map;Ljava/util/Map;Ljava/util/Map;Lio/github/lazily/StateChart;Lio/github/lazily/Effect;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun chartJson ()Ljava/util/List;
+	public final fun dispatchJson (Ljava/lang/String;Ljava/lang/String;Lkotlinx/serialization/json/JsonElement;)Ljava/util/List;
+	public final fun expressionsJson ()Ljava/util/Map;
+	public final fun getSubscription ()Lio/github/lazily/Effect;
+	public final fun layoutJson ()Ljava/util/List;
+	public final fun signalsJson ()Ljava/util/Map;
+}
+
+public final class io/github/lazily/View$Companion {
+	public final fun install (Lio/github/lazily/Context;Lkotlinx/serialization/json/JsonElement;)Lio/github/lazily/View;
+}
+
+public final class io/github/lazily/ViewEvent {
+	public static final field Companion Lio/github/lazily/ViewEvent$Companion;
+	public fun <init> (Ljava/lang/String;JLjava/lang/String;Ljava/lang/String;Lio/github/lazily/ViewEventType;Lkotlinx/serialization/json/JsonPrimitive;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()J
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Lio/github/lazily/ViewEventType;
+	public final fun component6 ()Lkotlinx/serialization/json/JsonPrimitive;
+	public final fun copy (Ljava/lang/String;JLjava/lang/String;Ljava/lang/String;Lio/github/lazily/ViewEventType;Lkotlinx/serialization/json/JsonPrimitive;)Lio/github/lazily/ViewEvent;
+	public static synthetic fun copy$default (Lio/github/lazily/ViewEvent;Ljava/lang/String;JLjava/lang/String;Ljava/lang/String;Lio/github/lazily/ViewEventType;Lkotlinx/serialization/json/JsonPrimitive;ILjava/lang/Object;)Lio/github/lazily/ViewEvent;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDisplayedRevision ()J
+	public final fun getEvent ()Lio/github/lazily/ViewEventType;
+	public final fun getEventId ()Ljava/lang/String;
+	public final fun getInstance ()Ljava/lang/String;
+	public final fun getNodeId ()Ljava/lang/String;
+	public final fun getPayload ()Lkotlinx/serialization/json/JsonPrimitive;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/ViewEvent$Companion {
+	public final fun fromJson (Lkotlinx/serialization/json/JsonElement;)Lio/github/lazily/ViewEvent;
+}
+
+public abstract interface class io/github/lazily/ViewEventResult {
+}
+
+public final class io/github/lazily/ViewEventResult$Accepted : io/github/lazily/ViewEventResult {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/github/lazily/ViewEventResult$Accepted;
+	public static synthetic fun copy$default (Lio/github/lazily/ViewEventResult$Accepted;Ljava/lang/String;ILjava/lang/Object;)Lio/github/lazily/ViewEventResult$Accepted;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAction ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/ViewEventResult$Conflict : io/github/lazily/ViewEventResult {
+	public static final field INSTANCE Lio/github/lazily/ViewEventResult$Conflict;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/ViewEventResult$Denied : io/github/lazily/ViewEventResult {
+	public static final field INSTANCE Lio/github/lazily/ViewEventResult$Denied;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/ViewEventResult$Duplicate : io/github/lazily/ViewEventResult {
+	public static final field INSTANCE Lio/github/lazily/ViewEventResult$Duplicate;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/ViewEventResult$Stale : io/github/lazily/ViewEventResult {
+	public static final field INSTANCE Lio/github/lazily/ViewEventResult$Stale;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/ViewEventResult$Unavailable : io/github/lazily/ViewEventResult {
+	public static final field INSTANCE Lio/github/lazily/ViewEventResult$Unavailable;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/ViewEventResult$WrongInstance : io/github/lazily/ViewEventResult {
+	public static final field INSTANCE Lio/github/lazily/ViewEventResult$WrongInstance;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/lazily/ViewEventType : java/lang/Enum {
+	public static final field ACTIVATE Lio/github/lazily/ViewEventType;
+	public static final field CHANGE Lio/github/lazily/ViewEventType;
+	public static final field SUBMIT Lio/github/lazily/ViewEventType;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/lazily/ViewEventType;
+	public static fun values ()[Lio/github/lazily/ViewEventType;
+}
+
+public final class io/github/lazily/ViewUpdate : java/lang/Enum {
+	public static final field APPLIED Lio/github/lazily/ViewUpdate;
+	public static final field IGNORED Lio/github/lazily/ViewUpdate;
+	public static final field SNAPSHOT_REQUIRED Lio/github/lazily/ViewUpdate;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/lazily/ViewUpdate;
+	public static fun values ()[Lio/github/lazily/ViewUpdate;
 }
 
 public final class io/github/lazily/WebRtcSink {
